@@ -48,8 +48,8 @@ from outreach.sources.keys import classify_domain, registrable_domain
 from outreach.sources.stapply import list_rows
 from outreach.store import append_event, transaction
 
-__all__ = ["SEED_ATS", "RETRY_DAYS", "CONFIG_PATH", "TOP_UP_DAYS", "Gate", "SeedConfig", "SeedReport", "gate",
-           "load_seed_config", "run_seed", "top_up_due"]
+__all__ = ["SEED_ATS", "RETRY_DAYS", "CONFIG_PATH", "DEAD_STATUSES", "TOP_UP_DAYS", "Gate", "SeedConfig",
+           "SeedReport", "gate", "load_seed_config", "run_seed", "top_up_due"]
 
 SEED_ATS = ("greenhouse", "ashby")
 CONFIG_PATH = Path(__file__).with_name("ats_seed.toml")
@@ -58,6 +58,9 @@ EVENT_KIND = "ats_seed_run"
 _TIME = "%Y-%m-%dT%H:%M:%SZ"
 _SOURCE = "stapply"
 _SOURCE_VERSION = "stapply-seed-1"  # only when the seed is the first to name the stapply source; find-boards sets it
+# An error read with one of these statuses is about the board (gone, closed), as the tick's `_BOARD_STATUSES` reads
+# it: the board is dead, never a failed read to try again on the next run.
+DEAD_STATUSES = frozenset({404, 410})
 
 
 @dataclass(frozen=True)
@@ -95,9 +98,11 @@ class Gate:
 
 
 def gate(result: ReadResult, rules_cfg: Config) -> Gate:
-    """The verdict on one list answer. `error` (and `unchanged`, which a first read never gets) stays `error`: it is
-    tried again on the next run and never counts as a rejection. `empty` is `dead`."""
-    if result.result == "empty":
+    """The verdict on one list answer. `empty` is `dead`, and so is an `error` whose HTTP status is 404 or 410
+    (`DEAD_STATUSES`: the board is gone, so it waits `RETRY_DAYS` like any other verdict). Any other `error` (and
+    `unchanged`, which a first read never gets) stays `error`: it is tried again on the next run and never counts as a
+    rejection."""
+    if result.result == "empty" or (result.result == "error" and result.http_status in DEAD_STATUSES):
         return Gate("dead", 0, "")
     if result.result != "ok":
         return Gate("error", 0, "")
@@ -116,9 +121,10 @@ def _is_us_engineering(title: str, location: str, country: str | None, cfg: Conf
 @dataclass(frozen=True)
 class SeedReport:
     """One run. `read`: list rows with a valid board (each board once). `promoted`, `rejected` (no US engineering
-    role), `dead` (no jobs) and `errors` (the read failed; tried again next run): the rows gated this run. `known`:
-    rows whose board the store already has (no request). `left`: rows due but not gated this run (past the limit,
-    behind a tripped bucket, or every due row in a dry run). The rest of `read` were gated in the last `RETRY_DAYS`.
+    role), `dead` (no jobs, or a 404 or 410) and `errors` (any other failed read; tried again next run): the rows
+    gated this run. `known`: rows whose board the store already has (no request). `left`: rows due but not gated this
+    run (past the limit, behind a tripped bucket, or every due row in a dry run). The rest of `read` were gated in the
+    last `RETRY_DAYS`.
     `tripped` names the buckets whose breaker opened: their ATS's gating ended there."""
     read: int
     promoted: int

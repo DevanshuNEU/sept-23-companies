@@ -66,6 +66,18 @@ class GateTest(unittest.TestCase):
         got = self.gate(ReadResult("error", (), Validators(), http_status=503, error="HTTP 503"))
         self.assertEqual(got, Gate("error", 0, ""))
 
+    def test_gate_reads_a_404_or_410_error_as_dead(self):
+        for status in (404, 410):
+            with self.subTest(status=status):
+                got = self.gate(ReadResult("error", (), Validators(), http_status=status, error=f"HTTP {status}"))
+                self.assertEqual(got, Gate("dead", 0, ""))
+
+    def test_gate_keeps_any_other_error_an_error(self):
+        for status in (503, 429, 403, None):
+            with self.subTest(status=status):
+                got = self.gate(ReadResult("error", (), Validators(), http_status=status, error="failed"))
+                self.assertEqual(got.result, "error")
+
     def test_gate_empty_is_dead(self):
         got = self.gate(ReadResult("empty", (), Validators(), http_status=200))
         self.assertEqual(got, Gate("dead", 0, ""))
@@ -207,11 +219,23 @@ class SeedRunTest(unittest.TestCase):
         self.assertEqual((report.promoted, report.errors), (1, 0))
         self.assertEqual(self.candidate("greenhouse", "betalabs")["gate_result"], "promoted")
 
-    def test_a_404_on_both_greenhouse_hosts_is_an_error_not_a_rejection(self):
+    def test_a_404_on_both_greenhouse_hosts_is_dead_and_waits_the_retry_days(self):
         self.routes[GH.format("betalabs")] = status_response(404)
         self.routes[GH_EU.format("betalabs")] = status_response(404)
         report = self.run_seed()
-        self.assertEqual((report.errors, report.rejected), (1, 0))
+        self.assertEqual((report.dead, report.errors, report.rejected), (1, 0, 0))
+        row = self.candidate("greenhouse", "betalabs")
+        self.assertEqual((row["gate_result"], row["open_us_engineering"]), ("dead", 0))
+        self.run_seed(now=days_before(NOW, -29))
+        self.assertEqual(self.client.requests, [])  # not tried again within RETRY_DAYS
+        self.run_seed(now=days_before(NOW, -31))
+        self.assertEqual(self.client.requests, [GH.format("betalabs"), GH_EU.format("betalabs")])
+
+    def test_a_410_is_dead(self):
+        self.routes[ASHBY.format("gamma")] = status_response(410)
+        report = self.run_seed()
+        self.assertEqual((report.dead, report.errors), (1, 0))
+        self.assertEqual(self.candidate("ashby", "gamma")["gate_result"], "dead")
 
     def test_excluded_lists_never_read(self):
         self.run_seed()

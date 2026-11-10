@@ -2,8 +2,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { pollMs, queryKeys, useClient, type Pulse } from '@/api';
 
 /** What a change of the pulse refetches: the plan, the shell's counts and Needs you (a person or request logged from
- * the terminal shows on all three). */
-export const PULSE_REFETCHES = [queryKeys.plan, queryKeys.shell, queryKeys.needsYou] as const;
+ * the terminal shows on all three), and the job list and the Check now status (a read that finds a new posting moves
+ * the pulse, so the new job reaches an open page within seconds). */
+export const PULSE_REFETCHES = [
+  queryKeys.plan,
+  queryKeys.shell,
+  queryKeys.needsYou,
+  queryKeys.jobsAll,
+  queryKeys.checkStatus,
+] as const;
 
 /**
  * Polls `GET /api/pulse` (one growing number) every 5 seconds while the tab is visible, and refetches

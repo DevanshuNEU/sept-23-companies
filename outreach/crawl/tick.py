@@ -395,6 +395,12 @@ class _Pass:
                       reopened=out.reopened)
         if out.tripped:
             self._trip(out.tripped)
+        if out.new > 0:
+            # The pulse (GET /api/pulse) is the newest event id: this moves it, so an open job list refetches.
+            with atomic(self.conn, "postings_new"):
+                append_event(self.conn, entity="board", kind="postings_new", actor="crawler", entity_id=board.board_id,
+                             detail={"new": out.new, "run_id": self.run_id}, at=now,
+                             idempotency_key=f"postings-new:{board.board_id}:{self.run_id}")
 
     def _rollback(self) -> None:
         if self.conn.in_transaction:

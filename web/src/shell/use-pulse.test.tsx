@@ -31,7 +31,7 @@ function setup() {
 }
 
 describe('the pulse', () => {
-  it('refetches the plan, the shell and Needs you when the number moves, and only then', async () => {
+  it('refetches the plan, the shell, Needs you, the jobs and the check when the number moves, and only then', async () => {
     const { client, invalidate, poll } = setup();
     await waitFor(() => expect(client.calls).toBe(1));
     expect(invalidate).not.toHaveBeenCalled(); // the first number is where the page starts, not a change
@@ -42,7 +42,18 @@ describe('the pulse', () => {
     client.rev = 9;
     await poll();
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(PULSE_REFETCHES.length));
-    expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual([queryKeys.plan, queryKeys.shell, queryKeys.needsYou]);
+    expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual(PULSE_REFETCHES);
+  });
+
+  it('refetches the job list when the pulse moves', async () => {
+    const { client, invalidate, poll } = setup();
+    await waitFor(() => expect(client.calls).toBe(1));
+    client.rev = 8; // the crawler found a new posting, or a check moved on
+    await poll();
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(PULSE_REFETCHES.length));
+    const keys = invalidate.mock.calls.map(([f]) => f?.queryKey);
+    expect(keys).toContainEqual(queryKeys.jobsAll);
+    expect(keys).toContainEqual(queryKeys.checkStatus);
   });
 
   it('polls every 5 seconds and not while the tab is hidden', async () => {

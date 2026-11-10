@@ -227,6 +227,26 @@ class JobRunTests(TickCase):
         self.assertFalse(report.rebuilt)
         self.assertEqual({r["run_id"] for r in self.reads()}, {job["run_id"]})
 
+    def test_new_postings_event_moves_pulse(self):
+        # The pulse (GET /api/pulse) is the newest event id, so an open job list refetches when a read finds a job.
+        bid = self.board("acme")
+        self.read_before(bid, 30000, next_in=-60)
+        revision = lambda: self.conn.execute("SELECT coalesce(max(event_id), 0) FROM event").fetchone()[0]
+        before = revision()
+        report = self.tick({gh("acme"): ok()})
+        self.assertEqual(report.new, 3)
+        self.assertGreater(revision(), before)
+        event, = self.conn.execute("SELECT * FROM event WHERE kind = 'postings_new'").fetchall()
+        self.assertEqual((event["entity"], event["entity_id"], event["actor"]), ("board", bid, "crawler"))
+        self.assertEqual(json.loads(event["detail"]), {"new": 3, "run_id": report.run_id})
+        self.assertEqual(event["idempotency_key"], f"postings-new:{bid}:{report.run_id}")
+
+        self.conn.execute("UPDATE board SET next_read_at = ? WHERE board_id = ?", (T0, bid))
+        after_new = revision()
+        self.tick({gh("acme"): status_response(304)})  # the same list: nothing new
+        self.assertEqual(revision(), after_new)
+        self.assertEqual(self.count("event WHERE kind = 'postings_new'"), 1)
+
     def test_wal_checkpoint_runs_even_after_an_exception(self):
         self.board("acme")
         seen = []

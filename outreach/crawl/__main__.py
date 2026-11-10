@@ -4,8 +4,9 @@
   New York day, up to 50 companies with no board), then the due watched pages. The one log line carries all three,
   as does the tick's `read_boards` job summary (`probe`, `probe_error`, `watch`, `watch_error`). Another tick holding
   the lock is not an error: it prints so and exits 0. When a Check now request waits (#194), the tick first reads
-  every Greenhouse and Ashby board in its own `read_boards` run, and does so again at the end for a request made
-  while it ran; the line names those runs (`check now: ...`) or the error.
+  every Greenhouse and Ashby board in its own `read_boards` run, and does so again for a request made while it ran:
+  after its feed step, and once more after the tick, before the lock is let go; the line names those runs
+  (`check now: ...`) or the error.
 - `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept). A
   board whose ATS's reader is switched off in config.toml (`ats_off`, #46) is not read: one line on stderr names it
   and the reason, the other boards are read, and the exit code is 1.
@@ -173,9 +174,28 @@ def _tick(client: HttpClient | None) -> int:
     from outreach.crawl.tick import run_tick
 
     def run(conn, polite, cfg):
-        return run_tick(conn, polite, cfg=cfg, notifier=mac_notifier, workers=cfg.workers)
+        report = run_tick(conn, polite, cfg=cfg, notifier=mac_notifier, workers=cfg.workers)
+        return _late_check(conn, polite, cfg, report)
 
     return _locked_run("tick", client, run, lock=True)
+
+
+def _late_check(conn: sqlite3.Connection, polite, cfg, report):
+    """One more Check now, still under the crawl lock, for a request made after the tick's last check point (during
+    the alarm or alert step): the kickstart that came with it found the job running and did nothing, so without this
+    it would wait for the next 30-minute tick. Its run is its own `read_boards` run; the report names it."""
+    import dataclasses
+
+    from outreach.crawl.check_all import run_pending_check
+    from outreach.store import utcnow
+
+    run_id, error = run_pending_check(conn, polite, cfg=cfg, now_fn=utcnow, switched_off=report.switched_off,
+                                      workers=cfg.workers)
+    if run_id is None and not error:
+        return report
+    return dataclasses.replace(report, check_runs=report.check_runs + ((run_id,) if run_id is not None else ()),
+                               check_error="; ".join(e for e in (report.check_error, error) if e))
+
 
 
 def _read(company_ids: list[int], client: HttpClient | None) -> int:

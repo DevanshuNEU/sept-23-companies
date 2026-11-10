@@ -92,6 +92,26 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(client.requests, [ACME])
         self.assertEqual(self.conn.execute("SELECT last_read FROM board").fetchone()[0], "ok")
 
+    def test_a_request_made_during_the_alert_step_is_served_before_exit(self):
+        from outreach.pipeline import check_state
+        from outreach.store import append_event
+        bid = seed_board(self.conn, seed_company(self.conn, "Acme"))
+        self.conn.execute("UPDATE board SET last_read = 'ok', last_read_at = '2020-01-01T00:00:00Z', streak_since = '2020-01-01T00:00:00Z', "
+                          "next_read_at = '2999-01-01T00:00:00Z' WHERE board_id = ?", (bid,))
+
+        def click_during_alerts(conn, notifier, now):
+            append_event(conn, entity="source", kind=check_state.REQUEST_KIND, actor="devanshu", detail={})
+            return 0
+
+        client = FakeClient({ACME: Response(200, "", SALES_ONLY, {"etag": '"A"'})})
+        with mock.patch("outreach.crawl.tick.alerts.run", side_effect=click_during_alerts):
+            code, out, _ = self.run_cli(["tick"], client)
+        self.assertEqual(code, 0)
+        self.assertEqual(client.requests, [ACME])  # the board is not due: only the late check read it
+        self.assertIsNone(check_state.pending_request(self.conn))
+        self.assertIsNotNone(check_state.progress(self.conn)["finished_at"])
+        self.assertIn("check now: read_boards run", out)
+
     def test_tick_passes_the_mac_notifier_and_run_tick_defaults_to_none(self):
         import inspect
         from outreach.crawl import tick as tick_module

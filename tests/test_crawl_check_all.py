@@ -14,8 +14,22 @@ from outreach.pipeline import check_state
 from outreach.store import append_event
 from tests.fakes import status_response
 from tests.storetest import seed_company
-from tests.test_crawl_tick import ASHBY_JOBS, T0, TickCase, ashby, at, gh, lever, lever_ok, ok
+from tests.test_crawl_tick import ASHBY_JOBS, JOBS, T0, TickCase, ashby, at, gh, lever, lever_ok, ok
 from outreach.net import Response
+from outreach.pipeline.joblist import JobFilters, query
+
+_GH = json.loads(JOBS)["jobs"]
+ENGINEER = next(j for j in _GH if j["title"] == "Software Engineer, New Grad")
+SALES = next(j for j in _GH if j["title"] == "Account Executive")
+
+
+def board_of(*jobs):
+    return Response(200, "", json.dumps({"jobs": list(jobs)}).encode(), {"etag": '"N"'})
+
+
+def many_engineers(n):
+    return [{**ENGINEER, "id": 5_000_000 + i, "absolute_url": f"https://job-boards.greenhouse.io/acme/jobs/{5_000_000 + i}",
+             "title": f"Software Engineer {i}"} for i in range(n)]
 
 
 def ashby_ok():
@@ -175,7 +189,7 @@ class ProgressTests(CheckCase):
     def test_progress_written_and_final(self):
         tokens = [f"b{i}" for i in range(10)]
         for t in tokens:
-            self.read_before(self.board(t), 3 * 3600, next_in=86400)
+            self.known(t, 3 * 3600)
         event_id = self.request()
         clock = iter(at(s) for s in range(0, 1000, 1))
 
@@ -199,13 +213,80 @@ class ProgressTests(CheckCase):
         first, final = writes[0], writes[-1]
         self.assertEqual((first["total"], first["request_event_id"]), (10, event_id))
         self.assertRegex(first["started_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        self.assertEqual((final["checked"], final["total"], final["new"], final["paused_hosts"]), (10, 10, 30, []))
+        listed = sum(len(query(self.conn, final["finished_at"], JobFilters(view=v, window_days=0), None).rows)
+                     for v in ("your_level", "higher"))
+        self.assertGreater(listed, 0)
+        self.assertEqual((final["checked"], final["total"], final["new"], final["paused_hosts"]),
+                         (10, 10, listed, []))
         self.assertRegex(final["finished_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertGreater(final["finished_at"], final["started_at"])
         self.assertEqual(self.progress(), final)
         run, = self.check_runs()
         self.assertEqual(final["run_id"], run["run_id"])
         self.assertEqual(check_state.status(self.conn, now=final["finished_at"]).state, "done")
+
+    def known(self, token, seconds_ago=3600):
+        """A board read fine `seconds_ago` with nothing on it, not due for a day: a posting it shows next is new."""
+        bid = self.board(token)
+        self.read_before(bid, seconds_ago, next_in=86400)
+        self.conn.execute("UPDATE board SET last_good_read_at = last_read_at WHERE board_id = ?", (bid,))
+        return bid
+
+    def test_a_first_read_in_a_check_is_not_new(self):
+        self.board("seeded")  # never read: what the seed adds
+        self.request()
+        report = self.tick({gh("seeded"): board_of(*many_engineers(300))})
+        run, = self.check_runs()
+        self.assertEqual(json.loads(run["summary"])["new"], 300)  # the job run still counts every row it inserted
+        self.assertEqual(self.progress()["new"], 0)  # but none of them is a new job on the list
+        self.assertEqual(report.check_error, "")
+
+    def test_the_new_count_is_what_the_list_marks_new(self):
+        self.known("eng")
+        self.known("sales")
+        self.request()
+        self.tick({gh("eng"): board_of(ENGINEER), gh("sales"): board_of(SALES)})
+        listed = query(self.conn, T0, JobFilters(view="your_level", window_days=0), None).rows + \
+            query(self.conn, T0, JobFilters(view="higher", window_days=0), None).rows
+        self.assertEqual([r.title for r in listed], [ENGINEER["title"]])  # the sales posting is never listed
+        self.assertEqual(self.progress()["new"], 1)
+
+    def test_a_repost_is_not_new(self):
+        bid = self.known("eng")
+        self.request()
+        self.tick({gh("eng"): board_of(ENGINEER)})
+        posting_id = self.conn.execute("SELECT posting_id FROM posting").fetchone()[0]
+        self.conn.execute("UPDATE posting SET repost_of = ? WHERE posting_id = ?", (posting_id, posting_id))
+        self.assertEqual(check_all._listed_new(self.conn, 0, check_all.listed_params(self.conn)), 0)
+
+    def test_a_paused_host_waits_out_its_deferral(self):
+        for i in range(6):
+            self.known(f"g{i}")
+        self.read_before(self.board("a0", ats="ashby"), 3600, next_in=86400)
+        self.request()
+        cfg = dataclasses.replace(self.cfg, breaker_failures=3)
+        routes = {gh(f"g{i}"): status_response(429) for i in range(6)}
+        routes[ashby("a0")] = ashby_ok()
+        self.tick(routes, cfg=cfg)
+        self.assertEqual(self.progress()["paused_hosts"], ["greenhouse"])
+        tripped_at = self.progress()["finished_at"]
+
+        # A click 20 minutes later: Greenhouse is not asked again, and the line still says it is paused.
+        self.request(at(1200))
+        self.clock.t += 1200
+        self.tick({ashby("a0"): ashby_ok()}, cfg=cfg, now_fn=lambda: at(1200))
+        self.assertEqual(self.client.requests, [ashby("a0")])
+        self.assertEqual(self.progress()["paused_hosts"], ["greenhouse"])
+        self.assertEqual(self.progress()["paused_at"], {"greenhouse": tripped_at})  # a held host keeps its first time
+
+        # Once defer_s has passed since the trip (not since the last click), Greenhouse is read again.
+        self.request(at(self.cfg.defer_s + 1))
+        self.clock.t += 1200
+        later = {gh(f"g{i}"): ok() for i in range(6)}
+        later[ashby("a0")] = ashby_ok()
+        self.tick(later, cfg=cfg, now_fn=lambda: at(self.cfg.defer_s + 1))
+        self.assertEqual(sorted(self.client.requests), sorted(later))
+        self.assertEqual(self.progress()["paused_hosts"], [])
 
     def test_check_reports_tripped_host(self):
         for i in range(6):

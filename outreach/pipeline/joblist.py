@@ -50,7 +50,7 @@ from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "explain", "WINDOWS", "BIG_OVER",
-           "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL"]
+           "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL", "LISTED_SQL", "listed_params"]
 
 WINDOWS = (7, 30, 60, 90, 0)  # days back from today, 0 for any
 BIG_OVER = 300  # a company is big above this many people
@@ -71,6 +71,12 @@ _PASS_REASON = "role"
 # A decision's level state, with the v1 job list rule for a row the 0007 rebuild has not reached (alerts use it too).
 STATE_SQL = ("COALESCE(d.level_state, CASE WHEN d.level_ok = 1 THEN 'fit' "
              "WHEN d.level_tier IN ('not_stated', 'open') THEN 'uncertain' ELSE 'reject' END)")
+# Listed at all (the first rule above), over `p` (the posting) and `d` (its current decision). `:nogo` and `:passed`
+# are JSON lists of ids (`listed_params`). The list's one predicate: Check now's new count reads it too (#194).
+LISTED_SQL = ("p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' AND d.citizenship = 0 "
+              "AND d.eligibility = 'ok' AND d.level_tier <> 'senior' "
+              "AND p.company_id NOT IN (SELECT value FROM json_each(:nogo)) "
+              "AND p.posting_id NOT IN (SELECT value FROM json_each(:passed))")
 
 
 @dataclass(frozen=True)
@@ -144,10 +150,7 @@ cand AS MATERIALIZED (
    AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1)
   LEFT JOIN canon cn ON cn.src = p.company_id
   LEFT JOIN posting rp ON rp.posting_id = p.repost_of
-  WHERE p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' AND d.citizenship = 0
-    AND d.eligibility = 'ok' AND d.level_tier <> 'senior'
-    AND p.company_id NOT IN (SELECT value FROM json_each(:nogo))
-    AND p.posting_id NOT IN (SELECT value FROM json_each(:passed))
+  WHERE {listed}
 ),
 -- Open postings read as US per company (merged companies counted into their survivor), once, not per posting.
 usn AS MATERIALIZED (
@@ -203,7 +206,7 @@ rows AS (
                    WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
 )
-""".replace("{state}", STATE_SQL)
+""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL)
 _COUNT = _SQL + "SELECT COALESCE(SUM(yl), 0) AS yl, COUNT(*) AS n FROM rows"
 # The page and both counts in one pass: the window functions run over every row of the filters, before the view
 # and the cursor narrow it to the page.
@@ -258,16 +261,22 @@ def _check(f: JobFilters, limit: int) -> None:
         raise ValueError("limit must be at least 1")
 
 
-def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[int, int],
-            contacted: dict[int, date]) -> dict:
+def listed_params(conn: sqlite3.Connection, canon: dict[int, int] | None = None) -> dict:
+    """The `:nogo` and `:passed` parameters of `LISTED_SQL`. `canon` defaults to `canonical_ids(conn)`."""
+    canon = canonical_ids(conn) if canon is None else canon
     held = {r[0] for r in conn.execute(
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
     # A company merged into a no-go company is a no-go company too, and so is a merged-away one with its own row.
     nogo = sorted(held | {src for src, dst in canon.items() if dst in held})
+    return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(passed_posting_ids(conn)))}
+
+
+def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[int, int],
+            contacted: dict[int, date]) -> dict:
     cutoff = _ny_midnight(today - timedelta(days=f.window_days)) if f.window_days else ""
     return {
         "canon": json.dumps({str(src): dst for src, dst in canon.items() if src != dst}),
-        "nogo": json.dumps(nogo), "passed": json.dumps(sorted(passed_posting_ids(conn))),
+        **listed_params(conn, canon),
         "big": BIG_OVER, "big_postings": BIG_BY_POSTINGS, "enterprise": json.dumps(ENTERPRISE_ATS),
         "unknown_rank": _UNKNOWN_RANK, "big_rank": _BIG_RANK, "cutoff": cutoff,
         "q": f.q.strip(), "like": _like(f.q), "size": f.size, "not_contacted": int(f.not_contacted),

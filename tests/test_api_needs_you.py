@@ -223,6 +223,25 @@ class NeedsYou(ApiCase):
         # The sidebar badge counts Needs you only.
         self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 4)
 
+    def test_needs_you_lists_emailed_and_reply_companies_without_a_plan(self):
+        # First to see (#9, 2026-11-10): no daily list is built any more. A company he is emailing or one held by a
+        # reply still asks for his attention; nothing is in play and the badge counts the two.
+        mailing = s.company(self.conn, "Mailing Co")
+        held = s.company(self.conn, "Held Co")
+        working = s.company(self.conn, "Working Co", "working")
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, mailing, "Pat Mail")), 0)  # drafted, open touch
+        hold(self.conn, held)
+        for n, cid in enumerate((mailing, held, working)):
+            s.review(self.conn, cid, "domain_missing", created_at=f"2026-11-0{n + 1}T08:00:00Z")
+        self.assertEqual(self.count("SELECT count(*) FROM daily_list"), 0)
+        view = self.view()
+        self.assertEqual([i["company"]["name"] for i in view["open"]], ["Mailing Co", "Held Co"])
+        self.assertEqual([i["inPlay"] for i in view["open"]], [False, False])
+        self.assertEqual([i["holdsEmail"] for i in view["open"]], [True, False])
+        self.assertEqual([i["company"]["picked"] for i in view["open"]], [False, False])
+        self.assertEqual([i["company"]["name"] for i in view["dataGaps"]], ["Working Co"])
+        self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 2)
+
     def test_every_kind_follows_the_same_scope(self):
         plain, picked = s.company(self.conn, "Plain"), s.company(self.conn, "Picked")
         plan_entry(self.conn, picked, "picked")

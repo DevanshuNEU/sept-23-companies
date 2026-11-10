@@ -153,6 +153,13 @@ class AshbyTests(unittest.TestCase):
         self.assertEqual(again.result, "ok")
         self.assertEqual(again.validators.etag, 'W/"new"')
 
+    def test_big_board_without_etag_reads_unchanged_second_time(self):
+        first, _ = read({URL: ok(etag="")})
+        self.assertEqual(first.result, "ok")
+        self.assertEqual(first.validators, Validators(ids_fingerprint=ids_fingerprint([ID1, ID2])))
+        again, _ = read({URL: ok(etag="")}, validators=first.validators)
+        self.assertEqual((again.result, again.jobs, again.validators), ("unchanged", (), first.validators))
+
     def test_listed_job_without_id_or_title_is_error(self):
         for key in ("id", "title"):
             jobs = fixture()["jobs"]

@@ -455,6 +455,36 @@ class FilterTests(JobListCase):
         seed_outbound(self.conn, person, reached, "linkedin_message", date(2026, 10, 25))
         self.assertEqual(self.run_query().rows[0].contacted_on, "2026-10-25")
 
+    def mark(self, company, at, kind="company_reached"):
+        append_event(self.conn, entity="company", entity_id=company, company_id=company, kind=kind,
+                     actor="devanshu", at=at, detail={"company_id": company})
+
+    def test_reached_mark_sets_contacted_on(self):
+        marked = self.company("Marked")
+        self.job(marked)
+        self.mark(marked, "2026-10-28T15:00:00Z")
+        self.assertEqual(self.run_query().rows[0].contacted_on, "2026-10-28")
+
+    def test_the_newer_of_a_mark_and_a_touch_is_contacted_on(self):
+        both, later = self.company("Both"), self.company("Later")
+        self.job(both, posted="2026-11-02")
+        self.job(later, posted="2026-11-01")
+        seed_outbound(self.conn, seed_person(self.conn, both, "Ada"), both, "linkedin_request", date(2026, 10, 25))
+        self.mark(both, "2026-10-20T15:00:00Z")  # an older mark never hides a newer touch
+        seed_outbound(self.conn, seed_person(self.conn, later, "Bo"), later, "linkedin_request", date(2026, 10, 20))
+        self.mark(later, "2026-10-30T15:00:00Z")
+        self.assertEqual([r.contacted_on for r in self.run_query().rows], ["2026-10-25", "2026-10-30"])
+
+    def test_not_contacted_filter_hides_marked(self):
+        marked, cleared, fresh = self.company("Marked"), self.company("Cleared"), self.company("Fresh")
+        a, b, c = self.job(marked), self.job(cleared), self.job(fresh)
+        self.mark(marked, "2026-10-28T15:00:00Z")
+        self.mark(cleared, "2026-10-28T15:00:00Z")
+        self.mark(cleared, "2026-10-28T15:01:00Z", kind="company_reached_cleared")
+        self.assertEqual(sorted(self.ids()), sorted([a, b, c]))
+        self.assertEqual(sorted(self.ids(not_contacted=True)), sorted([b, c]))
+        self.assertIsNone(next(r for r in self.run_query().rows if r.posting_id == b).contacted_on)
+
     def test_an_application_is_not_contact(self):
         co = self.company()
         self.job(co)

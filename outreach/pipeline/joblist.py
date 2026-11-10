@@ -25,6 +25,8 @@ The list reads the decision's columns:
   and never filtered out by one. The row also carries the board's own time (`posted_at`), the first sighting, the
   seen gap, `first_read` (no seen gap: the board's first read, or a row from before the gap was kept) and, for a
   repost, the first sighting of the posting it repeats (`reposted_from`).
+- Reached (#195): `contacted_on` is the newest day he reached the company, a person contacted there (every channel)
+  or his own Done mark (`outreach.pipeline.reached`); the not contacted filter hides every company that has one.
 - Windows: a dated row is in the 7, 30, 60 or 90 day window when its list time is at or after 00:00 New York that
   many days before today.
 - Order: list time newest first, then the smaller company (known small sizes by size, then unknown, then guessed big,
@@ -45,6 +47,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.pipeline import reached
 from outreach.plan.outbound import load_outbound
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT, iso_utc
@@ -108,7 +111,7 @@ class JobRow:
     says_no_sponsorship: bool
     everify: bool
     yc: bool
-    contacted_on: str | None  # the newest day he reached a person there
+    contacted_on: str | None  # the newest day he reached it: a person contacted there, or his own Done mark
 
 
 @dataclass(frozen=True)
@@ -285,12 +288,16 @@ def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[in
 
 
 def _contacted(conn: sqlite3.Connection, canon: dict[int, int]) -> dict[int, date]:
-    """Each survivor's newest day he reached a person (every channel, once; a first email still in the Outbox is not
-    contact yet)."""
+    """Each survivor's newest day he reached it: a person contacted (every channel, once; a first email still in the
+    Outbox is not contact yet) or his own Done mark (`reached.marks`), whichever is later."""
     out: dict[int, date] = {}
     for o in load_outbound(conn, canon, tz=_TZ):
         if not o.queued and (o.company_id not in out or o.sent_on > out[o.company_id]):
             out[o.company_id] = o.sent_on
+    for company, day in reached.marks(conn, canon).items():
+        on = date.fromisoformat(day)
+        if company not in out or on > out[company]:
+            out[company] = on
     return out
 
 

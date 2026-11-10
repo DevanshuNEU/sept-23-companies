@@ -1,4 +1,4 @@
-"""The job list (#156): `JobsView` for `GET /api/jobs` and the answers of Pass and Go ahead.
+"""The job list (#156): `JobsView` for `GET /api/jobs` and the answers of Pass, Done and its undo, and Check now.
 
 A row is the facts he checks, never a score and never a reason for its place: the list sorts by when each job was
 posted (`list_at`).
@@ -9,7 +9,6 @@ from outreach.api.models.base import Wire, WireRequest
 
 JobView = Literal["your_level", "higher"]
 JobWindow = Literal["7", "30", "60", "90", "any"]
-GoAheadState = Literal["added", "requested"]
 CheckNowState = Literal["started", "running", "not_live"]
 CheckState = Literal["idle", "queued", "running", "done"]
 JobSize = Literal["any", "small", "big", "unknown"]
@@ -34,7 +33,7 @@ class JobRowWire(Wire):
     says_no_sponsorship: bool
     everify: bool
     yc: bool
-    contacted_on: str | None  # YYYY-MM-DD, the newest day he reached a person there
+    contacted_on: str | None  # YYYY-MM-DD, the newest day he reached it: a person contacted, or his own Done mark
 
 
 class JobCounts(Wire):
@@ -51,7 +50,8 @@ class JobsView(Wire):
 
 
 class JobWriteBody(WireRequest):
-    """The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key."""
+    """The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's
+    key."""
 
 
 class PassJobResult(Wire):
@@ -60,14 +60,16 @@ class PassJobResult(Wire):
     passed: bool  # always true: the posting is off the list, its company is not touched
 
 
-class GoAheadResult(Wire):
+class DoneResult(Wire):
     posting_id: int
-    company_id: int
-    state: GoAheadState  # added: on today's list now; requested: the 08:00 plan puts it first
-    rank: int | None  # the pick's rank on today's list, None until the plan is built
-    entry_id: int | None  # the plan row's id (`GET /api/plan`), None until the plan is built
-    list_date: str  # YYYY-MM-DD, the list it is on or for: the next weekday when asked on a weekend
+    company_id: int  # the company marked: the survivor of any merge
+    reached_on: str  # YYYY-MM-DD in New York, the day of the standing mark (the first one when it was already marked)
     text: str
+
+
+class ClearDoneResult(Wire):
+    company_id: int  # the survivor of any merge
+    cleared: bool  # false: there was no mark to take back, nothing written
 
 
 class CheckNowResult(Wire):

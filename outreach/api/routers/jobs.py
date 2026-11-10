@@ -2,7 +2,8 @@
 
 `GET /api/jobs` is open engineering postings, newest first, one page at a time (`outreach.pipeline.joblist` decides
 which and in which order). `POST /api/jobs/{postingId}/pass` hides one posting and never its company;
-`POST /api/jobs/{postingId}/go-ahead` adds its company to today's list as his own pick. Each write is one `run_write`.
+`POST /api/jobs/{postingId}/done` marks its company as reached (#195; its undo is in `company_writes`). Each write is
+one `run_write`.
 
 Check now (#194): `POST /api/jobs/check-now` records a request and, after the commit, starts the crawl job;
 `GET /api/jobs/check` says how the check is going. The API never reads a job board itself.
@@ -16,7 +17,7 @@ from outreach.api.clock import get_clock
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import run_write
-from outreach.api.models.jobs import (CheckNowResult, CheckStatus, GoAheadResult, JobSize, JobsView, JobView, JobWindow,
+from outreach.api.models.jobs import (CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView, JobView, JobWindow,
                                       JobWriteBody, PassJobResult)
 from outreach.api.queries import jobs_list as queries
 from outreach.api.routers import row_id
@@ -53,9 +54,10 @@ def pass_job(body: JobWriteBody, request: Request, posting_id: int = row_id()) -
     return run_write(request, lambda ctx: service.pass_job(ctx, posting_id))
 
 
-@router.post("/jobs/{posting_id}/go-ahead", response_model=GoAheadResult)
-def go_ahead(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
-    return run_write(request, lambda ctx: service.go_ahead(ctx, posting_id))
+@router.post("/jobs/{posting_id}/done", response_model=DoneResult)
+def done(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
+    """Done: his mark that the posting's company has been reached. Undo is `/api/companies/{companyId}/reached/clear`."""
+    return run_write(request, lambda ctx: service.done(ctx, posting_id))
 
 
 @router.post("/jobs/check-now", response_model=CheckNowResult)

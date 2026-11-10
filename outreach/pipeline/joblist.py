@@ -20,8 +20,6 @@ The list reads the decision's columns:
   changes only when the rebuild gives it a real state.
 - The level tag: `fit` and `reject` show the tier (new grad, early career, SDE 1, SDE 2); `uncertain` shows "level not
   stated", whatever its tier; a `fit` posting whose tier is `not_stated` or `open` shows "entry level".
-- Date: `posted_on` when there is one (`posted`), else the New York date of the first sighting (`seen`). Shown only;
-  the list sorts and filters by the list time.
 - List time (#193, design 4.4): `posting.list_at`, written once by the crawler (`outreach.crawl.row_clock.list_at`).
   NULL means the date is not known: such a row is in the Date unknown group, after every dated row in every window
   and never filtered out by one. The row also carries the board's own time (`posted_at`), the first sighting, the
@@ -91,9 +89,6 @@ class JobRow:
     url: str
     location: str
     level_tag: str
-    date: str  # YYYY-MM-DD
-    date_kind: Literal["posted", "seen"]
-    age_days: int  # whole New York days from `date` to today, never below 0
     list_at: str | None  # the time the list sorts by (canonical UTC); None: Date unknown
     posted_at: str | None  # the board's own posting time, when it gives one Knock trusts
     first_seen_at: str  # Knock's first sighting
@@ -136,19 +131,12 @@ def passed_posting_ids(conn: sqlite3.Connection) -> frozenset[int]:
     return frozenset(out)
 
 
-def _ny_day(stamp: str) -> str:
-    """The New York date of a stored UTC moment (registered as an SQL function: the first sighting's day)."""
-    return datetime.strptime(stamp, ISO_FMT).replace(tzinfo=timezone.utc).astimezone(_NY).date().isoformat()
-
-
 # The facts are read once per company (not per posting): `company_fact` is the one view that picks a company's value.
 _SQL = """
 WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
          d.level_tier, {state} AS state, d.sponsorship, d.us,
-         COALESCE(p.posted_on, jl_ny_day(p.first_seen_at)) AS day,
-         CASE WHEN p.posted_on IS NULL THEN 'seen' ELSE 'posted' END AS kind,
          p.list_at, p.posted_at, p.first_seen_at, p.seen_gap_s, rp.first_seen_at AS reposted_from,
          CASE WHEN p.list_at IS NULL THEN 1 ELSE 0 END AS unk, COALESCE(p.list_at, p.first_seen_at) AS at
   FROM posting p
@@ -200,7 +188,7 @@ co AS (
   SELECT co1.*, CASE WHEN co1.size > :big OR co1.big_guess = 1 THEN 1 ELSE 0 END AS big FROM co1
 ),
 rows AS (
-  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc, c.day, c.kind,
+  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc,
          c.list_at, c.posted_at, c.first_seen_at, c.seen_gap_s, c.reposted_from, c.unk, c.at,
          c.level_tier, c.state, c.sponsorship,
          co.big,
@@ -307,14 +295,13 @@ def _prepare(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | Non
     page = {**params, "yl": int(f.view == "your_level"), "has_after": int(cursor is not None),
             "a_unk": cursor[0] if cursor else 0, "a_at": cursor[1] if cursor else "",
             "a_rank": cursor[2] if cursor else 0, "a_id": cursor[3] if cursor else 0, "limit": limit + 1}
-    conn.create_function("jl_ny_day", 1, _ny_day, deterministic=True)
-    return today, contacted, params, page
+    return contacted, params, page
 
 
 def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> JobPage:
     """One page of the list. `after` is the cursor of the last row seen (None for the first page); `counts` ignore the
     view, so both tabs can show their number. A bad filter or cursor is a ValueError."""
-    today, contacted, params, page = _prepare(conn, now, f, after, limit)
+    contacted, params, page = _prepare(conn, now, f, after, limit)
     cur = conn.cursor()
     cur.row_factory = sqlite3.Row
     found = cur.execute(_PAGE, page).fetchall()
@@ -324,7 +311,7 @@ def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, 
         counted = cur.execute(_COUNT, params).fetchone()
         counts = {"your_level": counted["yl"], "higher": counted["n"] - counted["yl"]}
     more = len(found) > limit
-    rows = [_row(r, today, contacted) for r in found[:limit]]
+    rows = [_row(r, contacted) for r in found[:limit]]
     last = found[limit - 1] if more else None
     return JobPage(rows, counts[f.view],
                    _encode(last["unk"], last["at"], last["rank"], last["posting_id"]) if last else None, counts)
@@ -338,13 +325,12 @@ def _level_tag(state: str, tier: str) -> str:
     return _LEVEL_TAGS[tier]
 
 
-def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
+def _row(r: sqlite3.Row, contacted: dict[int, date]) -> JobRow:
     size = r["size"]
     when = contacted.get(r["cid"])
     return JobRow(
         posting_id=r["posting_id"], title=r["title"], url=r["url"], location=r["location"],
-        level_tag=_level_tag(r["state"], r["level_tier"]), date=r["day"], date_kind=r["kind"],
-        age_days=max((today - date.fromisoformat(r["day"])).days, 0), list_at=r["list_at"], posted_at=r["posted_at"],
+        level_tag=_level_tag(r["state"], r["level_tier"]), list_at=r["list_at"], posted_at=r["posted_at"],
         first_seen_at=r["first_seen_at"], seen_gap_s=r["seen_gap_s"], first_read=r["seen_gap_s"] is None,
         reposted_from=r["reposted_from"], company_id=r["cid"], company_name=r["name"],
         size=size, big=bool(r["big"]), says_no_sponsorship=r["sponsorship"] == "no",
@@ -353,6 +339,6 @@ def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
 
 def explain(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> list[str]:
     """SQLite's query plan lines for the page query and the count query (for the plan test and for timing work)."""
-    _, _, params, page = _prepare(conn, now, f, after, limit)
+    _, params, page = _prepare(conn, now, f, after, limit)
     return ([r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _PAGE, page)]
             + [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _COUNT, params)])

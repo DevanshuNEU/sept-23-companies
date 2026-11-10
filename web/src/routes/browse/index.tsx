@@ -7,6 +7,7 @@ import {
   queryKeys,
   usePageClient,
   type Id,
+  type IsoTime,
   type JobRow,
   type JobsParams,
   type JobsSize,
@@ -22,7 +23,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAnnounce, useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { formatDueDay } from '@/lib/format';
+import { formatDueDay, gapTag, postedLabel, repostTag } from '@/lib/format';
 import { openExternal, safeHref } from '@/lib/safe-href';
 import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
@@ -53,7 +54,6 @@ const LINK =
 const CHIP = 'h-8 px-3 text-xs max-sm:h-11';
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
 const sizeLine = (j: JobRow) => (j.size === null ? (j.big ? 'Big company, size not known' : 'Size not known') : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
 const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
@@ -79,10 +79,15 @@ function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContac
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }
 
-function Flags({ job }: { job: JobRow }) {
-  if (!job.saysNoSponsorship && !job.everify && !job.yc && !job.contactedOn) return null;
+/** The row's tags: first what qualifies its time (a repost, a late find), then the company's flags. */
+function Flags({ job, asOf }: { job: JobRow; asOf: IsoTime }) {
+  const repost = repostTag(job.repostedFrom, asOf);
+  const gap = gapTag(job);
+  if (!repost && !gap && !job.saysNoSponsorship && !job.everify && !job.yc && !job.contactedOn) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
+      {repost ? <Badge variant="idle">{repost}</Badge> : null}
+      {gap ? <Badge variant="idle">{gap}</Badge> : null}
       {job.saysNoSponsorship ? <Badge variant="warn">Says no sponsorship</Badge> : null}
       {job.everify ? <Badge variant="idle">E-Verify</Badge> : null}
       {job.yc ? <Badge variant="idle">YC</Badge> : null}
@@ -93,6 +98,7 @@ function Flags({ job }: { job: JobRow }) {
 
 function JobItem({
   job,
+  asOf,
   current,
   answer,
   going,
@@ -101,6 +107,7 @@ function JobItem({
   onGoAhead,
 }: {
   job: JobRow;
+  asOf: IsoTime;
   current: boolean;
   answer: string | undefined;
   going: boolean;
@@ -132,11 +139,11 @@ function JobItem({
           <Link to={`/companies/${job.companyId}`} className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70">
             {job.companyName}
           </Link>
-          <span>{`${job.dateKind} ${ago(job.ageDays)}`}</span>
+          <span className="tabular-nums">{postedLabel(job, asOf)}</span>
           <span>{sizeLine(job)}</span>
           <span>{job.location}</span>
         </p>
-        <Flags job={job} />
+        <Flags job={job} asOf={asOf} />
       </div>
       {answer !== undefined ? (
         <p role="status" className="flex max-w-72 items-start gap-1.5 text-xs text-foreground">
@@ -175,9 +182,11 @@ function Skeletons() {
 }
 
 /**
- * Jobs (sidebar, or F on Today; #156): the open engineering postings, newest first, in two tabs (your level, higher
- * levels). He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never
- * its company) and Go ahead puts its company on today's list as his own pick. There is no score and no ranking text.
+ * Jobs (sidebar, or F on Today; #156): the open engineering postings, newest first by when each was posted (#193), in
+ * two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date, or when
+ * Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the end. He
+ * reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its company)
+ * and Go ahead puts its company on today's list as his own pick. There is no score and no ranking text.
  *
  * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Go ahead keeps the
  * row and writes the API's own sentence in it ("Added ... to today's list.", or when it is kept for the next list).
@@ -201,7 +210,7 @@ export default function BrowsePage() {
   const marks = useViewQuery(queryKeys.jobsMarks, () => Promise.resolve(NO_MARKS));
   const hidden = useMemo(() => new Set(marks.data?.hidden), [marks.data]);
   const ahead = useMemo(() => new Set(marks.data?.ahead), [marks.data]);
-  const list = useRef<HTMLUListElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -230,6 +239,8 @@ export default function BrowsePage() {
   const passed = loaded.length - jobs.length;
   const last = query.data?.pages.at(-1);
   const total = last ? Math.max(last.total - passed, 0) : undefined;
+  const dated = jobs.filter((j) => j.listAt !== null);
+  const undated = jobs.filter((j) => j.listAt === null);
   const counts = last ? { your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0), higher: last.counts.higher - (tab === 'higher' ? passed : 0) } : undefined;
 
   // A pass taken back (Undo, or it did not go through) puts the row back and puts him back on it. Done while rendering,
@@ -289,6 +300,21 @@ export default function BrowsePage() {
         }),
     });
   };
+
+  const asOf = last?.asOf;
+  const item = (j: JobRow) => (
+    <JobItem
+      key={j.postingId}
+      job={j}
+      asOf={asOf ?? j.firstSeenAt}
+      current={j.postingId === current?.postingId}
+      answer={answers.get(j.postingId)}
+      going={ahead.has(j.postingId)}
+      onSelect={() => setActive(j.postingId)}
+      onPass={() => pass(j)}
+      onGoAhead={() => goAhead(j)}
+    />
+  );
 
   const open = current !== null;
   const bindings: Binding[] = [
@@ -399,20 +425,20 @@ export default function BrowsePage() {
             {whatToWiden(on)}
           </EmptyState>
         ) : (
-          <ul ref={list} aria-label="Jobs" aria-busy={stale} className={cn(stale && 'opacity-60 transition-opacity')}>
-            {jobs.map((j) => (
-              <JobItem
-                key={j.postingId}
-                job={j}
-                current={j.postingId === current?.postingId}
-                answer={answers.get(j.postingId)}
-                going={ahead.has(j.postingId)}
-                onSelect={() => setActive(j.postingId)}
-                onPass={() => pass(j)}
-                onGoAhead={() => goAhead(j)}
-              />
-            ))}
-          </ul>
+          <div ref={list} aria-busy={stale} className={cn(stale && 'opacity-60 transition-opacity')}>
+            {dated.length > 0 ? <ul aria-label="Jobs">{dated.map(item)}</ul> : null}
+            {undated.length > 0 ? (
+              <section aria-labelledby="date-unknown-h">
+                <div className="grid gap-0.5 border-b px-6 pt-6 pb-3">
+                  <h2 id="date-unknown-h" className="text-sm font-semibold">
+                    Date unknown
+                  </h2>
+                  <p className="text-[13px] text-muted-foreground">These boards give no posting date, and Knock found these jobs on its first read.</p>
+                </div>
+                <ul aria-label="Date unknown">{undated.map(item)}</ul>
+              </section>
+            ) : null}
+          </div>
         )}
         {query.hasNextPage ? (
           <div className="grid justify-items-center border-t px-6 py-4">

@@ -2174,8 +2174,6 @@ export interface components {
         };
         /** JobRowWire */
         JobRowWire: {
-            /** Agedays */
-            ageDays: number;
             /** Big */
             big: boolean;
             /** Companyid */
@@ -2184,13 +2182,6 @@ export interface components {
             companyName: string;
             /** Contactedon */
             contactedOn: string | null;
-            /** Date */
-            date: string;
-            /**
-             * Datekind
-             * @enum {string}
-             */
-            dateKind: "posted" | "seen";
             /** Everify */
             everify: boolean;
             /** Firstread */

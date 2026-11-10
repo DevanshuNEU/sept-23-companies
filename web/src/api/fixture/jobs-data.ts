@@ -1,8 +1,11 @@
 /**
- * Sample data for the job list (#156), as the API answers it: open engineering postings, newest first, then the
- * smaller company, then the posting id; 50 a page by a cursor. 80 postings from 11 companies: every fourth is at a
- * higher level, every fifth is dated by when Knock saw it, and the oldest is 94 days old, so each tab, window and size
- * has something to show.
+ * Sample data for the job list (#156, #193), as the API answers it: open engineering postings, newest first by their
+ * list time, then the smaller company, then the posting id; the Date unknown group last; 50 a page by a cursor. 82
+ * postings from 11 companies: every fourth is at a higher level; most carry the board's own posting time, every fifth
+ * (from the third) only a date, and every fifth (from the fifth) is dated by when Knock first saw it. The newest went
+ * up 6 minutes before the sample's clock and the second is a repost; the fifth was found after a 3 day gap; the oldest
+ * 20 are from before list times (their day only), the oldest is 94 days old; and 2 at your level have no date at all,
+ * so each tab, window and size has something to show.
  */
 import type { IsoDate, IsoTime, JobRow, JobsParams, JobsView } from '../types';
 
@@ -36,42 +39,69 @@ const dayNumber = (on: IsoDate): number => {
 };
 const dayBefore = (on: IsoDate, days: number): IsoDate => new Date((dayNumber(on) - days) * 86_400_000).toISOString().slice(0, 10);
 
-/** The whole sample, already in list order. `today` is the plan's date. */
-export function buildJobs(today: IsoDate): { rows: JobRow[]; higher: ReadonlySet<number> } {
+const two = (n: number) => String(n).padStart(2, '0');
+const at = (on: IsoDate, h: number, m: number): IsoTime => `${on}T${two(h)}:${two(m)}:00Z`;
+const OLD_FROM = 60; // rows from here on are from before list times: no seen gap, their day only
+
+/**
+ * The whole sample, already in list order. `today` is the plan's date and `asOf` its clock; `ages` is each dated row's
+ * age in days, for the windows.
+ */
+export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; higher: ReadonlySet<number>; ages: ReadonlyMap<number, number> } {
   const higher = new Set<number>();
+  const ages = new Map<number, number>();
+  const company = (c: Company) => ({
+    companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
+    saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
+  });
   const rows = Array.from({ length: 80 }, (_, i): JobRow => {
     const c = COMPANIES[i % COMPANIES.length] as Company;
     const up = i % 4 === 3;
-    const ageDays = Math.floor(i * 1.2);
+    const age = Math.floor(i * 1.2);
     const id = 9000 + i;
     if (up) higher.add(id);
-    const date = dayBefore(today, ageDays);
-    const seen = i % 5 === 4;
+    ages.set(id, age);
+    const date = dayBefore(today, age);
+    const old = i >= OLD_FROM;
+    const kind = i % 5 === 4 ? 'seen' : i % 5 === 2 || old ? 'date' : 'time';
+    // The newest went up 6 minutes before the clock; the other board times vary through the day.
+    const posted = i === 0 ? new Date(Date.parse(asOf) - 6 * 60_000).toISOString().replace('.000Z', 'Z') : at(date, 13 + (i % 9), (i * 13) % 60);
+    const firstSeenAt = i === 0 ? new Date(Date.parse(asOf) - 4 * 60_000).toISOString().replace('.000Z', 'Z') : at(date, 15, 10);
     return {
       postingId: id,
       title: up ? (HIGHER[(i >> 2) % HIGHER.length] as string) : (TITLES[i % 4] as string),
       url: `https://jobs.example/${nameKey(c.name)}/${id}`,
       location: PLACES[i % PLACES.length] as string,
       levelTag: up ? 'SDE 2' : (TAGS[i % 4] as string),
-      date, dateKind: seen ? 'seen' : 'posted', ageDays,
-      listAt: `${date}T15:00:00Z`, postedAt: seen ? null : `${date}T15:00:00Z`, firstSeenAt: `${date}T15:10:00Z`,
-      seenGapS: 1800, firstRead: false, repostedFrom: null,
-      companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
-      saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
+      listAt: kind === 'time' ? posted : kind === 'date' ? at(date, 5, 0) : firstSeenAt,
+      postedAt: kind === 'time' ? posted : null, firstSeenAt,
+      seenGapS: old ? null : i === 4 ? 3 * 86_400 + 3600 : 1800, firstRead: old,
+      repostedFrom: i === 1 ? '2026-10-02T14:30:00Z' : null,
+      ...company(c),
     };
   });
+  // No date: a board with no posting time, found on its first read.
+  const unknown = (id: number, c: Company, title: string, firstSeenAt: IsoTime, place: string): JobRow => ({
+    postingId: id, title, url: `https://jobs.example/${nameKey(c.name)}/${id}`, location: place, levelTag: 'new grad',
+    listAt: null, postedAt: null, firstSeenAt, seenGapS: null, firstRead: true, repostedFrom: null, ...company(c),
+  });
+  rows.push(
+    unknown(9080, COMPANIES[9] as Company, 'Software Engineer, Platform', at(dayBefore(today, 1), 14, 0), 'New York, NY'),
+    unknown(9081, COMPANIES[1] as Company, 'Software Engineer, New Grad', at(dayBefore(today, 2), 14, 0), 'Remote (US)'),
+  );
   const rank = (r: JobRow) => (r.size === null ? (r.big ? 20_000_000 : 10_000_000) : r.big ? 20_000_000 + r.size : r.size);
-  rows.sort((a, b) => b.date.localeCompare(a.date) || rank(a) - rank(b) || a.postingId - b.postingId);
-  return { rows, higher };
+  const key = (r: JobRow) => r.listAt ?? r.firstSeenAt;
+  rows.sort((a, b) => Number(a.listAt === null) - Number(b.listAt === null) || key(b).localeCompare(key(a)) || rank(a) - rank(b) || a.postingId - b.postingId);
+  return { rows, higher, ages };
 }
 
-/** The API's job list: the tab, the window, the size, the contacted filter and the company search, then one page after the cursor. */
-export function jobsView(all: JobRow[], higher: ReadonlySet<number>, p: JobsParams, asOf: IsoTime, limit = 50): JobsView {
+/** The API's job list: the tab, the window (a row with no date is in every one), the size, the contacted filter and the company search, then one page after the cursor. */
+export function jobsView(all: JobRow[], higher: ReadonlySet<number>, ages: ReadonlyMap<number, number>, p: JobsParams, asOf: IsoTime, limit = 50): JobsView {
   const key = nameKey(p.q);
   const days = p.window === 'any' ? Infinity : Number(p.window);
   const sizeOk = (r: JobRow) => p.size === 'any' || (p.size === 'unknown' ? r.size === null && !r.big : p.size === 'big' ? r.big : r.size !== null && !r.big);
   const base = all
-    .filter((r) => r.ageDays <= days)
+    .filter((r) => r.listAt === null || (ages.get(r.postingId) ?? Infinity) <= days)
     .filter(sizeOk)
     .filter((r) => !p.notContacted || r.contactedOn === null)
     .filter((r) => !p.q.trim() || (key !== '' && nameKey(r.companyName).includes(key)));

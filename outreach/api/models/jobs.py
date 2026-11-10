@@ -19,9 +19,6 @@ class JobRowWire(Wire):
     url: str
     location: str
     level_tag: str  # "new grad", "early career", "SDE 1", "SDE 2" or "level not stated"
-    date: str  # YYYY-MM-DD
-    date_kind: Literal["posted", "seen"]
-    age_days: int
     list_at: str | None  # the time the list sorts by (UTC); null: Date unknown, listed after every dated row
     posted_at: str | None  # the board's own posting time, when it gives one Knock trusts
     first_seen_at: str  # when Knock first saw it

@@ -297,34 +297,6 @@ class LevelStateTests(JobListCase):
 
 
 class DateTests(JobListCase):
-    def test_posted_date_wins_and_is_labeled_posted(self):
-        self.job(self.company(), posted="2026-10-30", seen="2026-11-02T12:00:00Z")
-        row = self.run_query().rows[0]
-        self.assertEqual((row.date, row.date_kind, row.age_days), ("2026-10-30", "posted", 4))
-
-    def test_no_posted_date_uses_first_sight_labeled_seen_never_posted(self):
-        self.job(self.company(), posted=None, seen="2026-11-03T13:00:00Z")
-        row = self.run_query().rows[0]
-        self.assertEqual((row.date, row.date_kind, row.age_days), ("2026-11-03", "seen", 0))
-
-    def test_the_seen_date_is_a_new_york_day(self):
-        # The clocks went back on Nov 1, so 02:30Z on Nov 3 is 21:30 on Nov 2 in New York; in July it is 22:30.
-        self.job(self.company(), posted=None, seen="2026-11-03T02:30:00Z")
-        self.assertEqual(self.run_query().rows[0].date, "2026-11-02")
-        self.job(self.company(), posted=None, seen="2026-07-15T02:30:00Z")
-        self.assertEqual(self.run_query(window_days=0).rows[-1].date, "2026-07-14")
-
-    def test_age_counts_new_york_days_not_hours(self):
-        self.job(self.company(), posted="2026-11-02")
-        # 04:30Z on Nov 3 is 23:30 on Nov 2 in New York: still yesterday's date there, so age 1 at 10:00 Nov 3
-        # becomes age 0 at 23:30 Nov 2.
-        self.assertEqual(self.run_query(now="2026-11-03T04:30:00Z").rows[0].age_days, 0)
-        self.assertEqual(self.run_query(now="2026-11-03T05:30:00Z").rows[0].age_days, 1)
-
-    def test_a_date_ahead_of_today_has_age_zero(self):
-        self.job(self.company(), posted="2026-11-05")
-        self.assertEqual(self.run_query().rows[0].age_days, 0)
-
     def test_window_edges(self):
         co = self.company()
         by_age = {n: self.job(co, posted=(date(2026, 11, 3) - timedelta(days=n)).isoformat())

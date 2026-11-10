@@ -3,7 +3,7 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobRow, JobsParams, JobsView, PassJobResult, GoAheadResult,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
@@ -114,7 +114,7 @@ export class FixtureClient implements OutreachClient {
   private readonly browseRanks = new Map<Id, number>();
   private extras: BenchCompany[] | undefined;
   /** The job list (#156): the sample postings, the ones he passed, and the companies he said Go ahead to (by company id). */
-  private jobList: { rows: JobRow[]; higher: ReadonlySet<number> } | undefined;
+  private jobList: ReturnType<typeof buildJobs> | undefined;
   private readonly passedJobs = new Set<Id>();
   private readonly wentAhead = new Map<Id, GoAheadResult>();
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
@@ -1156,14 +1156,14 @@ export class FixtureClient implements OutreachClient {
     });
   }
 
-  private jobPool(): { rows: JobRow[]; higher: ReadonlySet<number> } {
-    this.jobList ??= buildJobs(this.db.plan.date);
-    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)), higher: this.jobList.higher };
+  private jobPool(): ReturnType<typeof buildJobs> {
+    this.jobList ??= buildJobs(this.db.plan.date, this.db.plan.asOf);
+    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)), higher: this.jobList.higher, ages: this.jobList.ages };
   }
 
   /** The job list, as the API: tab, window, size, contacted filter and company search, 50 a page by cursor. Never a posting he passed. */
   jobs(params: JobsParams): Promise<JobsView> {
-    return this.read(() => { const pool = this.jobPool(); return jobsView(pool.rows, pool.higher, params, this.db.plan.asOf, params.limit); });
+    return this.read(() => { const pool = this.jobPool(); return jobsView(pool.rows, pool.higher, pool.ages, params, this.db.plan.asOf, params.limit); });
   }
 
   /** Pass, as the API: the posting is hidden and nothing else changes. */

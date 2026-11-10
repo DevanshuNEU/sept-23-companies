@@ -51,12 +51,11 @@ class ListTest(JobsCase):
         row = self.jobs()["rows"][0]
         self.assertEqual(row["postingId"], pid)
         self.assertEqual(
-            sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "date", "dateKind", "ageDays",
-                                 "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
+            sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
                                  "companyId", "companyName", "size", "big", "saysNoSponsorship", "everify", "yc",
                                  "contactedOn"]))
-        self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["dateKind"],
-                          row["ageDays"], row["date"]), ("Acme", 40, False, "new grad", "posted", 1, "2026-11-09"))
+        self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["firstSeenAt"]),
+                         ("Acme", 40, False, "new grad", "2026-11-09T12:00:00Z"))
 
     def test_jobs_row_has_time_fields(self):
         co = self.company(size=40)

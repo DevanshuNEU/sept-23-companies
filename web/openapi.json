@@ -2785,10 +2785,6 @@
       },
       "JobRowWire": {
         "properties": {
-          "ageDays": {
-            "title": "Agedays",
-            "type": "integer"
-          },
           "big": {
             "title": "Big",
             "type": "boolean"
@@ -2811,18 +2807,6 @@
               }
             ],
             "title": "Contactedon"
-          },
-          "date": {
-            "title": "Date",
-            "type": "string"
-          },
-          "dateKind": {
-            "enum": [
-              "posted",
-              "seen"
-            ],
-            "title": "Datekind",
-            "type": "string"
           },
           "everify": {
             "title": "Everify",
@@ -2926,9 +2910,6 @@
           "url",
           "location",
           "levelTag",
-          "date",
-          "dateKind",
-          "ageDays",
           "listAt",
           "postedAt",
           "firstSeenAt",

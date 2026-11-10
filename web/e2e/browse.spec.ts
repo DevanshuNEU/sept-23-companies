@@ -18,11 +18,11 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await expect(page).toHaveURL(/\/browse/);
 
   const jobs = page.getByRole('list', { name: 'Jobs' }).locator('> li[data-job]');
-  await expect(page.getByText('20 at your level in the last 30 days')).toBeVisible();
+  await expect(page.getByText('22 at your level in the last 30 days')).toBeVisible();
   await expect(jobs).toHaveCount(20);
   await expect(jobs.first()).toContainText('Software Engineer, New Grad');
   await expect(jobs.first()).toContainText('Retell AI');
-  await expect(jobs.first()).toContainText('posted today');
+  await expect(jobs.first()).toContainText('posted 10:08, 6 min ago');
   await expect(jobs.first().getByRole('link', { name: 'Software Engineer, New Grad' })).toHaveAttribute('target', '_blank');
 
   // The other tab, a window chip and a size.
@@ -31,7 +31,7 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await page.getByRole('tab', { name: /^Your level/ }).click();
   await expect(jobs).toHaveCount(20);
   await page.getByRole('button', { name: '7 days' }).click();
-  await expect(page.getByText('6 at your level in the last 7 days')).toBeVisible();
+  await expect(page.getByText('8 at your level in the last 7 days')).toBeVisible();
   await page.getByRole('button', { name: '30 days' }).click();
   await expect(jobs).toHaveCount(20);
   await page.getByRole('button', { name: 'Not known' }).click();
@@ -53,7 +53,7 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await expect(jobs.nth(1)).toHaveAttribute('data-job', '9001');
   await page.keyboard.press('x');
   await expect(jobs).toHaveCount(19);
-  await expect(page.getByText('19 at your level in the last 30 days')).toBeVisible();
+  await expect(page.getByText('21 at your level in the last 30 days')).toBeVisible();
   await expect(jobs.nth(1)).toHaveAttribute('aria-current', 'true');
   await expect(jobs.nth(1)).toHaveAttribute('data-job', next ?? '');
 

@@ -108,15 +108,17 @@ def load_plan_config(path: Path = CONFIG_PATH) -> PlanConfig:
 
 # The keys the checks above read directly; every other key is read through `get`, which names a missing one.
 _CHECKED = {"lanes": ("role", "reason", "fill", "role_share", "reason_share"),
-            "plan": ("scan_limit", "timezone", "propose_people"),
+            "plan": ("enabled", "scan_limit", "timezone", "propose_people"),
             "linkedin": ("rotate_top_n", "max_people_per_company"), "note": ("max_chars",),
             "queue": ("companies_per_day", "requests_per_company", "fresh_slots", "fresh_hours", "fresh_pool_top_n",
                       "pass_cooldown_days", "bench_size"), "prepare": ("enabled", "deny_rule_checked"),
             "email": ("email_max_headcount", "email_companies_per_day"),
             "route": ("prefer_ic_in_role",), "bridge": ("log_back_days", "connect_email_after_days")}
 # The on and off switches, each checked to be a boolean. `prepare.enabled` and `plan.propose_people` are the
-# company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check.
-_SWITCHES = (("prepare", "enabled"), ("prepare", "deny_rule_checked"), ("plan", "propose_people"))
+# company-first switches (#9, 2026-10-26); `prepare.deny_rule_checked` records the one-time LinkedIn deny check;
+# `plan.enabled` is the first-to-see switch (#9, 2026-11-10) that turns the 08:00 plan off.
+_SWITCHES = (("prepare", "enabled"), ("prepare", "deny_rule_checked"), ("plan", "propose_people"),
+             ("plan", "enabled"))
 
 
 def _check_keys(data: dict, path: Path) -> None:

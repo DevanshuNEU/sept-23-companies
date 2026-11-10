@@ -82,8 +82,12 @@ def size_reason(company: str, basis: str) -> str:
         lead = f"You picked {company}, and nobody has recorded its size."
     elif basis == "planned":
         lead = f"{company} is in today's plan, and nobody has recorded its size."
+    elif basis == "marked":
+        lead = f"You marked {company} as reached, and nobody has recorded its size."
+    elif basis == "reached":
+        lead = f"You reached someone at {company} recently, and nobody has recorded its size."
     else:
-        raise ValueError(f"basis is 'picked' or 'planned', not {basis!r}")
+        raise ValueError(f"basis is 'picked', 'planned', 'marked' or 'reached', not {basis!r}")
     return clean(f"{lead} Over 300 people hides a company, so one number with a source settles it.")
 
 

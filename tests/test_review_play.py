@@ -1,6 +1,9 @@
 import unittest
+from datetime import date
 
 from outreach.review.play import emailing, in_play, live_company_ids, ny_date
+from outreach.store import append_event
+from tests import plan_seed
 from tests.review_seed import seed_email_person, seed_person, seed_plan_row, seed_queued_message, seed_status
 from tests.storetest import fresh_store, seed_company
 
@@ -81,6 +84,55 @@ class PlayTest(unittest.TestCase):
         for cid, state in ((a, "backlog"), (b, "removed")):
             seed_plan_row(self.conn, cid, TODAY, state, person_id=seed_email_person(self.conn, cid))
         self.assertEqual(self.play(), {})
+
+    def mark(self, cid, kind="company_reached", at="2026-11-01T15:00:00Z"):
+        append_event(self.conn, entity="company", entity_id=cid, company_id=cid, kind=kind, actor="devanshu", at=at,
+                     detail={"company_id": cid})
+
+    def reach(self, cid, sent_on, channel="linkedin_request"):
+        person = plan_seed.seed_person(self.conn, cid, f"Reached {sent_on}")
+        plan_seed.seed_outbound(self.conn, person, cid, channel, sent_on, context_source="own")
+
+    def test_a_company_he_marked_done_is_in_play_with_no_list(self):
+        # First to see (#9, 2026-11-10): with Today gone, his Done mark puts a company in play; a cleared one does not.
+        marked, cleared, plain = self.company(), self.company(), self.company()
+        self.mark(marked)
+        self.mark(cleared)
+        self.mark(cleared, "company_reached_cleared", at="2026-11-01T15:01:00Z")
+        self.assertEqual(self.play(), {marked: "marked"})
+        self.assertNotIn(plain, self.play())
+
+    def test_a_company_reached_10_days_ago_is_in_play_and_one_reached_20_days_ago_is_not(self):
+        recent, old = self.company(), self.company()
+        self.reach(recent, date(2026, 10, 31))
+        self.reach(old, date(2026, 10, 21))
+        self.assertEqual(self.play(), {recent: "reached"})
+
+    def test_reached_counts_for_14_days_on_every_channel(self):
+        edge, past, mailed = self.company(), self.company(), self.company()
+        self.reach(edge, date(2026, 10, 27))  # 14 days before today
+        self.reach(past, date(2026, 10, 26))  # 15
+        self.reach(mailed, date(2026, 11, 9), channel="email")
+        self.assertEqual(self.play(), {edge: "reached", mailed: "reached"})
+
+    def test_a_list_row_wins_over_a_mark_and_a_mark_over_a_touch(self):
+        picked, marked = self.company(), self.company()
+        seed_plan_row(self.conn, picked, TODAY, "picked")
+        for cid in (picked, marked):
+            self.mark(cid)
+            self.reach(cid, date(2026, 11, 9))
+        self.assertEqual(self.play(), {picked: "picked", marked: "marked"})
+
+    def test_a_marked_or_reached_company_that_is_no_go_or_merged_is_never_in_play(self):
+        nogo, keeper, dupe = self.company(), self.company(), self.company()
+        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'not_a_fit', "
+                          "'devanshu', '2026-11-01T12:00:00Z')", (nogo,))
+        self.mark(nogo)
+        self.reach(nogo, date(2026, 11, 9))
+        self.mark(dupe)
+        self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
+                          "WHERE company_id = ?", (keeper, dupe))
+        self.assertEqual(self.play(), {keeper: "marked"})
 
     def test_only_the_latest_list_counts(self):
         old_pick, new_pick = self.company(), self.company()

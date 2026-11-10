@@ -4,6 +4,9 @@
 sponsorship_top_n = 150
 # A company with a picked row, or a named person, on a daily list this many days old counts as in play.
 planned_days = 4
+# First to see (#9, 2026-11-10): no list is built now, so a company he reached this many days ago (any channel) is in
+# play too, as is one he marked Done.
+reached_days = 14
 # An open size or domain item that no list or queue has touched for this many days clears itself.
 stale_days = 14
 

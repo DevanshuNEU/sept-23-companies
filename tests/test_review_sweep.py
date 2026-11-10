@@ -5,6 +5,7 @@ import plistlib
 import re
 import sqlite3
 import unittest
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -14,8 +15,9 @@ from outreach.review.config import ReviewConfig
 from outreach.review.play import ny_date
 from outreach.review.triggers import SweepReport, clear_gone, clear_stale, sweep_needs_you
 from outreach.rules import rebuild
-from outreach.store import connect
+from outreach.store import append_event, connect
 from outreach.store.timefmt import utcnow
+from tests import plan_seed
 from tests.review_seed import seed_email_person, seed_item, seed_plan_row, seed_queued_message, seed_status
 from tests.storetest import fresh_store, seed_board, seed_company, seed_posting
 
@@ -198,17 +200,44 @@ class ClearStaleTest(SweepBase):
             self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 0)
         self.assertEqual((self.state(a)[0], self.state(b)[0]), ("open", "open"))
 
-    def test_clear_stale_is_skipped_when_no_recent_list_exists(self):
-        out = self.company()
-        a = seed_item(self.conn, "size_unknown", out)
-        self.old(a)
-        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 0)
+    def test_clear_stale_runs_with_no_daily_list(self):
+        # First to see (#9, 2026-11-10): no list is built any more, so the sweep no longer waits for one. A company he
+        # marked Done keeps its old item; one not marked, not reached and on no list is cleared.
+        marked, out = self.company("Marked"), self.company("Out")
+        append_event(self.conn, entity="company", entity_id=marked, company_id=marked, kind="company_reached",
+                     actor="devanshu", at="2026-11-01T15:00:00Z", detail={"company_id": marked})
+        kept, gone = seed_item(self.conn, "size_unknown", marked), seed_item(self.conn, "size_unknown", out)
+        self.old(kept)
+        self.old(gone)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)
         report = sweep_needs_you(self.conn, now=NOW, cfg=CFG)
-        self.assertTrue(any("no recent daily list" in s for s in report.skipped), report.skipped)
-        self.assertEqual(self.state(a)[0], "open")
-        seed_plan_row(self.conn, self.company(), "2026-11-01", "picked")  # a list, but older than planned_days
-        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 0)
-        self.assertEqual(self.state(a)[0], "open")
+        self.assertEqual(report.cleared.get("size_unknown"), 1)
+        self.assertFalse(any("daily list" in s for s in report.skipped), report.skipped)
+        self.assertEqual(self.state(kept)[0], "open")
+        self.assertEqual(self.state(gone), ("resolved", "cleared", "No longer in your plan."))
+
+    def test_a_company_reached_recently_keeps_its_old_item_with_no_list(self):
+        reached, faded = self.company("Reached"), self.company("Faded")
+        for cid, sent_on in ((reached, date(2026, 10, 31)), (faded, date(2026, 10, 21))):
+            plan_seed.seed_outbound(self.conn, plan_seed.seed_person(self.conn, cid, "Ana"), cid, "linkedin_request",
+                                    sent_on, context_source="own")
+        a, b = seed_item(self.conn, "size_unknown", reached), seed_item(self.conn, "size_unknown", faded)
+        self.old(a)
+        self.old(b)
+        self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 1)
+        self.assertEqual((self.state(a)[0], self.state(b)[0]), ("open", "resolved"))
+
+    def test_the_size_trigger_raises_for_a_company_he_marked_done_with_no_list(self):
+        marked = self.company("Marked")
+        append_event(self.conn, entity="company", entity_id=marked, company_id=marked, kind="company_reached",
+                     actor="devanshu", at="2026-11-09T15:00:00Z", detail={"company_id": marked})
+        self.company("Plain")
+        report = sweep_needs_you(self.conn, now=NOW, cfg=CFG)
+        self.assertEqual(report.raised.get("size_unknown"), 1)
+        row = self.conn.execute("SELECT company_id, reason FROM review_item WHERE kind = 'size_unknown' "
+                                "AND state = 'open'").fetchone()
+        self.assertEqual(row["company_id"], marked)
+        self.assertIn("You marked Marked as reached", row["reason"])
 
 
 class SweepTest(SweepBase):

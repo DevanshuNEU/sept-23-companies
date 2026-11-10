@@ -75,3 +75,36 @@ slightly warm emails about 15% more replies than neutral, very positive ones los
 (short subjects; buzzwords hurt), Sahni, Wheeler and Chintagunta 2018 (a name in the subject lifted opens in marketing
 email) against a 2023 Marketing Letters replication that found no lift, and Kumar and Epley 2018 and Liu et al. 2022
 (people underestimate how much a sincere note or a reach-out is appreciated).
+
+## Rounds 4 and 5: company research first, his projects first
+
+Devanshu's steps (2026-11-09): research what the company is building and where he could help, lead with his projects
+(Overhear, OpenCodeIntel and the rest), and keep his India work in the background. GPT with live web search found 2 to
+4 dated, quoted facts per company (recent launches, the team's work in the posting's own words) and, for one of the 12,
+the person's own site.
+
+Round 4 (v4: research and projects first, against v3): more personal (7.0 vs 5.2) but less human (7.2 vs 8.5), and v3
+won 7 of 12. The cause was the line that bridged their news to his work: "That's the problem I keep coming back to", "I
+spent September on the other side of that problem", "Search is what I've spent this year on", "a neat piece of
+plumbing", "better than the careers page does". Each was flagged as forced.
+
+Round 5 (v5: the same research, stated plainly, no bridge lines, proof picked for the role): on the 9 emails whose
+bodies differ, v5 won 6 and v3 won 3. Personal 6.6 vs 5.2, human 7.5 vs 7.8, reply 6.5 vs 6.2. What won: the posting's
+own words for the job ("keeping intraday trade data and the overnight reports right"), the team's stated work matched
+to the project that does that work (auditability for agents, Overhear), a named launch from last week. What lost: a
+vague company line ("<company> is putting <its agents> to work"), and a project that did not fit the role (an agent
+grader for a data platform role, where the ingestion pipeline won).
+
+## Subjects, rounds 4 and 5
+
+GPT wrote 8 candidates per email in different patterns, then 5 "personal, warm, never forced" candidates per email;
+a fresh GPT session picked what it would open from each inbox. Template decoys were skipped every time (82 of 82).
+
+- First picks were personal to the pair, not about the reader's company news: a shared past ("your <student group> days at
+  northeastern"), his small true story ("$500 in claude credits led me here"), his lesson ("24 lines caught what my
+  LLM missed", "my reranker made search worse first"), an honest gap ("two years against your three"), a plain
+  question about the role ("which team owns engineer I?", "<the program>: who should I write to?").
+- Subjects about the reader's own company news ("Your <product> announcement", "<company>'s new <agent>
+  Agent") were not picked first. That fact belongs in the first line, not the subject.
+- Losers: a project's name with specs ("OpenCodeIntel: a 12-tool MCP server"), skill lists, resume summaries, "interested
+  in", "I'd like to be considered at".

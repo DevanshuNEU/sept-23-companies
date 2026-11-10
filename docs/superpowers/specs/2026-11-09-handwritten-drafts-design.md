@@ -150,6 +150,19 @@ no draft has a source. Change:
 Keep every hard rule (#9's limits, truth, links, no visa mention at all, his voice files, the brief).
 Replace the fixed "Shape" and the by-reader table's fixed asks with what the lab and research showed works:
 
+**Devanshu's steps (2026-11-09), in order.** (1) Read the posting Knock has stored. (2) Research the company: what
+it is building or shipped lately and what the team owning the role works on, from public pages, quoted with link and
+date. (3) Research the person. (4) Find where he fits: the one project of his that does the kind of work they do.
+(5) Say how he'd help, humbly, in their own words for their work, never "you have a problem I can fix". (6) His
+projects lead (Overhear, OpenCodeIntel, CallBudget, Saar, Mem Machines, saar CLI, tool-crowding as being built); his
+two jobs in India are at most one supporting line, used when the role is plainly backend or the email argues
+experience. (7) A story if it fits. (8) Write. (9) Subject last. (10) Check and save. Lab rounds 4 and 5: the
+research must be stated plainly, in the posting's or the launch's own words; a line that bridges their news to his
+work ("that's the problem I keep coming back to") reads as forced and lost.
+
+The company facts are stored like person facts: `save_draft` takes them as `sources` of kind `company` (URL, quote,
+date), so a draft's claims about the company can be checked later.
+
 **The subject.** Written last, from the most concrete true thing in the email, so it promises what the first line
 delivers. At most about 40 characters, lowercase is fine. What won the inbox test: a shared tie with the reader (a
 student group of theirs and his school), a result ("800ms to 280ms"), a lesson ("my reranker made search worse

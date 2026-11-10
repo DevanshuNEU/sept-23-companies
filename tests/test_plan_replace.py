@@ -6,6 +6,7 @@ shipped config (company rows only). A replace refuses, writing nothing, as soon 
 import json
 import unittest
 from datetime import date
+from unittest import mock
 
 from outreach.outcomes.requests import record_request
 from outreach.plan.build import ReplaceRefused, build_plan
@@ -46,6 +47,12 @@ def rows(conn, table):
 
 class Fixture(unittest.TestCase):
     def setUp(self):
+        # The seeds stamp created_at from the wall clock, and "logged today" counts anything at or after the start of
+        # TUE, so on 2026-11-10 and every day after it the seeded rows read as today's work. The seeds' clock is
+        # pinned to the week before (#198); the code under test keeps its own clock.
+        clock = mock.patch("tests.plan_seed.utcnow", return_value="2026-11-02T12:00:00Z")
+        clock.start()
+        self.addCleanup(clock.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.ids, self.people = [], {}
@@ -152,7 +159,8 @@ class ReplaceTest(Fixture):
         self.old_plan()
         person, company = self.row_person()
         other = seed_person(self.conn, company, "Someone Else", "engineer", added_by="devanshu")
-        seed_outbound(self.conn, other, self.ids[10], "linkedin_request", date(2026, 10, 1))
+        with mock.patch("outreach.store.writes.utcnow", return_value="2026-10-01T15:00:00Z"):  # logged when it was sent
+            seed_outbound(self.conn, other, self.ids[10], "linkedin_request", date(2026, 10, 1))
         self.conn.execute("INSERT INTO application(company_id, applied_on) VALUES (?, '2026-10-01')", (self.ids[11],))
         self.conn.execute("INSERT INTO review_item(kind, company_id, reason, evidence_key, raised_by, created_at) "
                           "VALUES ('size_unknown', ?, 'no size', 'k', 'rules', ?)", (company, ON_TUE))

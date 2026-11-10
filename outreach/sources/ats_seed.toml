@@ -1,0 +1,10 @@
+# The ATS seed (#192): every Greenhouse and Ashby board the stapply lists name, read once through a one-request gate.
+# Read by outreach/sources/ats_seed.py.
+#
+# The first full seed is by hand (`python -m outreach.sources seed-ats`). After one has finished, run-due tops it up
+# once a week, gating at most `weekly_limit` boards: rows new to the lists first, then the ones whose last gate is
+# oldest.
+
+enabled = true  # false: run-due never tops the seed up (seed-ats by hand still runs)
+weekly_limit = 3000  # boards gated at most by one weekly top-up
+retry_days = 30  # a board that failed its gate (no US engineering role, or dead) is read again after this many days

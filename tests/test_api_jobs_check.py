@@ -147,12 +147,34 @@ class CheckStatusTest(CheckCase):
         self.check_now()
         self.assertEqual(self.status()["state"], "queued")
 
-    def test_the_pending_request_is_the_newest_after_the_last_finish(self):
+    def test_the_pending_request_is_the_newest_above_the_last_claimed_one(self):
         self.assertIsNone(check_state.pending_request(self.conn))
         self.check_now()
-        self.assertEqual(check_state.pending_request(self.conn), self.now)
-        self.progress(finished_at="2026-11-10T15:20:00Z")
+        request = check_state.pending_request(self.conn)
+        self.assertEqual(request.at, self.now)
+        self.progress(finished_at="2026-11-10T15:20:00Z", request_event_id=request.event_id)
         self.assertIsNone(check_state.pending_request(self.conn))
+
+    def test_a_request_in_the_same_second_as_the_finish_is_still_pending(self):
+        # Claimed by event id, not by time: a check that claimed one request and ended within the second the next
+        # request came in has not taken that one.
+        self.check_now()
+        first = check_state.pending_request(self.conn)
+        self.progress(started_at=self.now, finished_at=self.now, request_event_id=first.event_id)
+        self.assertEqual(self.status()["state"], "done")
+        self.check_now()
+        second = check_state.pending_request(self.conn)
+        self.assertIsNotNone(second)
+        self.assertGreater(second.event_id, first.event_id)
+        self.assertEqual(second.at, first.at)
+        self.assertEqual(self.status()["state"], "queued")
+
+    def test_a_running_check_that_claimed_a_request_leaves_it_claimed_when_stale(self):
+        self.check_now()
+        request = check_state.pending_request(self.conn)
+        self.progress(started_at="2026-11-10T14:53:59Z", request_event_id=request.event_id)  # 1201 s old, no end
+        self.assertIsNone(check_state.pending_request(self.conn))
+        self.assertEqual(self.status()["state"], "idle")
 
 
 class KickCrawlTest(CheckCase):

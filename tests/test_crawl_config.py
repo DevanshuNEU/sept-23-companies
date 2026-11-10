@@ -227,6 +227,17 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual(_load_with(check_budget_s=60).check_budget_s, 60)
         self.assertEqual(_load_with(check_budget_s=3600).check_budget_s, 3600)
 
+    def test_check_skips_boards_read_in_the_last_60_s_on_greenhouse_and_ashby(self):
+        cfg = load_crawl_config()
+        self.assertEqual((cfg.check_skip_recent_s, cfg.check_ats), (60, ("greenhouse", "ashby")))
+        self.assertEqual(_load_with(check_skip_recent_s=0).check_skip_recent_s, 0)
+        with self.assertRaisesRegex(ValueError, "check_skip_recent_s must not be negative"):
+            _load_with(check_skip_recent_s=-1)
+        with self.assertRaisesRegex(ValueError, "check_ats names icims"):
+            _load_with(check_ats='["greenhouse", "icims"]')
+        with self.assertRaisesRegex(ValueError, "check_ats must be a list"):
+            _load_with(check_ats='"greenhouse"')
+
     def test_counts_that_must_be_positive_refuse_zero(self):
         for key in ("defer_s", "max_bytes", "breaker_failures", "decide_batch", "detail_per_read", "boards_per_tick",
                     "tick_budget_s", "top_companies", "watch_interval_s", "watch_per_tick", "watch_min_text_chars",

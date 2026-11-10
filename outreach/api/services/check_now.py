@@ -22,7 +22,8 @@ def request_check(ctx: WriteCtx) -> tuple[CheckNowResult, bool]:
     if current.state == "running":
         return CheckNowResult(requested_at=current.started_at or ctx.now, state="running"), False
     if current.state == "queued":
-        return CheckNowResult(requested_at=check_state.pending_request(conn) or ctx.now, state="running"), True
+        request = check_state.pending_request(conn)
+        return CheckNowResult(requested_at=request.at if request else ctx.now, state="running"), True
     append_event(conn, entity="source", kind=check_state.REQUEST_KIND, actor="devanshu", at=ctx.now,
                  detail={}, idempotency_key=ctx.event_key(0))
     return CheckNowResult(requested_at=ctx.now, state="started"), True

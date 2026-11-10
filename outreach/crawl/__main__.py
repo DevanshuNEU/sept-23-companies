@@ -3,7 +3,9 @@
 - `tick`: one 30-minute tick under the crawl lock: the due boards, then the daily slug probe (the first tick of each
   New York day, up to 50 companies with no board), then the due watched pages. The one log line carries all three,
   as does the tick's `read_boards` job summary (`probe`, `probe_error`, `watch`, `watch_error`). Another tick holding
-  the lock is not an error: it prints so and exits 0.
+  the lock is not an error: it prints so and exits 0. When a Check now request waits (#194), the tick first reads
+  every Greenhouse and Ashby board in its own `read_boards` run, and does so again at the end for a request made
+  while it ran; the line names those runs (`check now: ...`) or the error.
 - `read --company ID [ID ...]`: read these companies' boards now (floor kept, an erroring board's backoff kept). A
   board whose ATS's reader is switched off in config.toml (`ats_off`, #46) is not read: one line on stderr names it
   and the reason, the other boards are read, and the exit code is 1.
@@ -123,6 +125,11 @@ def _line(report) -> str:
         text += f"; feed failed: {report.feed_error}"
     if report.alarm_error:
         text += f"; alarm check failed: {report.alarm_error}"
+    if report.check_runs:
+        runs = ", ".join(str(r) for r in report.check_runs)
+        text += f"; check now: read_boards run{'' if len(report.check_runs) == 1 else 's'} {runs}"
+    if report.check_error:
+        text += f"; check now failed: {report.check_error}"
     if report.alert_error:
         text += f"; job alert failed: {report.alert_error}"
     elif report.alerted:
@@ -156,7 +163,7 @@ def _locked_run(what: str, client: HttpClient | None, run, *, lock: bool) -> int
             print(f"{what}: {e}; nothing to do")
             return 0 if what == "tick" else 1
         print(_line(report))
-        ok = _status(conn, report.run_id) == "ok" and not report.watch_error
+        ok = _status(conn, report.run_id) == "ok" and not report.watch_error and not report.check_error
         return 0 if ok else 1
     finally:
         conn.close()

@@ -155,6 +155,13 @@ class CommandTests(unittest.TestCase):
         self.assertIn("job alert: 3 new", cli._line(TickReport(**base, alerted=3)))
         self.assertIn("job alert failed: boom", cli._line(TickReport(**base, alert_error="boom")))
 
+    def test_the_tick_line_names_the_check_runs_or_error(self):
+        from outreach.crawl.tick import TickReport
+        base = dict(run_id=1, rebuilt=False)
+        self.assertNotIn("check now", cli._line(TickReport(**base)))
+        self.assertIn("check now: read_boards run 4", cli._line(TickReport(**base, check_runs=(4,))))
+        self.assertIn("check now failed: boom", cli._line(TickReport(**base, check_error="boom")))
+
     def test_tick_exits_0_when_another_tick_holds_the_lock(self):
         seed_board(self.conn, seed_company(self.conn, "Acme"))
         client = FakeClient({})

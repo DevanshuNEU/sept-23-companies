@@ -122,6 +122,8 @@ class TickReport:
     alerted: int = 0  # the postings the new-job notice announced this tick (#156)
     alert_error: str = ""  # the new-job alert failed (#156); the tick itself did not
     by_ats: dict[str, dict[str, int]] = field(default_factory=dict)
+    check_runs: tuple[int, ...] = ()  # the Check now runs (#194) this tick made, each its own `read_boards` run
+    check_error: str = ""  # a Check now run failed (#194); the tick itself did not
 
 
 class AlreadyRunning(Exception):
@@ -415,7 +417,9 @@ def _checkpoint(conn: sqlite3.Connection) -> None:
 def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callable[[str], list[BoardRow]], *,
                  cfg: CrawlConfig, rules_cfg, combiner, now_fn, clock, started: float,
                  rebuilt: bool, switched_off: int = 0,
-                 workers: Mapping[str, int] | None = None) -> tuple[TickReport, _Pass]:
+                 workers: Mapping[str, int] | None = None, budget_s: int | None = None,
+                 summary_extra: Mapping[str, object] | None = None,
+                 on_take: Callable[[_Pass, int, int], None] | None = None) -> tuple[TickReport, _Pass]:
     """One `read_boards` job run over `select(now)`. Once the budget is spent (or the pass stopped) no board is
     listed, and under `workers` no listed board still waiting for the writer is written: listing on threads is fast
     and writing (with its body fetches) is not, so the budget bounds both. A board listed but not written keeps its
@@ -423,19 +427,30 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
     `switched_off` is the count of boards `select` leaves out because their reader is off; it goes into the report
     as it is.
 
+    The budget is `budget_s` seconds from `started`, `cfg.tick_budget_s` when None (a Check now passes its own,
+    #194). `summary_extra` is added to the job summary (a Check now's `mode` and `requested_at`). `on_take(run,
+    total, taken)` is called on this thread once the boards are selected (`taken` 0) and after each board is taken,
+    so a caller can report progress; it may write the store.
+
     The lists go through `fanout.list_boards`: inline in board order when `workers` is None, else on worker threads
     (#158). Every write happens here, on the thread that owns `conn`, as each list comes back; the body fetches stay
     inside `read_board`. A ruleset change a worker meets is handled as one an ingest meets: no new board starts, the
     run ends `partial`, and the boards not written keep their `next_read_at`."""
+    budget = cfg.tick_budget_s if budget_s is None else budget_s
+    extra = dict(summary_extra or {})
     run_id = start_job(conn, "read_boards", ruleset_version())
     run = _Pass(conn, polite, cfg, rules_cfg, combiner, now_fn, run_id, clock)
     try:
         now = now_fn()
 
         def should_stop() -> bool:  # asked on worker threads: never touches the store
-            return run.stopped or clock() - started >= cfg.tick_budget_s
+            return run.stopped or clock() - started >= budget
 
-        listed = fanout.list_boards(select(now), run.start, lambda b: full_read_due(conn, b, now), workers=workers,
+        boards = select(now)
+        taken = 0
+        if on_take is not None:
+            on_take(run, len(boards), taken)
+        listed = fanout.list_boards(boards, run.start, lambda b: full_read_due(conn, b, now), workers=workers,
                                     should_stop=should_stop, clock=clock)
         with contextlib.closing(listed):  # a break or a raise stops the workers now, not when the frame is collected
             try:
@@ -445,6 +460,9 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
                     if workers is not None and should_stop():
                         break
                     run.take(item)
+                    taken += 1
+                    if on_take is not None:
+                        on_take(run, len(boards), taken)
             except RulesetNotCurrent:  # a worker met it; an ingest that met it first has said so already
                 if not run.stopped:
                     run.errors.append(_RULESET_CHANGED)
@@ -454,7 +472,7 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
         try:
             if conn.in_transaction:
                 conn.execute("ROLLBACK")
-            finish_job(conn, run_id, "failed", run.counts, describe_error(e))
+            finish_job(conn, run_id, "failed", {**run.counts, **extra}, describe_error(e))
         except Exception as finish_err:  # keep the original error as the one that propagates
             e.add_note(f"could not record the failed run: {describe_error(finish_err)}")
         raise
@@ -462,7 +480,8 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
                         seconds=round(clock() - started, 3), tripped=tuple(sorted(run.down)), by_ats=run.by_ats)
     summary = {k: v for k, v in asdict(report).items()
                if k not in ("watch", "watch_error", "probe", "probe_error", "feed", "feed_error", "alarm_error", "alerted",
-                            "alert_error")}
+                            "alert_error", "check_runs", "check_error")}
+    summary.update(extra)
     if run.failed_ids:
         summary["failed_boards"] = run.failed_ids
     status = "partial" if run.failed_ids or run.stopped else "ok"
@@ -550,11 +569,12 @@ def _alert_step(conn: sqlite3.Connection, now_fn, notifier: Notifier) -> tuple[i
 
 def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
     """Put the probe, watch, feed, alarm and alert passes into the tick's `read_boards` summary, so the health view reads one row:
-    each pass's counts (null when it did not run) and its error text."""
+    each pass's counts (null when it did not run) and its error text, and the Check now runs the tick made."""
     passes = {"probe": asdict(report.probe) if report.probe is not None else None, "probe_error": report.probe_error,
               "watch": asdict(report.watch) if report.watch is not None else None, "watch_error": report.watch_error,
               "feed": report.feed, "feed_error": report.feed_error, "alarm_error": report.alarm_error,
-              "alerted": report.alerted, "alert_error": report.alert_error}
+              "alerted": report.alerted, "alert_error": report.alert_error, "check_runs": list(report.check_runs),
+              "check_error": report.check_error}
     with atomic(conn, "tick_summary"):
         row = conn.execute("SELECT summary FROM job_run WHERE run_id = ?", (report.run_id,)).fetchone()
         summary = {**json.loads(row[0]), **passes}
@@ -571,13 +591,16 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
              combiner=None, now_fn: Callable[[], str] = utcnow, clock: Callable[[], float] = time.monotonic,
              sleep: Callable[[float], None] = time.sleep, limit: int | None = None,
              notifier: Notifier = _no_notice, workers: Mapping[str, int] | None = None) -> TickReport:
-    """One tick: the ruleset check, the due boards (at most `limit or cfg.boards_per_tick`, within the budget), then
-    the daily slug probe (Task 26a, `probe`), then the watched-page pass (Task 14), then the SimplifyJobs feed poll
-    (#153, `feed`), all through the same client and breaker; the watch pass is its own `watch_pages` run. A failed
-    probe, watch or feed pass is reported in `probe_error`, `watch_error` or `feed_error` and leaves the board reads
-    as they are. The pipeline alarms are checked next and may send one Mac notice a day through `notifier`; the new-job
-    alert (#156) comes last and sends at most one grouped notice every 15 minutes through the same `notifier`. The caller
-    holds `tick_lock`.
+    """One tick: the ruleset check, a Check now when one waits (#194), the due boards (at most `limit or
+    cfg.boards_per_tick`, within the budget), then the daily slug probe (Task 26a, `probe`), then the watched-page pass
+    (Task 14), then the SimplifyJobs feed poll (#153, `feed`), then another Check now when a request came in meanwhile,
+    all through the same client and breaker; the watch pass is its own `watch_pages` run, and each check its own
+    `read_boards` run (`check_all.run_pending_check`, listed in `check_runs`). A failed probe, watch, feed or check
+    pass is reported in `probe_error`, `watch_error`, `feed_error` or `check_error` and leaves the board reads as they
+    are. The first check's time is not counted in the tick's budget, so a check never eats the tick's own pass. The
+    pipeline alarms are checked next and may send one Mac notice a day through `notifier`; the new-job alert (#156) comes last and
+    sends at most one grouped notice every 15 minutes through the same `notifier`, so it covers what a check found.
+    The caller holds `tick_lock`.
 
     `combiner=None` means `resolve_combiner(conn)`. `clock` and `sleep` drive the budget and the polite spacing.
     `workers` (the `[workers]` table, #158) lists the boards on that many threads per ATS; None lists them one by one
@@ -596,7 +619,22 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
             return due_boards(conn, now, supported=reading_ats(cfg), plan_ids=plan_company_ids(conn, plan_date(now)),
                               cfg=cfg, limit=limit or cfg.boards_per_tick)
 
+        from outreach.crawl.check_all import run_pending_check  # check_all builds on this module
         off = len(switched_off_boards(conn, cfg.ats_off))
+        check_runs: list[int] = []
+        check_errors: list[str] = []
+
+        def check() -> None:
+            run_id, error = run_pending_check(conn, polite, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
+                                              now_fn=now_fn, clock=clock, switched_off=off, workers=workers)
+            if run_id is not None:
+                check_runs.append(run_id)
+            if error:
+                check_errors.append(error)
+
+        before = clock()
+        check()
+        started += clock() - before  # the check's time is not the tick's: its own pass keeps its whole budget
         report, run = _read_boards(conn, polite, select, cfg=cfg, rules_cfg=rules_cfg, combiner=combiner,
                                    now_fn=now_fn, clock=clock, started=started, rebuilt=rebuilt, switched_off=off,
                                    workers=workers)
@@ -610,6 +648,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
             report = replace(report, watch_error=describe_error(e))
         feed, feed_error = _feed_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, feed=feed, feed_error=feed_error)
+        check()  # a request that came in while the tick ran
+        report = replace(report, check_runs=tuple(check_runs), check_error="; ".join(check_errors))
         report = replace(report, alarm_error=_alarm_step(conn, cfg, now_fn, notifier))
         alerted, alert_error = _alert_step(conn, now_fn, notifier)
         report = replace(report, alerted=alerted, alert_error=alert_error)

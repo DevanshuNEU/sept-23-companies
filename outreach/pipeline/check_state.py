@@ -1,9 +1,13 @@
 """Check now (#194, design 4.3): what a check is doing, read from the store.
 
 The API records a request as an `event` (entity `source`, kind `check_now_requested`, actor `devanshu`). The crawl
-job, which runs the check, keeps its progress in one `pipeline_meta` row (`PROGRESS_KEY`) as JSON
-`{run_id, checked, total, new, started_at, finished_at, paused_hosts}`: written when the check starts, updated as it
-goes, given a `finished_at` when it ends. Reads only. Times are canonical UTC text, so they compare as text.
+job, which runs the check (`outreach.crawl.check_all`), keeps its progress in one `pipeline_meta` row (`PROGRESS_KEY`)
+as JSON `{run_id, checked, total, new, started_at, finished_at, paused_hosts, request_event_id}`: written when the
+check starts, updated as it goes, given a `finished_at` when it ends. Reads only. Times are canonical UTC text, so
+they compare as text.
+
+A check claims requests by event id: `request_event_id` is the request it serves, and it takes every request up to
+that id. A request with a higher id is still waiting, even one made in the same second the check ended.
 
 A run that never wrote its end (the crawler died) is stale once its `started_at` is older than the crawl config's
 `check_budget_s` plus `STALE_GRACE_S`: it reads as idle, so a new click can start a check.
@@ -19,6 +23,13 @@ from outreach.store.timefmt import ISO_FMT, utcnow
 PROGRESS_KEY = "check_progress"
 REQUEST_KIND = "check_now_requested"
 STALE_GRACE_S = 300  # a run with no end is stale once it is older than `check_budget_s` plus this
+
+
+@dataclass(frozen=True)
+class Request:
+    """One `check_now_requested` event: its id (what a check claims) and when it was made."""
+    event_id: int
+    at: str
 
 
 @dataclass(frozen=True)
@@ -57,14 +68,18 @@ def _stale(last: dict, now: str, budget_s: int) -> bool:
     return at - begun > timedelta(seconds=budget_s + STALE_GRACE_S)
 
 
-def pending_request(conn: sqlite3.Connection) -> str | None:
-    """The newest request time that is newer than the last check's end (or, for a run with no end, its start), else
-    None: a run has taken the requests made before it began."""
-    last = progress(conn)
-    finished = (last.get("finished_at") or last.get("started_at")) if last else None
-    row = conn.execute("SELECT max(at) FROM event WHERE entity = 'source' AND kind = ? AND (? IS NULL OR at > ?)",
-                       (REQUEST_KIND, finished, finished)).fetchone()
-    return row[0]
+def claimed_id(last: dict | None) -> int:
+    """The highest request event id a check has claimed (`request_event_id` of the progress row), else 0."""
+    value = last.get("request_event_id") if last else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def pending_request(conn: sqlite3.Connection) -> Request | None:
+    """The newest request whose event id is above the one the last check claimed, else None: a check takes every
+    request up to the one it serves, whatever their times."""
+    row = conn.execute("SELECT event_id, at FROM event WHERE entity = 'source' AND kind = ? AND event_id > ? "
+                       "ORDER BY event_id DESC LIMIT 1", (REQUEST_KIND, claimed_id(progress(conn)))).fetchone()
+    return Request(event_id=row[0], at=row[1]) if row is not None else None
 
 
 def status(conn: sqlite3.Connection, now: str | None = None, budget_s: int | None = None) -> CheckStatus:

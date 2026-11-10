@@ -325,3 +325,43 @@ class YardstickMigrationTest(unittest.TestCase):
         self.conn.execute("INSERT INTO pipeline_meta(key, value) VALUES ('feed_etag', 'W/\"1\"')")
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("INSERT INTO pipeline_meta(key, value) VALUES ('feed_etag', 'x')")
+
+
+class BoardCandidateMigrationTest(unittest.TestCase):
+    """0008 only adds `board_candidate` (#192, the shape #160 planned); nothing is rebuilt."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        self.addCleanup(self.conn.close)
+
+    def insert(self, ats="greenhouse", token="acme", **extra):
+        cols = {"ats": ats, "token": token, "source": "stapply", "found_at": "2026-11-10T10:00:00Z", **extra}
+        self.conn.execute(f"INSERT INTO board_candidate({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                          tuple(cols.values()))
+
+    def test_0008_creates_board_candidate(self):
+        names = [(r[0], r[1]) for r in self.conn.execute("SELECT version, name FROM schema_migration")]
+        self.assertIn((8, "board_candidate"), names)
+        strict = {r[1]: r[5] for r in self.conn.execute("PRAGMA table_list")}
+        self.assertEqual(strict["board_candidate"], 1)
+        self.insert()
+        row = self.conn.execute("SELECT name, url, domain, source_ref, priority, gated_at, gate_result, "
+                                "open_us_engineering, board_id FROM board_candidate").fetchone()
+        self.assertEqual(tuple(row), ("", "", None, "", 0, None, None, None, None))
+
+    def test_a_board_is_listed_once_per_ats_and_token(self):
+        self.insert()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.insert()
+        self.insert(ats="ashby")
+
+    def test_gate_result_and_times_are_checked(self):
+        at = "2026-11-10T11:00:00Z"
+        for result in ("promoted", "no_us_engineering", "dead", "error", "known"):
+            self.insert(token=result, gated_at=at, gate_result=result)
+        for extra in ({"gated_at": at, "gate_result": "maybe"}, {"gated_at": at},
+                      {"gate_result": "dead"}, {"found_at": "yesterday"},
+                      {"gated_at": "2026-11-10 11:00:00", "gate_result": "dead"},
+                      {"gated_at": at, "gate_result": "dead", "open_us_engineering": -1}):
+            with self.subTest(extra=extra), self.assertRaises(sqlite3.IntegrityError):
+                self.insert(token="x", **extra)

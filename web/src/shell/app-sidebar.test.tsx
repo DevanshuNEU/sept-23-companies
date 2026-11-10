@@ -197,6 +197,23 @@ describe('AppShell sidebar', () => {
     expect(sending.className).not.toContain('font-semibold');
   });
 
+  it('reads the last board read from the crawler\'s read_boards run, which is the name it writes', async () => {
+    const db = buildFixture();
+    const crawl = db.shell.jobs.find((j) => j.job === 'crawl')!;
+    db.shell = { ...db.shell, jobs: db.shell.jobs.map((j) => (j === crawl ? { ...crawl, job: 'read_boards' as const } : j)) };
+    await shell('/today', new FixtureClient(db));
+    expect(screen.getByRole('button', { name: 'Boards read Mon 08:04' })).toBeInTheDocument();
+  });
+
+  it('keeps the last-runs popover inside the window and scrollable', async () => {
+    await shell();
+    fireEvent.click(screen.getByRole('button', { name: 'Boards read Mon 08:04' }));
+    const pop = await screen.findByRole('dialog');
+    expect(within(pop).getByText('Last runs')).toBeInTheDocument();
+    expect(pop.className).toContain('max-h-(--radix-popover-content-available-height)');
+    expect(pop).toHaveClass('overflow-y-auto');
+  });
+
   it('shows the scorecard line under "Boards read", in the same muted style', async () => {
     await shell();
     const line = screen.getByText('Coverage 32%, level 51%');
@@ -330,15 +347,15 @@ describe('AppShell sidebar', () => {
 
     const board = within(pop).getByRole('listitem', { name: 'Board read' });
     expect(within(board).getByText('Mon Nov 9, 08:04')).toBeInTheDocument();
-    expect(within(board).getByText('Finished')).toBeInTheDocument();
-    expect(within(board).getByText('Boards read 871, Empty 1, Errors 1')).toBeInTheDocument();
     expect(within(board).queryByText('Late')).toBeNull();
+    expect(within(board).queryByText('Boards read 871, Empty 1, Errors 1')).toBeNull();
 
     for (const name of ['Daily list', 'Sender', 'Import']) {
       expect(within(pop).getByRole('listitem', { name })).toBeInTheDocument();
     }
 
-    const rebuild = within(pop).getByRole('listitem', { name: 'Rebuild' });
+    const look = within(pop).getByRole('list', { name: 'Needs a look' });
+    const rebuild = within(look).getByRole('listitem', { name: 'Rebuild' });
     expect(within(rebuild).getByText('Late').closest('[data-slot="badge"]')).toHaveAttribute('data-variant', 'warn');
     expect(within(rebuild).getByText('Expected Sun Nov 8, 07:00')).toHaveClass('text-warn');
     expect(within(rebuild).getByText('Postings classified 3,190')).toBeInTheDocument();

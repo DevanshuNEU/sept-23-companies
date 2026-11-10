@@ -17,18 +17,20 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { StatusBadge } from '@/components/status-badge';
-import { formatDayTime, formatMonth, formatWeekdayTime } from '@/lib/format';
-import { jobKindLabel, jobStatus, type Tone } from '@/lib/status';
+import { formatMonth, formatWeekdayTime } from '@/lib/format';
+import type { Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
 import { useTheme } from '@/theme/theme';
 import { KTile } from './k-tile';
+import { LastRuns } from './last-runs';
 import { useRecentCompanies } from './recent';
 
 // Hover is a soft wash; the current view is a full wash, a 2px brand bar on the left and a brand icon.
 const ITEM =
   "relative h-8 gap-2 px-2 text-sm before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full hover:bg-sidebar-accent/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:hover:bg-sidebar-accent aria-[current=page]:before:bg-brand [&>svg]:text-muted-foreground aria-[current=page]:[&>svg]:text-brand";
+// A footer popover opens upward: it stops at the top of the window and scrolls inside instead of running off it.
+const POPOVER_FITS = 'w-80 max-h-(--radix-popover-content-available-height) overflow-y-auto';
 const COUNT = 'ml-auto text-xs text-muted-foreground tabular-nums';
 const DOT: Record<Tone, string> = {
   ok: 'bg-ok-dot',
@@ -227,31 +229,10 @@ function RecentItems() {
   );
 }
 
-function JobRun({ job }: { job: JobRunSummary }) {
-  const label = jobKindLabel[job.job];
-  const counts = job.counts.map((c) => `${c.label} ${c.value.toLocaleString('en-US')}`).join(', ');
-  return (
-    <li aria-label={label} className="grid gap-1 py-2.5 first:pt-0 last:pb-0">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="ml-auto flex gap-1">
-          {job.late ? <StatusBadge status={jobStatus.late} /> : null}
-          <StatusBadge status={jobStatus[job.status]} />
-        </span>
-      </div>
-      <p className="text-xs text-muted-foreground tabular-nums">{formatDayTime(job.startedAt)}</p>
-      {counts ? <p className="text-xs text-muted-foreground">{counts}</p> : null}
-      {job.error ? <p className="text-xs text-bad">{job.error}</p> : null}
-      {job.late && job.expectedNextAt ? (
-        <p className="text-xs text-warn">Expected {formatDayTime(job.expectedNextAt)}</p>
-      ) : null}
-    </li>
-  );
-}
-
 /** "Boards read Mon 08:04", which opens the last run of every job. */
 function BoardsRead({ jobs }: { jobs: JobRunSummary[] }) {
-  const crawl = jobs.find((j) => j.job === 'crawl');
+  // The crawler records its runs as read_boards; the first match is the newest, since the list is newest first.
+  const crawl = jobs.find((j) => j.job === 'read_boards' || j.job === 'crawl');
   const tone: Tone = !crawl ? 'idle' : crawl.status === 'failed' ? 'bad' : crawl.late ? 'warn' : 'idle';
   const text = crawl ? `Boards read ${formatWeekdayTime(crawl.startedAt)}` : 'Boards not read yet';
   return (
@@ -269,13 +250,8 @@ function BoardsRead({ jobs }: { jobs: JobRunSummary[] }) {
           {text}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-80">
-        <p className="mb-3 text-sm font-semibold">Last runs</p>
-        <ul className="divide-y">
-          {jobs.map((job) => (
-            <JobRun key={job.job} job={job} />
-          ))}
-        </ul>
+      <PopoverContent side="top" align="start" collisionPadding={8} className={POPOVER_FITS}>
+        <LastRuns jobs={jobs} />
       </PopoverContent>
     </Popover>
   );
@@ -306,7 +282,7 @@ function PipelineScore({ line }: { line: PipelineLine }) {
           {line.text}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-80">
+      <PopoverContent side="top" align="start" collisionPadding={8} className={POPOVER_FITS}>
         <p className="mb-3 text-sm font-semibold">Pipeline alarms</p>
         <ul className="grid gap-2 text-sm">
           {line.alarms.map((alarm) => (

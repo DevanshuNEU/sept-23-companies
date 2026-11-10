@@ -57,6 +57,11 @@ class Stats:
             self.now[ats] -= 1
 
 
+def listing_threads():
+    """The fan-out's own worker threads still alive (other modules' threads do not count)."""
+    return [t.name for t in threading.enumerate() if t.name.startswith("list-")]
+
+
 def run(boards, *, workers, hook=None, full=lambda b: False, should_stop=lambda: False, start=None, stats=None):
     stats = stats or Stats()
     start = start or (lambda b: (FakeAdapter(b.ats, stats, hook), object()))
@@ -206,27 +211,46 @@ class ListBoardsTests(unittest.TestCase):
                 self.assertIsNone(by_id[1].tripped)
                 self.assertIs(by_id[2].result, EMPTY)
 
-    def test_an_unexpected_failure_reaches_the_calling_thread_and_stops_the_workers(self):
-        before = threading.active_count()
+    def test_an_unexpected_failure_reaches_the_calling_thread_and_stops_the_other_workers(self):
+        # Worker A holds t0 until released. Worker B takes t1 and fails, after A has started t0. Eight boards wait in the
+        # queue. Once the abort is certainly set, A is released: it must start none of them.
+        t0_started, failing, release = threading.Event(), threading.Event(), threading.Event()
+        calls = []
 
         def hook(ats, token):
-            if token == "t3":
+            if token == "t0":
+                calls.append(token)
+                t0_started.set()
+                release.wait(10)
+            elif token == "t1":
+                t0_started.wait(10)
+                calls.append(token)
+                failing.set()
                 raise RulesetNotCurrent("changed under us")
-            time.sleep(0.002)
+            else:
+                calls.append(token)
             return EMPTY
 
-        boards = [board(i, "greenhouse") for i in range(30)]
+        def release_later():
+            # The generator cannot return from its failure until A is joined, so nothing the test can see comes
+            # after the abort is set. The wait is one-sided: too short could only fail the test, never pass it wrongly.
+            failing.wait(10)
+            time.sleep(0.3)
+            release.set()
+
+        helper = threading.Thread(target=release_later)
+        helper.start()
         stats = Stats()
+        boards = [board(i, "greenhouse") for i in range(10)]
         gen = list_boards(boards, lambda b: (FakeAdapter(b.ats, stats, hook), object()), lambda b: False,
-                          workers=WORKERS, should_stop=lambda: False, clock=time.monotonic)
+                          workers={"default": 2}, should_stop=lambda: False, clock=time.monotonic)
         with self.assertRaises(RulesetNotCurrent):
             list(gen)
-        self.assertEqual(threading.active_count(), before, "no worker is left running")
-        self.assertLess(sum(stats.peak.values()), 30)
+        helper.join()
+        self.assertEqual(calls, ["t0", "t1"], "a worker started a board after another worker failed")
+        self.assertEqual(listing_threads(), [], "no worker is left running")
 
     def test_an_unexpected_failure_in_start_surfaces_and_leaves_no_thread(self):
-        before = threading.active_count()
-
         def start(b):
             if b.board_id == 5:
                 raise RuntimeError("store read failed")
@@ -235,15 +259,14 @@ class ListBoardsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             list(list_boards([board(i) for i in range(10)], start, lambda b: False, workers=WORKERS,
                              should_stop=lambda: False, clock=time.monotonic))
-        self.assertEqual(threading.active_count(), before)
+        self.assertEqual(listing_threads(), [])
 
     def test_closing_the_generator_early_joins_the_workers(self):
-        before = threading.active_count()
         gen = list_boards([board(i) for i in range(30)], lambda b: (FakeAdapter(b.ats, Stats()), object()),
                           lambda b: False, workers=WORKERS, should_stop=lambda: False, clock=time.monotonic)
         next(gen)
         gen.close()
-        self.assertEqual(threading.active_count(), before)
+        self.assertEqual(listing_threads(), [])
 
     def test_no_boards_yields_nothing(self):
         for workers in (None, WORKERS):

@@ -12,8 +12,9 @@ is open.
 `board_candidate` row per board, and gates each one with one list request. The requests go through the crawler's
 `PoliteClient` (the crawl config's spacing and breaker) and `fanout.list_boards`; every write happens on the calling
 thread, under the crawler's `crawl.lock`, so the seed never sends alongside a tick. A promoted board joins the one
-stored company whose name has the row's `board_match_key` (as find-boards attaches a stapply hit), else identity makes
-or finds its company; its board row has no `next_read_at`, so the next tick or Check now reads it in full. A rejected,
+stored company whose name has the row's `board_match_key` when that key is on at most `MAX_HITS` rows (as find-boards
+guards a stapply hit), else identity makes or finds its company (see `_promote`); its board row has no
+`next_read_at`, so the next tick or Check now reads it in full. A rejected,
 dead or failed gate writes only its candidate row. The first full seed is Devanshu's call, by hand (`seed-ats`); after
 one has finished, run-due tops it up once a week, after find-boards (`top_up_due`), with the limit from
 `ats_seed.toml`.
@@ -26,8 +27,8 @@ import sqlite3
 import time
 import tomllib
 import urllib.parse
-from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -51,7 +52,7 @@ from outreach.sources.base import Candidate
 from outreach.sources.boards import BoardRef, add_board
 from outreach.sources.jobs import _company_names  # the names find-boards matches a stapply row on
 from outreach.sources.keys import classify_domain, registrable_domain
-from outreach.sources.stapply import MIN_KEY, board_match_key, list_rows
+from outreach.sources.stapply import MAX_HITS, MIN_KEY, board_match_key, list_rows
 from outreach.store import append_event, transaction
 
 __all__ = ["SEED_ATS", "CONFIG_PATH", "DEAD_STATUSES", "TOP_UP_DAYS", "Gate", "SeedConfig",
@@ -204,53 +205,64 @@ class _NotAdded(Exception):
     """`add_board` did not add the board (another writer has it since the run read the store): undo the unit."""
 
 
-def _name_owners(conn: sqlite3.Connection) -> dict[str, set[int]]:
-    """`board_match_key` -> the stored companies (not merged, not removed) with a name, legal name or dba of that
-    key: the key find-boards matches a stapply row on. A key under `MIN_KEY` characters never matches."""
-    owners: dict[str, set[int]] = defaultdict(set)
-    for r in conn.execute("SELECT company_id, name FROM company WHERE merged_into IS NULL AND status <> 'removed'"):
+def _name_owners(conn: sqlite3.Connection) -> dict[str, dict[int, str]]:
+    """`board_match_key` -> {company id: status} for the stored companies (not merged, not removed) with a name,
+    legal name or dba of that key: the key find-boards matches a stapply row on. A key under `MIN_KEY` characters
+    never matches."""
+    owners: dict[str, dict[int, str]] = defaultdict(dict)
+    for r in conn.execute("SELECT company_id, name, status FROM company "
+                          "WHERE merged_into IS NULL AND status <> 'removed'"):
         for name in _company_names(conn, r["company_id"], r["name"]):
             key = board_match_key(name)
             if len(key) >= MIN_KEY:
-                owners[key].add(r["company_id"])
+                owners[key][r["company_id"]] = r["status"]
     return owners
 
 
-def _promote(conn: sqlite3.Connection, row: _Row, verdict: Gate, now: str, owners: dict[str, set[int]]) -> bool:
-    """The board, its company and the verdict, as one unit. When the row's name key belongs to exactly one stored
-    company, the board joins it (as find-boards attaches a stapply hit); with none or several, identity makes or
-    finds the company (the same domain is the same company). When `add_board` adds nothing (the board is someone
-    else's by now), the unit is undone and the row is recorded `known`. Returns whether the board was added."""
+def _promote(conn: sqlite3.Connection, row: _Row, verdict: Gate, now: str, owners: dict[str, dict[int, str]],
+             key_rows: Counter) -> bool:
+    """The board, its company and the verdict, as one unit. Returns whether the board was added.
+
+    The row's stapply name key decides the company, as find-boards guards a stapply hit. A key some closed company
+    holds makes the row `known`: the seed never revives or duplicates a company he closed. A key on at most `MAX_HITS`
+    rows of the lists being seeded, held by exactly one stored company, joins it (`found_by` `stapply_name`).
+    Otherwise identity makes or finds the company, named as the board names itself when the gate saw a name, else as
+    the list does; a company it makes from this board gets `found_by` `import` (no name guess). The `owners` were read
+    before the gating, so a company the seed makes never takes a later row of its name: that row goes through
+    identity, which raises its weak-name merge item. When `add_board` adds nothing (the board is someone else's by
+    now), the unit is undone and the row is recorded `known`."""
     ref = BoardRef(row.ats, row.token)
     ats_key = f"{row.ats}:{row.token}"
-    name = row.name or verdict.board_name or row.token
-    key = board_match_key(name)
-    matched = owners.get(key, set()) if len(key) >= MIN_KEY else set()
+    key = board_match_key(row.name)
+    held = owners.get(key, {}) if len(key) >= MIN_KEY else {}
+    if "closed" in held.values():
+        with transaction(conn):
+            _verdict(conn, row, now, "known", None, None)
+        return False
+    joined = next(iter(held)) if len(held) == 1 and key_rows[key] <= MAX_HITS else None
     try:
         with transaction(conn):
             conn.execute("INSERT INTO source(source_name, version) VALUES (?, ?) "
                          "ON CONFLICT(source_name) DO NOTHING", (_SOURCE, _SOURCE_VERSION))
-            if len(matched) == 1:
-                company_id = next(iter(matched))
+            if joined is not None:
+                company_id, found_by = joined, "stapply_name"
                 conn.execute(
                     "INSERT INTO company_source(company_id, source_name, source_ref, first_seen_at, last_seen_at) "
                     "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING", (company_id, _SOURCE, ats_key, now, now))
             else:
+                name = verdict.board_name.strip() or row.name or row.token
                 evidence = (EvidenceDraft("domain", row.domain, "estimate", _SOURCE, row.url),) if row.domain else ()
-                company_id = resolve_candidate(conn, Candidate(name=name, domain=row.domain, keys={"ats": ats_key},
-                                                               evidence=evidence, source_ref=ats_key),
-                                               source_name=_SOURCE).company_id
-            if add_board(conn, company_id, ref, via="ats_seed", matched_on="name" if len(matched) == 1 else "gate",
-                         found_by="stapply_name", actor="source", now=now) != "added":
+                res = resolve_candidate(conn, Candidate(name=name, domain=row.domain, keys={"ats": ats_key},
+                                                        evidence=evidence, source_ref=ats_key), source_name=_SOURCE)
+                company_id, found_by = res.company_id, "import" if res.created else "stapply_name"
+            if add_board(conn, company_id, ref, via="ats_seed", matched_on="name" if joined is not None else "gate",
+                         found_by=found_by, actor="source", now=now) != "added":
                 raise _NotAdded
-            board_id = _board_id(conn, ref)
-            _verdict(conn, row, now, "promoted", verdict.open_us_engineering, board_id)
+            _verdict(conn, row, now, "promoted", verdict.open_us_engineering, _board_id(conn, ref))
     except _NotAdded:
         with transaction(conn):
             _verdict(conn, row, now, "known", None, _board_id(conn, ref))
         return False
-    if len(key) >= MIN_KEY:
-        owners[key].add(company_id)  # a later row of this name joins it
     return True
 
 
@@ -277,7 +289,8 @@ def _plan(conn: sqlite3.Connection, folder: Path, ats: tuple[str, ...], now: str
 
 def run_seed(conn: sqlite3.Connection, client: HttpClient, *, folder: Path, now: str,
              ats: Sequence[str] = SEED_ATS, limit: int | None = None, dry_run: bool = False,
-             workers: Mapping[str, int] | None = None, config: SeedConfig | None = None) -> SeedReport:
+             workers: Mapping[str, int] | None = None, config: SeedConfig | None = None,
+             say: Callable[[str], None] | None = None) -> SeedReport:
     """Gate the boards of the stapply lists in `folder` for each of `ats` (a subset of `SEED_ATS`).
 
     A row whose board the store already has is `known` and sends nothing (its candidate row says `known` unless it
@@ -286,7 +299,8 @@ def run_seed(conn: sqlite3.Connection, client: HttpClient, *, folder: Path, now:
     tripped bucket ends its ATS's gating for the run; its rows stay as they were and count in `left`. `dry_run` sends
     nothing and writes nothing. Otherwise the run holds the crawler's `crawl.lock` from its first write to its last,
     so it never sends alongside a tick or a Check now: `AlreadyRunning`, before any write, when one holds it.
-    `workers` as in `fanout.list_boards` (None lists one by one). A non-dry run ends with one `source` /
+    `workers` as in `fanout.list_boards` (None lists one by one). `say` gets one line before the gating (and in a
+    dry run): the due rows per list, the known rows and the limit. A non-dry run ends with one `source` /
     `ats_seed_run` event holding the report, the limit and the lists read. `ValueError` for an ATS outside
     `SEED_ATS`, a limit under 1, a missing list or an open transaction (the run sends requests)."""
     ats = tuple(ats)
@@ -300,10 +314,24 @@ def run_seed(conn: sqlite3.Connection, client: HttpClient, *, folder: Path, now:
     retry_days = (config or load_seed_config()).retry_days
     if dry_run:
         rows, known, due = _plan(conn, Path(folder), ats, now, retry_days, dry_run=True)
+        if say is not None:
+            say(_start_line(ats, rows, known, due, limit, dry_run=True))
         return SeedReport(read=len(rows), promoted=0, rejected=0, dead=0, errors=0, known=len(known), left=len(due))
     with _store_lock(conn):
         rows, known, due = _plan(conn, Path(folder), ats, now, retry_days, dry_run=False)
+        if say is not None:
+            say(_start_line(ats, rows, known, due, limit, dry_run=False))
         return _gate_rows(conn, client, rows, known, due, now=now, ats=ats, limit=limit, workers=workers)
+
+
+def _start_line(ats: tuple[str, ...], rows: list[_Row], known: list, due: list[_Row], limit: int | None, *,
+                dry_run: bool) -> str:
+    per = Counter(r.ats for r in due)
+    text = (f"{len(due)} due ({', '.join(f'{a} {per[a]}' for a in ats)}) of {len(rows)} rows read, "
+            f"{len(known)} known")
+    if dry_run:
+        return text + "; dry run: nothing is sent or written"
+    return text + (f"; gating at most {limit}" if limit is not None else "; gating them all")
 
 
 def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], known: list[tuple[_Row, int | None]],
@@ -317,7 +345,8 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
     counts = {"promoted": 0, "no_us_engineering": 0, "dead": 0, "error": 0, "known": len(known)}
     left = len(due) - len(gating)
     tripped: set[str] = set()
-    owners: dict[str, set[int]] | None = None  # read at the first promotion: most runs promote few
+    owners: dict[str, dict[int, str]] | None = None  # read at the first promotion, then never added to
+    key_rows = Counter(board_match_key(r.name) for r in rows)  # how many rows of these lists carry each name key
     polite = client if isinstance(client, PoliteClient) else PoliteClient(client, load_crawl_config())
     rules_cfg = default_config()
     listed = fanout.list_boards(gating, lambda row: (adapter_for(row.ats, polite), None), lambda row: True,
@@ -333,7 +362,7 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
             if verdict.result == "promoted":
                 if owners is None:
                     owners = _name_owners(conn)
-                counts["promoted" if _promote(conn, item.board, verdict, now, owners) else "known"] += 1
+                counts["promoted" if _promote(conn, item.board, verdict, now, owners, key_rows) else "known"] += 1
                 continue
             counts[verdict.result] += 1
             count = None if verdict.result == "error" else verdict.open_us_engineering

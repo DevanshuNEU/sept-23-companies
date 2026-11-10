@@ -164,7 +164,7 @@ class SeedRunTest(unittest.TestCase):
         beta = self.candidate("greenhouse", "betalabs")
         self.assertEqual((beta["gate_result"], beta["open_us_engineering"], beta["board_id"]),
                          ("no_us_engineering", 0, None))
-        self.assertEqual(self.board("ashby", "gamma")["found_by"], "stapply_name")
+        self.assertEqual(self.board("ashby", "gamma")["found_by"], "import")  # its company was made from it
         self.assertEqual(sorted(self.client.requests), sorted(self.routes))
 
     def test_rejected_and_dead_rows_write_only_their_candidate_row(self):
@@ -292,12 +292,54 @@ class SeedRunTest(unittest.TestCase):
         self.assertNotIn(company, (first, second))
         self.assertEqual(self.count("SELECT count(*) FROM company"), 3)
 
-    def test_two_lists_naming_one_company_make_one_company(self):
-        self.write("ashby", "Acme,acmehq,https://jobs.ashbyhq.com/acmehq\n")
-        self.routes[ASHBY.format("acmehq")] = ashby_answer(US_ENG)
-        report = self.run_seed()
-        self.assertEqual(report.promoted, 2)
-        self.assertEqual(self.board("greenhouse", "acme")["company_id"], self.board("ashby", "acmehq")["company_id"])
+    def same_name_rows(self, n, name="Relay"):
+        tokens = [f"relay{i}" for i in range(n)]
+        self.write("greenhouse", "".join(f"{name},{t},https://boards.greenhouse.io/{t}\n" for t in tokens))
+        self.routes = {GH.format(t): gh_answer(US_ENG, name="") for t in tokens}
+        return tokens
+
+    def test_same_name_rows_with_no_stored_owner_make_one_company_each(self):
+        tokens = self.same_name_rows(5)
+        report = self.run_seed(ats=("greenhouse",))
+        self.assertEqual(report.promoted, 5)
+        owners = {self.board("greenhouse", t)["company_id"] for t in tokens}
+        self.assertEqual(len(owners), 5)  # a company the seed made never takes a later row of its name
+        self.assertTrue(all(self.board("greenhouse", t)["found_by"] == "import" for t in tokens))
+        self.assertGreater(self.count("SELECT count(*) FROM review_item WHERE kind = 'merge_candidate'"), 0)
+
+    def test_a_name_on_four_rows_never_joins_its_one_stored_owner(self):
+        stored = seed_company(self.conn, "Relay Inc")
+        tokens = self.same_name_rows(4)
+        self.run_seed(ats=("greenhouse",))
+        owners = {self.board("greenhouse", t)["company_id"] for t in tokens}
+        self.assertNotIn(stored, owners)
+        self.assertEqual(len(owners), 4)
+
+    def test_a_name_on_three_rows_joins_its_one_stored_owner(self):
+        stored = seed_company(self.conn, "Relay Inc")
+        tokens = self.same_name_rows(3)
+        self.run_seed(ats=("greenhouse",))
+        self.assertEqual({self.board("greenhouse", t)["company_id"] for t in tokens}, {stored})
+        self.assertEqual({self.board("greenhouse", t)["found_by"] for t in tokens}, {"stapply_name"})
+
+    def test_a_closed_owner_makes_the_row_known(self):
+        closed = seed_company(self.conn, "Acme Inc")
+        self.conn.execute("UPDATE company SET status = 'closed', close_reason = 'no_referrals' WHERE company_id = ?",
+                          (closed,))
+        companies = self.count("SELECT count(*) FROM company")
+        report = self.run_seed(ats=("greenhouse",))
+        self.assertEqual((report.known, report.promoted), (1, 0))
+        acme = self.candidate("greenhouse", "acme")
+        self.assertEqual((acme["gate_result"], acme["board_id"]), ("known", None))
+        self.assertIsNone(self.board("greenhouse", "acme"))
+        self.assertEqual(self.count("SELECT count(*) FROM company"), companies)
+
+    def test_a_new_company_takes_the_board_name_the_gate_saw(self):
+        self.routes[GH.format("acme")] = gh_answer(US_ENG, name="Acme Robotics, Inc.")
+        self.run_seed(ats=("greenhouse",))
+        board = self.board("greenhouse", "acme")
+        name = self.conn.execute("SELECT name FROM company WHERE company_id = ?", (board["company_id"],)).fetchone()[0]
+        self.assertEqual((name, board["found_by"]), ("Acme Robotics, Inc.", "import"))
 
     def test_a_board_another_writer_added_is_known_and_nothing_half_written(self):
         other = seed_company(self.conn, "Other Co")
@@ -311,6 +353,15 @@ class SeedRunTest(unittest.TestCase):
                          ("known", board_id, None))
         after = {t: self.count(f"SELECT count(*) FROM {t}") for t in ("company", "board", "review_item", "event")}
         self.assertEqual(after, {**before, "event": before["event"] + 1})  # the run's own event only
+
+    def test_the_run_says_what_is_due_before_it_gates(self):
+        lines = []
+        self.run_seed(dry_run=True, say=lines.append)
+        self.run_seed(limit=2, say=lines.append)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("3 due (greenhouse 2, ashby 1)", lines[0])
+        self.assertIn("dry run", lines[0])
+        self.assertIn("at most 2", lines[1])
 
     def test_the_crawler_running_stops_the_seed_before_any_write(self):
         path = self.conn.execute("PRAGMA database_list").fetchone()[2]

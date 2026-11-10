@@ -155,7 +155,7 @@ def _seed(conn: sqlite3.Connection, factory: ClientFactory, *, ats: Sequence[str
     polite = PoliteClient(factory("declared", timeout_s=cfg.timeout_s, max_bytes=cfg.max_bytes,
                                   max_redirects=cfg.max_redirects, spaced=False), cfg)
     report = run_seed(conn, polite, folder=sources_dir() / "stapply", now=utcnow(), ats=ats, limit=limit,
-                      dry_run=dry_run, workers=cfg.workers, config=config)
+                      dry_run=dry_run, workers=cfg.workers, config=config, say=lambda t: _say(f"seed-ats: {t}"))
     status = "partial" if report.tripped else "ok"
     if report.tripped:
         _say(f"seed-ats: {', '.join(report.tripped)} tripped; {report.left} rows left for the next run")
@@ -344,7 +344,8 @@ Commands:
   seed-ats [--ats greenhouse|ashby] [--limit N] [--dry-run]
                                              gate every board the stapply Greenhouse and Ashby lists name with one
                                              list request; a board with an open US engineering role becomes a
-                                             company and a board. --dry-run counts the rows and sends nothing
+                                             company and a board. --dry-run counts the rows and sends nothing.
+                                             Only a run of both lists with no --limit counts as the full seed
   run-due                                    what launchd runs daily: this month's HN thread (once it is out),
                                              freehire, Form D (when SEC has a newer quarterly set), the stapply lists
                                              (weekly), resolve, find-boards --max-careers 100, the seed-ats top-up
@@ -390,8 +391,10 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument("--state")
     add.add_argument("--ats", help="a board as ats:token, such as lever:acme")
     seed = sub.add_parser("seed-ats", help="gate the stapply Greenhouse and Ashby boards")
-    seed.add_argument("--ats", choices=SEED_ATS, help="one list only (default: both)")
-    seed.add_argument("--limit", type=int, help="gate at most N boards this run (default: every due one)")
+    seed.add_argument("--ats", choices=SEED_ATS, help="one list only (default: both; a one-list run is never the full "
+                                                      "seed run-due waits for)")
+    seed.add_argument("--limit", type=int, help="gate at most N boards this run (default: every due one; a limited run "
+                                                "is never the full seed run-due waits for)")
     seed.add_argument("--dry-run", action="store_true", help="count the rows; send nothing, write nothing")
     sub.add_parser("run-due", help="what launchd runs daily")
     return parser

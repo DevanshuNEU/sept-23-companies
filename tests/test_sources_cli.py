@@ -369,7 +369,10 @@ class SeedAtsCommandTest(CliCase):
         return sorted(u for u in self.client.requests if u in seed_routes())
 
     def test_seed_ats_dry_run_prints_the_counts_and_sends_nothing(self):
-        payload = self.ok("seed-ats", "--dry-run")
+        code, out, err = self.cli("seed-ats", "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("seed-ats: 4 due (greenhouse 3, ashby 1) of 4 rows read, 0 known; dry run", err)
+        payload = json.loads(out)
         self.assertEqual((payload["job"], payload["status"], payload["dry_run"]), ("seed-ats", "ok", True))
         self.assertEqual(payload["report"], {"read": 4, "promoted": 0, "rejected": 0, "dead": 0, "errors": 0,
                                              "known": 0, "left": 4, "tripped": []})
@@ -379,7 +382,10 @@ class SeedAtsCommandTest(CliCase):
         self.assertEqual(count(conn, "SELECT count(*) FROM event WHERE kind = 'ats_seed_run'"), 0)
 
     def test_seed_ats_gates_every_row_through_the_crawl_client(self):
-        payload = self.ok("seed-ats")
+        code, out, err = self.cli("seed-ats")
+        self.assertEqual(code, 0, err)
+        self.assertIn("seed-ats: 4 due (greenhouse 3, ashby 1) of 4 rows read, 0 known; gating them all", err)
+        payload = json.loads(out)
         self.assertEqual(payload["report"], {"read": 4, "promoted": 2, "rejected": 1, "dead": 1, "errors": 0,
                                              "known": 0, "left": 0, "tripped": []})
         self.assertEqual(self.list_requests(), sorted(seed_routes()))

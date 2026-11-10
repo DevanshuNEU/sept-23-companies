@@ -19,10 +19,10 @@ function countLinks(body: string): number {
   return (text.match(URL_RE)?.length ?? 0) + (rest.match(BARE_RE)?.length ?? 0);
 }
 
-/** The word range from check_draft.py: 80 to 120 (80 to 100 for a recruiter), up to 80 for a follow-up. Display only. */
-function wordRange(kind: RoleKind, seq: number): [number, number] {
-  if (seq > 0) return [0, 80];
-  return kind === 'recruiter' ? [80, 100] : [80, 120];
+/** The word range of the approve checks: a first email up to 120 for every reader (#9, 2026-11-09), a follow-up up
+ * to 80. Display only. */
+function wordRange(_kind: RoleKind, seq: number): [number, number] {
+  return seq > 0 ? [0, 80] : [0, 120];
 }
 
 const WHO: Record<SavedBy, string> = { claude: 'Claude', devanshu: 'you', sender: 'the sender', import: 'import' };

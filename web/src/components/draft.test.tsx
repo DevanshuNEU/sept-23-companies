@@ -110,6 +110,17 @@ describe('DraftEditor', () => {
     expect(screen.getByLabelText('Email body')).toHaveValue(detail.body);
   });
 
+  it('marks a first email in range from 0 up to 120 words, for a recruiter too (#9, 2026-11-09)', () => {
+    const short = 'Hi Pat, ' + Array(68).fill('word').join(' ');
+    for (const kind of ['engineer', 'recruiter'] as const) {
+      const { unmount } = render(<DraftEditor {...base} kind={kind} subject="s" body={short} onChange={() => {}} />);
+      const meter = screen.getByText('70 words');
+      expect(meter).not.toHaveClass('text-warn');
+      expect(meter).toHaveAttribute('title', 'Aim for up to 120');
+      unmount();
+    }
+  });
+
   it('does not count URLs as words, and does not count an email address as a link', () => {
     const body =
       'Hi Kenji,\n\nThanks for reading, reach me at me@mail.example.\n\nhttps://www.devanshuchicholikar.com/a/b?c=1\nhttps://opencodeintel.com';

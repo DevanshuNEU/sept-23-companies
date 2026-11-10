@@ -8,7 +8,9 @@ The checks only read. They never approve, send or change a message; the caller s
 
 Blocks are #9's safety list: no mail server, more than 2 links, a link shortener, near-identical to a colleague's
 draft, a no-go on the person or the company, a person who said no or asked to stop, a company closed for no
-sponsorship. An address with no usable domain counts as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
+sponsorship. Two more come from his 2026-11-09 rulings: a markdown link (email is plain text, so the brackets would
+arrive as typed) and any visa, OPT or sponsorship mention, for every reader. An address with no usable domain counts
+as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
 as it does in `mail/check_draft.py`. Two more block because a send could not be checked or could not thread: a
 banned phrases list that cannot be read (fail closed), and a follow-up subject that is not `Re: ` plus the first
 email's subject (#14). There is no attachment check because a message has no attachment column (a test pins that).
@@ -24,6 +26,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.drafting.signature import signature_lines
 from outreach.drafting.voice_checks import voice_checks
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 
@@ -35,14 +38,19 @@ MX_TTL = timedelta(hours=24)
 NEW_YORK = ZoneInfo("America/New_York")
 
 PORTFOLIO = "devanshuchicholikar.com"
-WORDS = {"recruiter": (80, 100)}  # #9: about 90 for recruiters
-DEFAULT_WORDS = (80, 120)         # #9: engineers, managers, founders (and alums, others)
+DEFAULT_WORDS = (0, 120)          # #9, 2026-11-09: at most 120 words, anything under that is fine, every reader
 FOLLOWUP_MAX_WORDS = 80
 MAX_LINKS = 2
 SIMILAR = 0.8
 STALE_HOOK_DAYS = 30
-NEVER = ["bumping this", "bump this", "got buried", "gentle reminder", "in case you missed"]  # #9 Follow-ups
-WEAK_SUBJECT = ["quick question", "following up", "excited"]
+WEAK_SUBJECT = ["quick question", "following up", "excited", "opportunity", "hoping to connect", "touching base",
+                "checking in", "application for", "referral request"]
+SUBJECT_MAX_CHARS = 40  # about what Gmail shows of a subject on a phone
+# Lines about the email itself, the reader's inbox or their time: every lab judge read them as performed (2026-11-09).
+NARRATED = ("i'll be brief", "i'll keep this short", "i'll keep it short", "short one", "quick note",
+            "a lot of these", "many of these", "your inbox", "thank you for opening", "thanks for opening",
+            "you don't owe me", "i hope it's okay", "sorry to bother", "i know you're busy", "out of the blue",
+            "this cold email")
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "buff.ly", "is.gd", "rebrand.ly", "cutt.ly",
               "lnkd.in", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "t.ly"}
 DASHES = re.compile("[\u2012-\u2015]")
@@ -54,6 +62,12 @@ URL = re.compile(r"https?://[^\s<>()\"']+", re.I)
 BARE = re.compile(r"(?<![\w@./-])(?:[a-z0-9-]+\.)+(?:com|ai|io|dev|app|co|org|net|ly|gl|in|at|cc|id|me|sh|so|xyz|us)"
                   r"\b(?:/[^\s<>()\"']*)?", re.I)
 RE_PREFIX = re.compile(r"re\s*:", re.I)
+MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\]\(\s*https?://[^)\s]+\s*\)", re.I)
+# No visa, OPT or sponsorship in any email, to anyone (#9, 2026-11-09). A block also pulls an approved email back, so
+# ordinary words pass: OPT only in upper case and not "OPT-in", "visa" only in lower case (Visa the company passes),
+# F-1 not as a score, sponsorship but not "sponsored by", immigration only as a status.
+VISA = re.compile(r"\bF-1\b(?!\s+score)|\bOPT\b(?!-in)|\bvisas?\b|(?i:\bsponsorship\b|\bsponsor (?:me|my|him)\b|"
+                  r"\bH-?1B\b|work authori[sz]ation|authori[sz]ed to work|\bgreen card\b|\bimmigration status\b)")
 HOOK_DATE = re.compile(r"\((\d{4}-\d{2}-\d{2})\)$")
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
@@ -62,11 +76,11 @@ _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
 OPEN_STATES = ("drafted", "approved", "sending", "send_unknown", "sent", "failed")
 STOP_REPLIES = ("said_no", "asked_to_stop")
 
-BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "too_many_links", "link_shortener", "followup_subject",
-               "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
-WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
-              "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
-              "voice_recital", "voice_rhythm", "voice_opt_line", "voice_ungrounded")
+BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown_link", "visa_line", "too_many_links",
+               "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
+WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
+              "subject_reused", "link_count", "signature", "narrated_email", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
 
@@ -239,7 +253,7 @@ def _banned(d: DraftInput, banned: Sequence[tuple[str, re.Pattern]]) -> list[Che
                           "The banned phrases list could not be read, so this draft was not checked for banned "
                           "phrases. Fix the list (OUTREACH_BANNED_PHRASES, or banned_phrases.txt in DevVault), "
                           "then check again."))
-    rules = [(src, rx) for src, rx in banned] + [(p, re.compile(re.escape(p), re.I)) for p in NEVER]
+    rules = list(banned)
     for field, text in (("subject", d.subject), ("body", d.body)):
         for src, rx in rules:
             for m in rx.finditer(text):
@@ -274,6 +288,26 @@ def _placeholder(d: DraftInput) -> Check:
     return _check("placeholder", "pass", "No placeholder text", "No TODO, ASK: or {{ }} left in.")
 
 
+def _markdown_link(d: DraftInput) -> Check:
+    spans = [_span(f, m.start(), m.end()) for f, text in (("subject", d.subject), ("body", d.body))
+             for m in MARKDOWN_LINK.finditer(text)]
+    if spans:
+        return _check("markdown_link", "block", "Markdown link",
+                      "The email is plain text, so the brackets arrive as typed. Write the full link on its own line.",
+                      spans=spans)
+    return _check("markdown_link", "pass", "No markdown links", "Every link is a plain link.")
+
+
+def _visa_line(d: DraftInput) -> Check:
+    spans = [_span(f, m.start(), m.end()) for f, text in (("subject", d.subject), ("body", d.body))
+             for m in VISA.finditer(text)]
+    if spans:
+        return _check("visa_line", "block", "Visa mention",
+                      "No visa, OPT or sponsorship in any email (#9, 2026-11-09). Take this out; it comes up only if "
+                      "they ask.", spans=spans)
+    return _check("visa_line", "pass", "No visa mention", "Nothing about visa, OPT or sponsorship.")
+
+
 def _link_rules(d: DraftInput) -> list[Check]:
     found = _links(d.body)
     spans = [_span("body", s, e) for s, e, _ in found]
@@ -290,17 +324,38 @@ def _link_rules(d: DraftInput) -> list[Check]:
     else:
         out.append(_check("link_shortener", "pass", "No link shorteners", "Every link is a full link."))
     if d.seq == 0:
-        if len(found) == MAX_LINKS and _is_portfolio(found[0][2]):
-            out.append(_check("link_count", "pass", "Portfolio, then one project", "2 links, portfolio first."))
+        start = _signature_start(d.body)
+        signed = start is not None and found and _is_portfolio(found[-1][2]) and found[-1][0] >= start
+        if len(found) == MAX_LINKS and signed:
+            out.append(_check("link_count", "pass", "One link, then the signed portfolio",
+                              "2 links: one in the body, the portfolio in the signature."))
         elif len(found) != MAX_LINKS:
             out.append(_check("link_count", "warn", "Not 2 links",
-                              f"{len(found)} links. A first email has 2: https://www.{PORTFOLIO} first, then the "
-                              "relevant project.", spans=spans))
+                              f"{len(found)} links. A first email has 2: one link in the body (the project or the "
+                              "writing it leans on), and the portfolio in the signature.", spans=spans))
         else:
-            out.append(_check("link_count", "warn", "Portfolio not first",
-                              f"The first link is {found[0][2]}. Put https://www.{PORTFOLIO} first.",
-                              spans=spans[:1]))
+            out.append(_check("link_count", "warn", "Portfolio belongs in the signature",
+                              f"End with the signature; it carries https://www.{PORTFOLIO}. Keep one link in the "
+                              "body.", spans=spans))
     return out
+
+
+def _signature_start(body: str) -> int | None:
+    """Where the signature begins in `body` when the body ends with it (each line compared stripped, blank lines
+    skipped), else None."""
+    want = signature_lines()
+    lines = [(m.start(), m.group().strip()) for m in re.finditer(r"[^\n]+", body) if m.group().strip()]
+    if len(lines) < len(want) or [text for _, text in lines[-len(want):]] != want:
+        return None
+    return lines[-len(want)][0]
+
+
+def _signature(d: DraftInput) -> Check:
+    if _signature_start(d.body) is not None:
+        return _check("signature", "pass", "Signature is there", "The email ends with his signature.")
+    return _check("signature", "warn", "Signature missing",
+                  "End with an optional sign-off word, then his signature exactly: "
+                  + " / ".join(signature_lines()) + ".")
 
 
 def _length(d: DraftInput) -> Check:
@@ -308,8 +363,8 @@ def _length(d: DraftInput) -> Check:
     if d.seq >= 1:
         lo, hi, aim = 0, FOLLOWUP_MAX_WORDS, f"a follow-up is at most {FOLLOWUP_MAX_WORDS}"
     else:
-        lo, hi = WORDS.get(d.role_kind, DEFAULT_WORDS)
-        aim = f"aim for {lo} to {hi}"
+        lo, hi = DEFAULT_WORDS
+        aim = f"a first email is at most {hi}"
     if lo <= n <= hi:
         return _check("length", "pass", "Length is right", f"{n} words; {aim}.")
     return _check("length", "warn", "Too long" if n > hi else "Too short", f"{n} words; {aim}.")
@@ -342,12 +397,34 @@ def _subject_wording(d: DraftInput) -> Check:
     return _check("subject_wording", "pass", "Subject reads well", "No weak subject wording.")
 
 
+def _subject_length(d: DraftInput) -> Check | None:
+    if d.seq >= 1:
+        return None  # a follow-up's subject is "Re: " plus the first one, set by code
+    n = len(d.subject.strip())
+    if n > SUBJECT_MAX_CHARS:
+        return _check("subject_length", "warn", "Subject too long",
+                      f"{n} characters. A phone shows about {SUBJECT_MAX_CHARS}; keep it to that so it reads whole.")
+    return _check("subject_length", "pass", "Subject fits a phone", f"{n} characters.")
+
+
+def _narrated(d: DraftInput) -> Check | None:
+    if d.seq >= 1:
+        return None  # a follow-up may say it is following up, or that they may be busy (#9, 2026-11-09)
+    spans = [_span("body", m.start(), m.end()) for phrase in NARRATED
+             for m in re.finditer(rf"(?<![\w']){re.escape(phrase)}(?![\w])", d.body.replace("\u2019", "'"), re.I)]
+    if spans:
+        return _check("narrated_email", "warn", "A line about the email itself",
+                      "This line talks about the email, their inbox or their time. Cut it; the specifics do the work.",
+                      spans=sorted(spans, key=lambda s: s["start"]))
+    return _check("narrated_email", "pass", "No lines about the email", "Nothing talks about the email itself.")
+
+
 def _recruiter(d: DraftInput) -> Check:
     if d.role_kind != "recruiter":
         return _check("recruiter", "pass", "Not a recruiter", f"Role kind is {d.role_kind}.")
     return _check("recruiter", "warn", "Recruiter",
                   "This person is a recruiter. Email a recruiter only when no engineer, manager or founder is "
-                  "found, and put the work authorization line up front. If the role kind is wrong, change it.",
+                  "found, and name the exact role up front. If the role kind is wrong, change it.",
                   fix={"kind": "role_kind"})
 
 
@@ -410,6 +487,21 @@ def _closed(conn, chain: list[int]) -> Check:
                   f"{row['name']} is closed because it does not sponsor. Reopen it first if that changed.")
 
 
+def _core(body: str) -> str:
+    """The body without its greeting line, and without the signature and the sign-off word line before it."""
+    text = body.rstrip()
+    start = _signature_start(text)
+    if start is not None:
+        text = text[:start].rstrip()
+        last = text.rsplit("\n", 1)
+        if len(last) == 2 and len(last[1].split()) <= 3 and last[1].strip().endswith(","):
+            text = last[0].rstrip()
+    lines = text.split("\n", 1)
+    if len(lines) == 2 and re.match(r"^\s*(hi|hello|hey|dear)\b[^\n]{0,40},\s*$", lines[0], re.I):
+        text = lines[1]
+    return text.strip()
+
+
 def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
     rows = conn.execute(
         f"SELECT m.message_id, m.body, p.name FROM message m JOIN touch t ON t.touch_id = m.touch_id "
@@ -418,9 +510,10 @@ def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
         (*family, d.person_id, *OPEN_STATES, d.message_id)).fetchall()
     best, best_ratio = None, 0.0
     # autojunk off: on a body over 200 characters it junks common letters, so the score drops and depends on order.
-    matcher = difflib.SequenceMatcher(None, "", d.body.lower(), autojunk=False)
+    # The greeting, the sign-off word and the signature are the same in every email, so they are not compared.
+    matcher = difflib.SequenceMatcher(None, "", _core(d.body).lower(), autojunk=False)
     for row in rows:
-        matcher.set_seq1(row["body"].lower())
+        matcher.set_seq1(_core(row["body"]).lower())
         if matcher.real_quick_ratio() < SIMILAR or matcher.quick_ratio() < SIMILAR:
             continue  # both are upper bounds of ratio(), so skipping here never misses a match
         ratio = matcher.ratio()
@@ -472,15 +565,22 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         raise LookupError(f"no company {d.company_id}")
     chain = resolve_company(companies, d.company_id)
     family = _family(companies, chain[-1])
+    if ground is not None:
+        ground = ground + "\n" + "\n".join(signature_lines())  # his phone is in the signature, not in me.md
     found: list[Check | None] = [
         *_mail_server(d),
         *_banned(d, banned),
         _dash(d),
         _placeholder(d),
+        _markdown_link(d),
+        _visa_line(d),
         *_link_rules(d),
+        _signature(d),
+        _narrated(d),
         _length(d),
         _stale_hook(d, now),
         _subject_wording(d),
+        _subject_length(d),
         _recruiter(d),
         *voice_checks(d.body, d.role_kind, ground=ground),
         _followup_subject(conn, d),

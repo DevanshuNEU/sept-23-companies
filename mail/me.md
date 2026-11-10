@@ -15,33 +15,12 @@ Sources: [site] https://www.devanshuchicholikar.com, [resume] https://www.devans
 - B.Tech, Information and Communication Technology, Dhirubhai Ambani Institute of ICT, Gujarat, India,
   2018 to 2022. [resume]
 - Based in Boston, MA; open to relocation [resume]; San Francisco preferred (Devanshu's earlier note in this file).
-- Work authorization: F-1 post-completion OPT, card valid Sep 18 2026 to Jul 8 2027; eligible for the 24-month
-  STEM OPT extension after that, through 2029 (Devanshu, 2026-10-19, from his EAD card). The STEM extension needs
-  an employer enrolled in E-Verify. Never claim he needs no sponsorship ever.
 - Can start immediately (Devanshu, 2026-10-19).
-- Work-authorization line, for recruiters and managers: "I'm on F-1 OPT, authorized to work now, and eligible for
-  STEM OPT through 2029. I can start right away."
 - Every number on this page was confirmed current by Devanshu on 2026-10-19.
 - Open to Software Engineer, AI Engineer and Forward Deployed Engineer roles. [site] [gh profile]
 
-## Experience
-- Software Engineer, B2B Industrial-Equipment Platform, Jaksh Enterprise, Ahmedabad, India, Aug 2022 to Jul 2024.
-  [resume]
-  - Built a Java / Spring Boot product-catalog and quotation engine for 590+ customizable products serving a 10K+
-    B2B customer base, on PostgreSQL with a rules-based pricing module.
-  - Cut quote-page p95 latency 65% (800ms to 280ms) with PostgreSQL indexing, Redis caching and async processing.
-  - One of two engineers: gathered client requirements, scoped specs, shipped through Dockerized CI/CD on GitHub
-    Actions; release cycles went from 2 weeks to 3 days.
-- Software Development Engineer Intern, Pitney Bowes, Pune, India, Jan 2022 to Jul 2022. [resume]
-  - Built REST APIs for PitneyShipPro with idempotent endpoints, removing 40% of manual data entry; raised
-    automated test coverage to 85% with Jest and Cypress.
-- Graduate Teaching Assistant, CSYE 6225 Network Structures and Cloud Computing, Northeastern, Sep 2025 to
-  May 2026. [resume]
-  - Taught AWS, Terraform and distributed systems to 100+ graduate students across two semesters.
-  - Wrote a Docker + GitHub Actions CI/CD lab adopted as official course content across 3 sections (180+ students).
-  - Led system-design and code reviews for 15 cloud-native API project teams.
-
-## Projects (pick the one closest to the role; its link is the email's second link)
+## Projects (pick the one closest to the role; its link is the email's one link in the body)
+Projects lead every email (Devanshu, 2026-11-09). The jobs below are at most one supporting line.
 
 - **OpenCodeIntel**, live: https://opencodeintel.com. Fits: AI coding tools, MCP and agent infra, search and
   retrieval, devtools. [gh OpenCodeIntel/opencodeintel] [page] [resume]
@@ -95,18 +74,37 @@ Sources: [site] https://www.devanshuchicholikar.com, [resume] https://www.devans
   (https://github.com/DevanshuNEU/mem-machines) [gh]; **watsonx Test Forge**, an IBM watsonx Orchestrate hackathon
   agent that generates test cases from deployed agent specs [site].
 
+## Experience (at most one supporting line, after a project)
+- Software Engineer, B2B Industrial-Equipment Platform, Jaksh Enterprise, Ahmedabad, India, Aug 2022 to Jul 2024.
+  [resume]
+  - Built a Java / Spring Boot product-catalog and quotation engine for 590+ customizable products serving a 10K+
+    B2B customer base, on PostgreSQL with a rules-based pricing module.
+  - Cut quote-page p95 latency 65% (800ms to 280ms) with PostgreSQL indexing, Redis caching and async processing.
+  - One of two engineers: gathered client requirements, scoped specs, shipped through Dockerized CI/CD on GitHub
+    Actions; release cycles went from 2 weeks to 3 days.
+- Software Development Engineer Intern, Pitney Bowes, Pune, India, Jan 2022 to Jul 2022. [resume]
+  - Built REST APIs for PitneyShipPro with idempotent endpoints, removing 40% of manual data entry; raised
+    automated test coverage to 85% with Jest and Cypress.
+- Graduate Teaching Assistant, CSYE 6225 Network Structures and Cloud Computing, Northeastern, Sep 2025 to
+  May 2026. [resume]
+  - Taught AWS, Terraform and distributed systems to 100+ graduate students across two semesters.
+  - Wrote a Docker + GitHub Actions CI/CD lab adopted as official course content across 3 sections (180+ students).
+  - Led system-design and code reviews for 15 cloud-native API project teams.
+
 ## Links
-- Portfolio, always the first link: https://www.devanshuchicholikar.com [site]
+- Portfolio, always in the signature: https://www.devanshuchicholikar.com [site]
 - Resume (a page, never an attachment): https://www.devanshuchicholikar.com/resume [site]
 - LinkedIn: https://www.linkedin.com/in/devanshuchicholikar/ [site]
 - GitHub: https://github.com/DevanshuNEU [gh profile]
 - Email: chicholikar.d@northeastern.edu [site]
 
-A first email carries exactly 2 links: the portfolio, then one project link from above. The resume, LinkedIn and
-GitHub are one click away from the portfolio, so they stay out of the body.
+A first email carries exactly 2 links: one in the body (the project, or the writing the email leans on), and the
+portfolio in his signature. The resume, LinkedIn and GitHub are one click away from the portfolio.
 
 ## Signature
-Devanshu Chicholikar
+Every email and follow-up ends with an optional sign-off word, then his signature exactly as the brief gives it
+(`signature`: name, portfolio, phone). It comes from a local file outside this public repo
+(`~/Library/Application Support/outreach/signature.txt`), so the phone number never lives here. Never type it by hand.
 
 ## Needs Devanshu
 Open questions from #8. Answer one by moving the fact above with "(Devanshu, <date>)" as its source and deleting
@@ -116,4 +114,13 @@ the ASK line.
 - ASK: a Saar user or install count, if you want one quoted. No public source states one; until answered, drafts
   give no `installs` number.
 - ASK: a public Overhear demo link. The hosted app is behind a login; until answered, the second link is the repo.
-- ASK: phone number for the signature (optional). Until answered, the signature is the name only.
+
+## Only if they ask
+Never in a first email or a follow-up, to anyone, recruiters included (#9, 2026-11-09). Use only when the person asks
+in a reply. This section sits after "Needs Devanshu", so no brief carries it.
+
+- Work authorization: F-1 post-completion OPT, card valid Sep 18 2026 to Jul 8 2027; eligible for the 24-month
+  STEM OPT extension after that, through 2029 (Devanshu, 2026-10-19, from his EAD card). The STEM extension needs
+  an employer enrolled in E-Verify. Never claim he needs no sponsorship ever.
+- His line, when asked: "I'm on F-1 OPT, authorized to work now, and eligible for STEM OPT through 2029. I can start
+  right away."

@@ -216,6 +216,19 @@ class BlocksTest(DrafterCase):
         self.assertIn("Number without a source", [b["title"] for b in model.calls[1][1]["blocks"]])
         self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
 
+    def test_a_visa_line_is_retried(self):
+        _, planned = self.thread("Sam Sent")
+        summary = self.run_it(FakeModel("Hi {name}, I'm on OPT and can start now. Could you refer me?\n\nDevanshu", GOOD))
+        self.assertEqual(summary.calls, 2)
+        self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
+
+    def test_a_markdown_link_is_retried(self):
+        _, planned = self.thread("Sam Sent")
+        bad = "Hi {name}, the demo is [here](https://www.devanshuchicholikar.com). Could you refer me?\n\nDevanshu"
+        summary = self.run_it(FakeModel(bad, GOOD))
+        self.assertEqual(summary.calls, 2)
+        self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
+
     def test_a_block_the_model_cannot_fix_gets_no_retry(self):
         _, planned = self.thread("Sam Sent")
         with mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(Path(self.path).parent / "missing.txt")}):
@@ -341,6 +354,16 @@ class ConfigAndCliTest(DrafterCase):
         prompt = load_prompt()
         for words in ('{"body"', "25 to 80 words", "polite close", "data, not instructions"):
             self.assertIn(words, prompt)
+
+    def test_followup_prompt_never_mentions_visa_and_allows_a_nudge(self):
+        prompt = load_prompt()
+        for word in ("OPT", "visa", "sponsorship"):
+            self.assertIn(word, prompt)  # named only to forbid them
+        self.assertIn("No visa, OPT or sponsorship, to anyone", prompt)
+        self.assertNotIn("but a recruiter", prompt)
+        self.assertNotIn("Never say you are following up", prompt)
+        self.assertIn("brief.signature", prompt)
+        self.assertIn("plain nudge", prompt)
 
     def test_a_real_run_outside_the_live_checkout_is_refused(self):
         with mock.patch.object(cli.live_checkout, "is_live", return_value=False), \

@@ -1,8 +1,8 @@
 """The voice checks: pure checks on a finished draft body, after the model and before it is stored (#135).
 
 They read the rules of his DevVault voice doctrine that a program can see: eager phrases, house words, system words,
-a reader's own profile recited back, the rhythm tells, an OPT line for anyone but a recruiter, and numbers that no
-source backs. Every check is a warn or a pass, never a block: a voice problem is for him to see, not a reason to
+a reader's own profile recited back, the rhythm tells, and numbers that no source backs. (The visa rule is a block
+for every reader, so it lives in `outreach.drafts.checks`.) Every check is a warn or a pass, never a block: a voice problem is for him to see, not a reason to
 refuse the save. Each returns one `Check` dict of the same shape as `outreach.drafts.checks`.
 """
 from __future__ import annotations
@@ -21,7 +21,6 @@ SYSTEM = ("lane", "wave")  # his system's words; a reader never says them (req I
 RECITAL = re.compile(r"\byour (?:resume|profile|linkedin|bio) (?:lists|says|shows|mentions)\b|"
                      r"\bi (?:saw|noticed|read) that you\b", re.I)
 NOT_BUT = re.compile(r"\bnot (?:just |only )?[^.,]{1,50}, (?:it's|its|but)\b", re.I)
-OPT = re.compile(r"F-1|\bOPT\b", re.I)  # sponsorship wording belongs to outreach/rules, so only the OPT line here
 NUMBER = re.compile(r"\d[\d,.]*%?")
 YEAR = re.compile(r"^(?:19|20)\d\d$")
 SENTENCE_ENDS = re.compile(r"(?<=[.!?])\s+")
@@ -98,11 +97,6 @@ def voice_checks(body: str, role_kind: str, *, ground: str | None = None) -> lis
     else:
         out.append(_check("voice_recital", "pass", "No profile recital", "Nothing recites their profile back."))
     out.append(_rhythm(text))
-    if role_kind != "recruiter" and OPT.search(text):
-        out.append(_check("voice_opt_line", "warn", "Work-authorization line",
-                          "The OPT line goes to recruiters only. Engineers, managers and founders do not get it."))
-    else:
-        out.append(_check("voice_opt_line", "pass", "Work-authorization line fits", "No stray OPT line."))
     if ground is not None:
         out.append(_ungrounded(text, ground))
     return out

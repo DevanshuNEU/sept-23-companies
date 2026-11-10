@@ -20,7 +20,7 @@ from tests.test_drafts_checks import BODY, FIXTURE_BANNED, PORTFOLIO, PROJECT
 from tests.test_mcp_reads import no_go
 
 FIXTURE_MAIL = Path(__file__).parent / "fixtures" / "plan"  # its me.md is the evidence the brief reads
-SUBJECT = "Your queue rewrite and the new grad backend role"
+SUBJECT = "your queue rewrite and the backend role"
 HOOK = "His post on the queue rewrite"
 HIS_WORDS = "He has edited this one. Leave it."
 FOLLOW = "Hi Sam, one more note on the ledger idea from my last email. Happy to send a short demo. Thanks, Devanshu"

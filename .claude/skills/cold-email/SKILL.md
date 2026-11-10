@@ -22,7 +22,7 @@ get past.
    drafting, and write from what it returns: his DevVault voice files (the Posture section above all), the me.md
    evidence, the person's facts and the limits, assembled by code. Do not read those files yourself. They are voice
    only: where they disagree with #9 or with this file on a limit or a format (one draft, not versions; no authorship
-   gate; 80 to 120 words; 2 links; OPT line for recruiters only; no `lint_draft.sh`), #9 and this file win. If
+   gate; at most 120 words; 2 links, the portfolio in the signature; no visa line for anyone; no `lint_draft.sh`), #9 and this file win. If
    `draft_brief` refuses (`voice_unreadable`), say so and stop; nothing is drafted without it. Keep its `brief_id`.
 1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only if he gave
    one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
@@ -64,7 +64,7 @@ get past.
    - **Read the person.** Use what he pasted about their real work, interests, and how close they are to hiring and to
      the role. The by-reader table below is the default, not a mold: when the paste shows something else (an engineer
      who owns hiring, a founder who still writes code), follow the person. The hard rules for a reader kind still hold
-     (a recruiter gets the exact role title and the work-authorization line early).
+     (a recruiter gets the exact role title early).
    - **Compete.** Draft at least three emails on substantially different strategies (for example peer to peer on a
      shared technical problem, evidence first, a direct and plain referral ask), not rewordings. Each follows every
      rule below.
@@ -159,34 +159,35 @@ style check, so passing the checks proves nothing; the sound has to be his. The 
   as Devanshu to a friend: cut every line he would not say. If it still sounds like a template, it is one.
 - **Specific beats warm:** name the thing they did, never praise them.
 
-**Length.** 80 to 120 words in the body, counting greeting and sign-off, links excluded. Recruiters about 90.
+**Length.** At most 120 words, counting greeting, sign-off and signature, links excluded. Anything under that is
+fine (#9, 2026-11-09).
 
 **Shape.** "Hi <first name>," then, in sentences written fresh for this person: the hook; who he is and that he
-wants in; the evidence with its number; one ask. Then the two links on their own lines, then "Thanks," and
-"Devanshu Chicholikar". Plain text, short paragraphs, no bullets. Two people at one company get different
+wants in; the evidence with its number; one ask. The one body link sits on its own line. Then an optional sign-off
+word ("Thanks,", "Thank you,", "Best," or none) and the brief's `signature` exactly, line for line (name, portfolio,
+phone). Plain text, short paragraphs, no bullets, no markdown. Two people at one company get different
 emails; the save checks block near-copies.
 
 **By reader.**
 
-| kind | lead with | ask | work authorization |
-|---|---|---|---|
-| engineer | the hook, peer to peer | would they refer him, or point him to who owns the req | leave out |
-| manager | the evidence | a short call about the named role | leave out |
-| founder | one line on why their product, then the evidence | one concrete next step tied to what they build | leave out |
-| recruiter | the exact role title and req ID | a screen at two concrete times he gives you (ask him) | first or second line |
+| kind | lead with | ask |
+|---|---|---|
+| engineer | the hook, peer to peer | would they refer him, or point him to who owns the req |
+| manager | the evidence | a short call about the named role |
+| founder | one line on why their product, then the evidence | one concrete next step tied to what they build |
+| recruiter | the exact role title and req ID | whether they are recruiting for it; he can send the resume |
 
-The work-authorization line goes to recruiters only. Engineers, managers and founders get no visa, OPT or
-sponsorship line, unless they ask in a reply. The line is me.md's, word for word: on F-1 OPT, authorized to work
-now, eligible for STEM OPT through 2029, can start right away.
+No visa, OPT, sponsorship or work-authorization line to anyone, recruiters included (#9, 2026-11-09). It comes up
+only if they ask in a reply; the approve checks block it.
 
-**Links.** Exactly 2 in a first email, as bare URLs on their own lines. The portfolio,
-https://www.devanshuchicholikar.com, is always first and never left out. The second link is chosen per email, from
+**Links.** Exactly 2 in a first email, as bare URLs on their own lines: one in the body, and the portfolio,
+https://www.devanshuchicholikar.com, which the signature carries. The body link is chosen per email, from
 me.md's Links and projects: the evidence project's link when the email leans on that project (the default, because
 the link backs the claim), otherwise his GitHub (https://github.com/DevanshuNEU) or LinkedIn
 (https://www.linkedin.com/in/devanshuchicholikar/). Use GitHub or LinkedIn when the email does not hinge on one
 project, such as a short referral ask or a recruiter email, and vary between them so emails to a team do not all
 look alike. Never a third link. `project` in `save_draft` stays the evidence project named in the body. The role is named by title, not linked. Gmail turns any written domain
-into a link, so write "Claude", not "Claude.ai", and keep the signature to his name. Full links only.
+into a link, so write "Claude", not "Claude.ai". The signature is exactly the brief's `signature`. Full links only.
 
 **Resume.** Never attached to a first email (#9: no attachments, and the resume link is not one of the two
 links). Decide per person whether to offer it: a recruiter, a posting that asks for a resume, or a reader who would
@@ -195,8 +196,8 @@ It counts toward the word count. Skip it when the email is already clear without
 When he is asked for the resume after a reply, he attaches it himself.
 
 **Subject.** Unique to this person: name something of theirs (their post, their team's product, the role) in 4
-to 7 calm, lowercase words. A first email never starts with "Re:" and never names his own product. Recruiters
-get a clear one: role title plus "on OPT".
+to 7 calm, lowercase words, at most 40 characters. A first email never starts with "Re:". Recruiters get a clear
+one: company plus role title.
 
 **Truth.** Every fact about him comes from `mail/me.md`; every fact about the person comes from his paste or a public page quoted in Research. Keep
 me.md's qualifiers with its numbers ("simulated" for CallBudget, "research eval" for OpenCodeIntel). tool-crowding
@@ -209,14 +210,17 @@ Northeastern". Commas, colons and full stops carry the rhythm; every dash is a p
 
 ## Follow-ups
 
-#9: up to 4 follow-ups, at 3, 7, 14 and 21 business days after the first email, in the same thread. Each is short
-and adds one new thing (a result, a link, a narrower ask) that the earlier ones did not; the fourth is a polite
-close. A reply from anyone at the company stops all queued email there.
+#9: up to 4 follow-ups, at 3, 7, 14 and 21 business days after the first email, in the same thread. Each is short.
+It may be a plain human nudge ("just bumping this in case it got buried") and may say it is following up; it may
+add one new thing (a result, a link, a narrower ask) when there is a good one. It stays on the first email's role,
+ends with the brief's `signature`, and never mentions visa, OPT or sponsorship. The fourth is a polite close. A
+reply from anyone at the company stops all queued email there.
 
 A nightly job drafts every follow-up due the next business day into the Outbox the same way (#142), so by hand
 this is only for one he asks for. `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7):
 person, company, `seq`, the first email's subject. For each, call `draft_brief` for the person (it shows the thread
-so far), write a body of 25 to 80 words that greets by first name and says the one new thing, then `save_followup`
+so far), write a body of 25 to 80 words that greets by first name, nudges or says the one new thing, and ends with
+the signature, then `save_followup`
 with `person_id`, `seq`, `body` and the brief's `brief_id`. The subject is set by code ("Re: " plus the first
 subject), so never give one. Fix `blocks` and save again, as in step 6. Done when `blocks` is empty. Then point him
 to the Outbox.

@@ -348,6 +348,9 @@ class DecideTests(unittest.TestCase):
             # lookup (the ruling of 2026-10-22), not a classification of the posting: the posting's own location
             # still goes through outreach/rules.
             "outreach/ranking/pay.py": "wage lookup refuses a remote or anywhere location",
+            # The visa block reads his own email draft, never a posting: no email mentions visa, OPT or sponsorship
+            # to anyone (#9, 2026-11-09; #191). Postings are still classified only in outreach/rules.
+            "outreach/drafts/checks.py": "blocks visa words in his own email draft, not a posting",
         }
         found = []
         for path in sorted((ROOT / "outreach").rglob("*.py")):

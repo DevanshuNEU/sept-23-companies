@@ -1,6 +1,6 @@
 # Drafts that read handwritten
 
-Date: 2026-11-09. Status: approved by Devanshu 2026-11-09 with the scope cut below. Issue: to be opened when he approves.
+Date: 2026-11-09. Status: scope and rulings approved by Devanshu 2026-11-09; the subject rules, "Stories" and `narrated_email` were added after lab 3 and wait for his review. Issue: to be opened when he approves.
 
 ## Scope (Devanshu, 2026-11-09)
 
@@ -27,23 +27,21 @@ What the Outbox shows on 2026-11-09 (read only, 459 first emails: 275 approved, 
   (`outreach/sending/gmail.py`, `set_content`), so the brackets arrive as typed. 21 went out like that; 56 are approved.
 - 13 non-recruiters got the work-authorization line, 6 of them still approved. #9 (2026-10-27) gives it to
   recruiters only, but `mail/me.md` says the line is "for recruiters and managers", and `voice_opt_line` only warns.
-- Follow-ups can switch roles mid-thread (Hark: first email about Computer-Use Agents, follow-up about LLM &
-  Production).
+- Follow-ups can switch roles mid-thread (one thread's first email named one role, its follow-up another).
 
-The lab (`.context/drafting-lab.md` in the harrisburg workspace): 12 approved drafts, three versions each (the
-original, a GPT rewrite after two rounds of critique, and a Claude rewrite that followed the rules below). A fresh GPT
-session judged them blind, versions shuffled:
+The lab (`docs/research/2026-11-09-drafting-lab.md`): three rounds on 12 approved drafts, each judged blind by a
+fresh GPT session, plus an inbox test where the subject and Gmail preview sat among 6 template decoys.
 
-| Version | Feels human (1 to 10) | Would reply (1 to 10) | Picked best |
-|---|---|---|---|
-| Original | 5.3 | 4.4 | 0 of 12 |
-| GPT rewrite | 4.7 | 4.8 | 1 of 12 |
-| Claude rewrite | 7.7 | 7.2 | 11 of 12 |
+| Round | Winner | Feels human | Picked best | Opened first in the inbox |
+|---|---|---|---|---|
+| 1: original vs GPT rewrite vs Claude rewrite | Claude rewrite (v1) | 7.7 vs 5.3 original, 4.7 GPT | 11 of 12 | not run |
+| 2: v1 vs added warmth | v1 (7 of 12); warm lines about the email itself flagged every time | 7.3 | 7 of 12 | v1 4, warm 4, decoys 0 of 72 |
+| 3: the combined recipe (v3) vs v1 vs warm | v3 | 7.8 vs 6.8 and 6.8 | 9 of 12 | v3 8 of 12 |
 
-GPT's rewrites drifted formal and uniform ("I'm contacting you as a...", "I don't know whether..." in nearly every
-email) and once invented a detail. One judge on 12 emails is a strong hint, not proof.
+GPT's own rewrites drifted formal and uniform and once invented a detail, so GPT judges and does not draft.
 
-Research: `docs/research/2026-11-09-human-cold-outreach.md` (ChatGPT Deep Research, 2026-11-09). Checked by hand:
+Research: `docs/research/2026-11-09-human-cold-outreach.md` (ChatGPT Deep Research) and
+`docs/research/2026-11-09-subject-lines-and-warm-cold-email.md` (GPT with live web search), both 2026-11-09. Checked by hand:
 Russell, Karpinska, Iyyer (ACL 2025: five frequent LLM users by majority vote miss 1 of 300), the Wikipedia "Signs of
 AI writing" guide (negative parallelism, rule of three, "-ing" tails, inflated significance; em dashes now a historical
 indicator), and Nick Singh's page (real cold emails that got him interviews). The PNAS paper (Jakesch et al. 2023,
@@ -53,14 +51,22 @@ What the research says, in short: the tell people actually catch is sameness acr
 wording, and leaked formatting, not contractions or warmth. Replies come from messages that say why this person,
 use one specific true detail, ask one small thing a stranger can answer in a line, and make "no" cheap. A small
 honest doubt reads as human. Feeling belongs to the work, never to the job hunt. Planted typos do not help.
+On subjects: short (Boomerang, 40 million emails: 3 to 4 words got the most replies; Gong, 85 million cold emails:
+short wins, buzzwords hurt), naming the real topic, with no trick (a blank subject raised opens and cut replies). A
+first name in the subject lifted opens in marketing email (Sahni et al. 2018) but a 2023 replication found nothing.
+Gmail shows about 38 characters of subject on a phone, then the first line of the body as preview, so the subject and
+the first line are read as one unit. On warmth: slightly warm emails got about 15% more replies than neutral ones,
+very positive ones lost it (Boomerang), and senders underrate how much a sincere note is appreciated (Kumar and Epley
+2018; Liu et al. 2022). A recruiter documented getting the same "you probably don't get many of these" line again and
+again; commenting on the email itself is a template too.
 
 ## Goals
 
-1. No email carries markdown or gives the visa line to a non-recruiter.
+1. No email carries markdown or mentions visa, OPT or sponsorship to anyone.
 2. A draft cannot quietly repeat the openings and sentences of his other emails.
 3. Each engineer, manager or founder email carries one true, sourced fact about the person or their team when one
    exists, and says plainly that they haven't met when none does.
-4. The cold-email skill writes the way the lab's winning set did.
+4. The cold-email skill writes the way the lab's winning set (v3) did, subjects included.
 5. Any change to the skill can be scored against the old one, blind, before it replaces it.
 
 ## Non-goals and anti-goals
@@ -86,14 +92,23 @@ that now blocks goes back to drafted with its reason; that is existing sender be
 it.
 
 - `markdown_link` (block): a `[text](url)` in the body. Fix: write the bare URL on its own line.
-- `opt_line` (block): `voice_opt_line` becomes a block for any `role_kind` other than `recruiter`. `mail/me.md`'s
-  line changes to "for recruiters only", matching #9.
+- `visa_line` (block): any mention of visa, OPT, STEM OPT, F-1, sponsorship, H-1B or work authorization, for every
+  reader, recruiters included (Devanshu, 2026-11-09: no visa mention anywhere; he only reaches companies he is
+  eligible for). Replaces `voice_opt_line`. The work-authorization line leaves `mail/me.md`'s usable facts (it moves
+  under "Needs Devanshu" or a "reply only" note, so the brief never hands it over), and the skill's recruiter row
+  loses its visa line and "on OPT" subject.
 - `length` (warn): first emails at most 120 words, with no floor (Devanshu, 2026-11-09: "until that anything is
   fine"). Replaces 80 to 120, and the recruiters' "about 90".
 - `reused_sentence` (warn): a sentence of 6 or more words that also appears in 3 or more of his other first emails
   (drafted, approved or sent), quoted with the count.
 - `same_opening` (warn): the first sentence after the greeting starts with the same 4 words as 5 or more of his last
   100 first emails.
+
+- `narrated_email` (warn): a line about the email itself or the reader's inbox or time ("I'll be brief", "short
+  one", "you must get a lot of these", "your inbox is probably full", "thank you for opening this", "I hope it's okay
+  that I'm asking"). Every lab judge flagged these as performed.
+- `subject_length` (warn): a subject over 40 characters (what a phone shows), or one on the vague list ("quick
+  question", "hoping to connect", "following up", "opportunity").
 
 The sameness checks warn, never block. Warnings show in the Outbox and `save_draft` returns them, and the skill
 fixes every one it can.
@@ -105,6 +120,9 @@ remember:
 
 - `recent_openings`: the first sentence of his last 30 first emails.
 - `overused`: sentences and 6-word runs found in 10 or more of his first emails, with counts.
+- `recent_subjects`: the subjects of his last 30 first emails.
+- `evidence_used`: how many of his first emails in the last 14 days leaned on each project or job (the `project`
+  field), so the drafter can pick a fitting one he has not used much.
 
 The brief id stays the hash of the voice files, me.md and the person; these lists are advice and do not change it.
 
@@ -117,30 +135,54 @@ no draft has a source. Change:
   and writes them to `person_source`. The MCP guard grants that insert to `save_draft`.
 - New warn `no_person_fact`: an engineer, manager or founder draft whose person has no profile text and no source.
   The draft still saves; the warning tells him the email is built on the role alone.
+- **His stories** (me.md, new section "Stories"): short true moments from his own public writing, each with its
+  link, that only he can tell, so an email can carry one that fits the reader. Examples from his LinkedIn posts: the
+  $200 then $500 Claude bills that made him build Saar for himself first; the pharmacy caller he built during the
+  Adderall shortage, whose hardest part was getting it to admit when it doesn't know; explaining every diff out loud
+  to an empty room before he commits; the reranker that made his code search worse before it made it better. He
+  approves each one before it goes in. A feeling about his work is used only when he wrote it himself; the drafter
+  never adds one (the lab showed made-up feelings get caught, and they would not be true).
 - The skill: when research finds nothing, the email says so plainly (for example that they haven't met and why
   this person: their title is on the team that owns the role). Never fake a connection.
 
 ### Part 4. The skill (`.claude/skills/cold-email/SKILL.md`, edited with the writing-for-agents skill)
 
-Keep every hard rule (#9's limits, truth, links, no visa line except for recruiters, his voice files, the brief).
+Keep every hard rule (#9's limits, truth, links, no visa mention at all, his voice files, the brief).
 Replace the fixed "Shape" and the by-reader table's fixed asks with what the lab and research showed works:
 
+**The subject.** Written last, from the most concrete true thing in the email, so it promises what the first line
+delivers. At most about 40 characters, lowercase is fine. What won the inbox test: a shared tie with the reader (a
+student group of theirs and his school), a result ("800ms to 280ms"), a lesson ("my reranker made search worse
+first"), an honest gap ("two years against your three"), a plain question about the role ("which team owns engineer
+I?"), or the role plus who he is ("<the program>, from a backend engineer"). What lost: warm but vague subjects ("one
+engineer to another", "a small favor, if you have a minute"), ticket titles, fake "Re:", their first name, and
+anything from `recent_subjects`.
+
+**The first line.** It is the Gmail preview, so it pays off the subject at once: the tie, the story or the reason for
+writing to this person. No pleasantries and no line about the email itself.
+
+**The body.**
 - Say why this person in the first two lines, from a true fact: their team, their title's area, something they wrote,
-  a shared school or employer. The fact the original Jason email missed (he did Sandbox at Northeastern) is the
-  kind of fact that matters.
+  a shared school or employer. A shared school activity the original email missed (it recited the person's job
+  history instead) is the kind of fact that matters.
 - Open differently from `recent_openings`. Northeastern is a fact to use when it connects, never the default opener.
-- One piece of proof chosen for this role (a Data Platform role hears about data and backend work, not a voice-agent
-  evaluator). Name the role once, exactly.
-- One ask a stranger can answer in a line and that the posting does not already answer. A name counts as success.
-  Make "no" cheap ("if it's not yours, a name helps just as much"). No fixed meeting time unless the reader is a
-  recruiter.
+- One piece of proof chosen for this role and this reader (a data platform role hears about data and backend work, not
+  a voice-agent evaluator), preferring one not heavy in `evidence_used`. Name the role once, exactly.
+- A story from "Stories" when one fits the reader; told plainly, in one or two sentences. A story that does not fit
+  the reader loses (the lab's spending story to a manager at an unrelated product).
+- Warmth comes from the specific detail, a plain sentence about why he wants this role, and an easy ask. Never from
+  talking about the reader's time or inbox, praising them, or adding a feeling he didn't write.
+- One ask a stranger can answer in a line and that the posting does not already answer. A name counts as success, and
+  "no" should be cheap. Word the ask fresh each time; "a name is plenty" and "is this yours, else who" were already
+  repeating across 12 emails.
 - A small honest doubt or gap is allowed, at most once, in his words ("I have two full-time against your three. I'm
   writing anyway.").
+- No visa, OPT or sponsorship, to anyone.
 - Vary the sign-off ("Thanks,", "Thank you,", "Best,", or none). The name line stays "Devanshu Chicholikar".
-- Cut anything that exists to sound warm ("that kind of work is what I'd want to keep doing", "caught my attention").
-  Warmth comes from the specific detail and the easy ask.
-- Before saving, read the draft against `recent_openings` and `overused`; save; fix every `reused_sentence`,
-  `same_opening` and `no_person_fact` warning the facts allow.
+- The second link may be the piece of his writing the email leans on (the rerankers post, the LLM judge post) when that
+  pays off the subject better than the project page.
+- Before saving, read the draft against `recent_openings`, `recent_subjects` and `overused`; check it with
+  `check_draft`; save; fix every sameness, `narrated_email` and `no_person_fact` warning the facts allow.
 
 Follow-ups (`outreach/followup_drafter/prompt.md` and the skill's follow-up section), Devanshu 2026-11-09: a
 follow-up may be a plain, short human nudge, the way people actually write one ("just bumping this in case it got
@@ -166,11 +208,12 @@ per-recipient scores, the deciding quotes, and phrases repeated across each set.
 - Closed or old roles, citizenship terms and people per company are not this work's concern (see Scope).
 - Length: at most 120 words; anything under that is fine.
 - Links: unchanged, exactly 2 in a first email.
+- No visa, OPT or sponsorship mention in any email, to anyone, unless they ask in a reply.
 - Follow-ups: a plain human nudge is allowed (Part 4).
 
 ## Calls made in the design (Claude's, Devanshu can overrule)
 
-- **#9 first.** The two new blocks (`markdown_link`, `opt_line`) join #9's "Approve checks" list, and #9 records
+- **#9 first.** The two new blocks (`markdown_link`, `visa_line`) join #9's "Approve checks" list, and #9 records
   the length and follow-up rulings, before any code.
 - **A dry-run check tool.** New read-only MCP tool `check_draft` (person, subject, body, `seq`): runs every save
   check, stores nothing, and leaves the message's own stored text out of the sameness counts. The skill uses it to

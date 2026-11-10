@@ -10,8 +10,8 @@ postings and decisions stay as they are until the reader is on again. The report
 
 Every request goes through one `PoliteClient`. An outage is not a finding about any one board (Review Focus 3), so:
 
-- a board whose request the breaker refuses is deferred (`next_read_at = now + defer_s`), with no `board_read` and no
-  streak change;
+- a board whose request the breaker refuses is deferred (`next_read_at = now + defer_s`, or later when it was already
+  due later), with no `board_read` and no streak change;
 - an `error` read is held back until the end of the tick. The tick also counts, per host bucket, error reads in a
   row that the polite breaker does not see as host failures (a challenge page or another wrong-shape 200, a blanket
   401 or 400; a 404 or 410 is about the board and is not counted), from boards whose last read was good only. When
@@ -288,13 +288,13 @@ class _Pass:
         now = self.now_fn()
         if listed.tripped is not None:
             self._trip(listed.tripped)
-            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self._defer_board(board, now)
             self.counts["deferred"] += 1
             return
         self._profile(board.ats, boards=1, list_requests=view.requests, list_ms=listed.list_ms)
         bucket = view.first_bucket
         if bucket is not None and bucket in self.down:  # listed before the writer took the trip: a late answer
-            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self._defer_board(board, now)
             self.counts["deferred"] += 1
             return
         if bucket is not None:
@@ -342,7 +342,7 @@ class _Pass:
         self.held_empty.clear()
 
     def _defer(self, h: _Held) -> None:
-        self._push(h.board, add_seconds(h.now, self.cfg.defer_s))
+        self._defer_board(h.board, h.now)
         self.counts["deferred"] += 1
 
     def _shielded(self, board: BoardRow, now: str) -> bool:
@@ -366,13 +366,13 @@ class _Pass:
         except HostTripped as e:  # read_board ends its body fetches itself; kept so a trip can never fail a board
             self._rollback()
             self._trip(e.bucket)
-            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self._defer_board(board, now)
             self.counts["deferred"] += 1
             return
         except RulesetNotCurrent:
             # Someone changed the ruleset mid-tick: start no more boards; the next tick rebuilds first.
             self._rollback()
-            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self._defer_board(board, now)
             self.counts["deferred"] += 1
             self.stopped = True
             self.errors.append(_RULESET_CHANGED)
@@ -405,6 +405,15 @@ class _Pass:
     def _rollback(self) -> None:
         if self.conn.in_transaction:
             self.conn.execute("ROLLBACK")
+
+    def _defer_board(self, board: BoardRow, now: str) -> None:
+        """Put the board off by `defer_s`, but never sooner than it was due: the later of its stored `next_read_at` (a
+        NULL counts as earlier) and `now + defer_s`. A tick only defers due boards, so for it this is `now + defer_s`;
+        a Check now (#194) reads boards that are not due, and a trip must not make them all due in 30 minutes."""
+        until = add_seconds(now, self.cfg.defer_s)
+        with atomic(self.conn, "tick_defer"):
+            self.conn.execute("UPDATE board SET next_read_at = CASE WHEN next_read_at IS NOT NULL AND next_read_at > ? "
+                              "THEN next_read_at ELSE ? END WHERE board_id = ?", (until, until, board.board_id))
 
     def _push(self, board: BoardRow, next_read_at: str) -> None:
         with atomic(self.conn, "tick_push"):

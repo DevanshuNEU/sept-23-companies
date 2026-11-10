@@ -85,15 +85,23 @@ class _Progress:
 
     def seen(self, run: _Pass, total: int, taken: int) -> None:
         """`_read_boards`' `on_take`: write when the first call comes (the run and its total are known) and then at
-        most every `PROGRESS_EVERY_S` seconds."""
+        most every `PROGRESS_EVERY_S` seconds. These writes are advisory: one that fails with a store error (the
+        store busy, say) is counted in `progress_write_errors` and the check reads on; the next write or the final
+        one catches up."""
         self.run = run
         self.value.update(run_id=run.run_id, total=total, checked=taken)
         now = self.clock()
         if self.last_write is None or now - self.last_write >= PROGRESS_EVERY_S:
             self.last_write = now
-            self._write()
+            try:
+                self._write()
+            except sqlite3.Error:
+                if self.conn.in_transaction:
+                    self.conn.execute("ROLLBACK")
+                self.value["progress_write_errors"] = int(self.value.get("progress_write_errors") or 0) + 1
 
     def finish(self, finished_at: str) -> None:
+        """The final write, with `finished_at`. Strict: a failure here is the check's error."""
         self.value["finished_at"] = finished_at
         self._write()
 

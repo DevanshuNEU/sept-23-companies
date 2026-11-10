@@ -5,6 +5,7 @@ network or the live store.
 """
 import dataclasses
 import json
+import sqlite3
 from unittest import mock
 
 from outreach.crawl import check_all
@@ -216,6 +217,68 @@ class ProgressTests(CheckCase):
         routes[ashby("a0")] = ashby_ok()
         self.tick(routes, cfg=cfg)
         self.assertEqual(self.progress()["paused_hosts"], ["greenhouse"])
+
+    def test_a_tripped_check_never_makes_a_board_due_sooner(self):
+        # A deferral writes the later of the stored next_read_at and now + defer_s: a trip early in a check must not
+        # make every not-due board of that host due in 30 minutes.
+        later = []
+        for i in range(6):
+            bid = self.board(f"g{i}")
+            self.read_before(bid, 3600, next_in=86400)
+            later.append(bid)
+        due = self.board("due")
+        self.read_before(due, 30000, next_in=-60)
+        self.request()
+        cfg = dataclasses.replace(self.cfg, breaker_failures=3)
+        routes = {gh(f"g{i}"): status_response(503) for i in range(6)}
+        routes[gh("due")] = status_response(503)
+        self.tick(routes, cfg=cfg)
+        self.assertEqual(self.progress()["paused_hosts"], ["greenhouse"])
+        for bid in later:
+            self.assertEqual(self.row(bid)["next_read_at"], at(86400))
+        self.assertEqual(self.row(due)["next_read_at"], at(self.cfg.defer_s))
+
+    def test_a_failed_progress_write_mid_run_does_not_stop_the_check(self):
+        tokens = [f"b{i}" for i in range(4)]
+        for t in tokens:
+            self.read_before(self.board(t), 3 * 3600, next_in=86400)
+        self.request()
+
+        def answer(method, url, headers, body):
+            self.clock.t += 1.5  # every take is past the throttle, so each one tries a write
+            return ok()
+
+        real = check_all.write_progress
+        calls = []
+
+        def flaky(conn, value):
+            calls.append(value["finished_at"])
+            if value["finished_at"] is None and len(calls) > 1:
+                raise sqlite3.OperationalError("database is locked")
+            real(conn, value)
+
+        with mock.patch.object(check_all, "write_progress", side_effect=flaky):
+            report = self.tick({gh(t): answer for t in tokens})
+        self.assertEqual(report.check_error, "")
+        self.assertEqual(sorted(self.client.requests), sorted(gh(t) for t in tokens))
+        last = self.progress()
+        self.assertEqual((last["checked"], last["total"]), (4, 4))
+        self.assertIsNotNone(last["finished_at"])
+        self.assertEqual(last["progress_write_errors"], len(calls) - 2)  # all but the first and the final write
+
+    def test_a_failed_final_progress_write_is_the_checks_error(self):
+        self.read_before(self.board("quiet"), 3 * 3600, next_in=86400)
+        self.request()
+        real = check_all.write_progress
+
+        def final_fails(conn, value):
+            if value["finished_at"] is not None:
+                raise sqlite3.OperationalError("database is locked")
+            real(conn, value)
+
+        with mock.patch.object(check_all, "write_progress", side_effect=final_fails):
+            report = self.tick({gh("quiet"): ok()})
+        self.assertIn("database is locked", report.check_error)
 
     def test_the_check_lists_through_the_workers(self):
         routes = {}

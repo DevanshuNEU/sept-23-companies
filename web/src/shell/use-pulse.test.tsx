@@ -42,13 +42,19 @@ describe('the pulse', () => {
     client.rev = 9;
     await poll();
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(PULSE_REFETCHES.length));
-    expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual(PULSE_REFETCHES);
+    expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual([
+      ['plan'],
+      ['shell'],
+      ['needs-you'],
+      ['jobs'],
+      ['jobs-check'],
+    ]);
   });
 
   it('refetches the job list when the pulse moves', async () => {
     const { client, invalidate, poll } = setup();
     await waitFor(() => expect(client.calls).toBe(1));
-    client.rev = 8; // the crawler found a new posting, or a check moved on
+    client.rev = 8; // a read found a new posting (a postings_new event); check progress writes never move it
     await poll();
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(PULSE_REFETCHES.length));
     const keys = invalidate.mock.calls.map(([f]) => f?.queryKey);

@@ -250,6 +250,7 @@ def _profile(runs: int, as_json: bool) -> int:
         print(f"{r.ats:<18}{r.boards:>7}{r.seconds:>10.1f}{r.seconds_per_board:>9.2f}{r.share * 100:>7.1f}%"
               f"{r.list_requests:>7}{r.body_requests:>8}{r.new:>6}{r.closed:>8}{r.reopened:>9}")
     print("seconds = list calls + bodies (fetch and store) + ingest; lists and bodies are request counts")
+    print("list time is added up across worker threads (waits included), so rows can sum past the tick time")
     return 0
 
 

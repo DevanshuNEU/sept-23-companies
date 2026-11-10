@@ -2,8 +2,9 @@
 
 One tick is one `read_boards` job run. It rebuilds first when the store's ruleset is not this code's, so a rebuild
 and a crawl never overlap; `tick_lock` keeps two ticks from running at once. Boards come from `due_boards` in its
-fixed order (today's plan, then never read, then the oldest due), and no new board starts once `tick_budget_s` has
-passed, so a Mac that slept for days reads what matters first and leaves the rest due. A board whose ATS's reader is
+fixed order (today's plan, then never read, then the oldest due), and once `tick_budget_s` has passed no new board
+is listed and no listed board still waiting for the writer is written, so a Mac that slept for days reads what
+matters first and leaves the rest due. A board whose ATS's reader is
 switched off in config.toml (`ats_off`, #46) is never due: nothing is sent, deferred or written for it, so its state,
 postings and decisions stay as they are until the reader is on again. The report counts such boards in `switched_off`.
 
@@ -84,6 +85,7 @@ MASS_EMPTY_BOARDS = 5
 _PROFILE_KEYS = ("boards", "list_requests", "list_ms", "body_requests", "body_ms", "ingest_ms", "new", "closed",
                  "reopened")
 _MAX_ERROR_LINES = 20  # board failures named in job_run.error; the count is always complete
+_RULESET_CHANGED = "the ruleset changed during the tick; the next tick rebuilds first"
 
 
 @dataclass(frozen=True)
@@ -371,7 +373,7 @@ class _Pass:
             self._push(board, add_seconds(now, self.cfg.defer_s))
             self.counts["deferred"] += 1
             self.stopped = True
-            self.errors.append("the ruleset changed during the tick; the next tick rebuilds first")
+            self.errors.append(_RULESET_CHANGED)
             return
         except Exception as e:
             # Our bug, not the board's error: no streak change, and the wait its next error would get.
@@ -414,8 +416,12 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
                  cfg: CrawlConfig, rules_cfg, combiner, now_fn, clock, started: float,
                  rebuilt: bool, switched_off: int = 0,
                  workers: Mapping[str, int] | None = None) -> tuple[TickReport, _Pass]:
-    """One `read_boards` job run over `select(now)`, starting no board once the budget is spent. `switched_off` is
-    the count of boards `select` leaves out because their reader is off; it goes into the report as it is.
+    """One `read_boards` job run over `select(now)`. Once the budget is spent (or the pass stopped) no board is
+    listed, and under `workers` no listed board still waiting for the writer is written: listing on threads is fast
+    and writing (with its body fetches) is not, so the budget bounds both. A board listed but not written keeps its
+    `next_read_at` and is read again next tick. Serially each board is written as soon as it is listed, as before.
+    `switched_off` is the count of boards `select` leaves out because their reader is off; it goes into the report
+    as it is.
 
     The lists go through `fanout.list_boards`: inline in board order when `workers` is None, else on worker threads
     (#158). Every write happens here, on the thread that owns `conn`, as each list comes back; the body fetches stay
@@ -431,13 +437,18 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
 
         listed = fanout.list_boards(select(now), run.start, lambda b: full_read_due(conn, b, now), workers=workers,
                                     should_stop=should_stop, clock=clock)
-        with contextlib.closing(listed):  # a raise below stops the workers now, not when the frame is collected
+        with contextlib.closing(listed):  # a break or a raise stops the workers now, not when the frame is collected
             try:
                 for item in listed:
+                    # Serially a board is written as soon as it is listed. Fanned out, lists run ahead of the
+                    # writer, so a listed board may wait here, and the budget stops its write too.
+                    if workers is not None and should_stop():
+                        break
                     run.take(item)
-            except RulesetNotCurrent:
+            except RulesetNotCurrent:  # a worker met it; an ingest that met it first has said so already
+                if not run.stopped:
+                    run.errors.append(_RULESET_CHANGED)
                 run.stopped = True
-                run.errors.append("the ruleset changed during the tick; the next tick rebuilds first")
         run.finish()
     except BaseException as e:
         try:

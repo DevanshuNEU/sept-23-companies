@@ -4,6 +4,10 @@ Store only, nothing sent. An ATS's seconds are its list calls, its bodies (fetch
 tick keeps apart: `ingest_ms` already leaves `body_ms` out, so the three add up without counting a body twice.
 `share` is the ATS's seconds over the summed `seconds` of the used runs (each summary's `seconds` is the whole tick).
 A run whose summary has no `by_ats` (from before #152) is skipped and does not count toward `runs`.
+
+When the tick lists on worker threads (#158), an ATS's list time is thread time: each worker's list calls, spacing
+waits included, added up across the workers, not the time that passed. So the ATS rows can add up to more than the
+runs' `seconds`, which is always the time that passed, and `share` can then go past 100%.
 """
 from __future__ import annotations
 

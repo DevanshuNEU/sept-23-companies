@@ -27,7 +27,7 @@ from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
 from outreach.rules import RulesetNotCurrent, ruleset_version
-from tests.fakes import FakeClient, feed_off, status_response, text_response
+from tests.fakes import FakeClient, feed_off, status_response, text_response, with_greenhouse_details
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
@@ -1176,21 +1176,82 @@ class ThreadedTickTests(TickCase):
     def test_stop_after_budget_starts_no_new_board_threaded(self):
         tokens = ["b1", "b2", "b3", "b4", "b5"]
         ids = [self.board(t) for t in tokens]
+        b1_written = threading.Event()
+        real = tick.read_board
+
+        def spy(conn, board, adapter, **kw):
+            out = real(conn, board, adapter, **kw)
+            if board.token == "b1":
+                b1_written.set()
+            return out
 
         def slow(method, url, headers, body):
+            if url == gh("b2"):  # b2 is listed once b1 is written, so the order is fixed
+                self.assertTrue(b1_written.wait(10))
             self.clock.t += 1000
             return ok()
 
         # One Greenhouse worker, so the boards are listed one after another and the budget is seen between them.
         workers = {"default": 2, "greenhouse": 1}
-        report = self.tick({gh(t): slow for t in tokens}, cfg=dataclasses.replace(self.cfg, tick_budget_s=1500),
-                           workers=workers)
+        with mock.patch.object(tick, "read_board", spy):
+            report = self.tick({gh(t): slow for t in tokens}, cfg=dataclasses.replace(self.cfg, tick_budget_s=1500),
+                               workers=workers)
         self.assertEqual(self.client.requests, [gh("b1"), gh("b2")])
-        self.assertEqual(report.read, 2)
-        for bid in ids[2:]:
+        # b1 was written at 1000 s; b2 was listed then (within the budget) but came back at 2000 s, past it: not
+        # written, still due.
+        self.assertEqual(report.read, 1)
+        self.assertEqual(self.row(ids[0])["last_read"], "ok")
+        for bid in ids[1:]:
             row = self.row(bid)
             self.assertIsNone(row["last_read"])
             self.assertIsNone(row["next_read_at"])  # started on the writer's side only: still due
+        self.assertEqual(listing_threads(), [])
+
+    def test_the_budget_stops_writing_boards_already_listed(self):
+        # Listing is fast and the bodies are slow: the budget runs out while listed boards wait for the writer. No
+        # board is written and no body is asked for after that, and the boards left keep their next_read_at.
+        tokens = [f"g{i}" for i in range(6)]
+        ids = [self.board(t) for t in tokens]
+        for bid in ids:
+            self.read_before(bid, 3600, next_in=-60)
+        cfg = dataclasses.replace(load_crawl_config(), tick_budget_s=1500)  # bodies on: detail_per_read as shipped
+        slow_once: set[str] = set()
+
+        def slow_body(method, url, headers, body):
+            token = url.split("/boards/")[1].split("/")[0]
+            if token not in slow_once:  # each board's bodies take 1000 s on the fake clock
+                slow_once.add(token)
+                self.clock.t += 1000
+            return status_response(404)
+
+        routes = {gh(t): ok() for t in tokens}
+        routes = {url: (slow_body if url not in routes else value)
+                  for url, value in with_greenhouse_details(routes).items()}
+        lists = set(routes) & {gh(t) for t in tokens}
+        real = tick.read_board
+        written = []
+
+        def spy(conn, board, adapter, **kw):
+            deadline = time.monotonic() + 10
+            while not lists <= set(self.client.requests):  # every board listed before the first is written
+                if time.monotonic() > deadline:
+                    raise AssertionError("the workers never listed every board")
+                time.sleep(0.001)
+            written.append(board.token)
+            return real(conn, board, adapter, **kw)
+
+        with mock.patch.object(tick, "read_board", spy):
+            report = self.tick(routes, cfg=cfg, workers=self.cfg.workers)
+        self.assertEqual(len(written), 2)  # 0 s, then 1000 s: the third would start at 2000 s
+        self.assertEqual(report.read, 2)
+        bodies = [u for u in self.client.requests if u not in lists]
+        self.assertEqual({u.split("/boards/")[1].split("/")[0] for u in bodies}, set(written))
+        for token, bid in zip(tokens, ids):
+            if token in written:
+                continue
+            row = self.row(bid)
+            self.assertEqual((row["last_read_at"], row["next_read_at"]), (at(-3600), at(-60)))
+            self.assertEqual(self.reads(bid), [])
         self.assertEqual(listing_threads(), [])
 
     def test_a_ruleset_change_while_listing_stops_the_pass(self):

@@ -53,6 +53,23 @@ describe('heldRows', () => {
     expect(waiting).toBe(1);
   });
 
+  it('with more pages on the server, shown rows pushed past the loaded window stay: they are not gone', () => {
+    const tail = [job(1), job(2), job(3), job(4), job(5)];
+    const { rows, waiting } = heldRows(tail, [job(10), job(1), job(2), job(3), job(4)], false, true, true);
+    expect(ids(rows)).toEqual([1, 2, 3, 4, 5]);
+    expect(waiting).toBe(1);
+  });
+
+  it('with no more pages, a shown row missing at the end is gone', () => {
+    const tail = [job(1), job(2), job(3), job(4), job(5)];
+    expect(ids(heldRows(tail, [job(10), job(1), job(2), job(3), job(4)], false, true, false).rows)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('a passed last row still leaves when the next page moves a row into the window', () => {
+    const { rows } = heldRows(shown, [job(1), job(2), job(6)], false, true, true);
+    expect(ids(rows)).toEqual([1, 2, 6]);
+  });
+
   it('with nothing shown yet, everything shows', () => {
     expect(heldRows([], incoming, false, true)).toEqual({ rows: incoming, waiting: 0 });
   });

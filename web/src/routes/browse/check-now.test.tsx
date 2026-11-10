@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { queryKeys, type CheckStatus } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
+import { Link, useLocation } from 'react-router';
 import { renderWithApp } from '@/test/render';
 import BrowsePage from './index';
 import { LAST_OPENED_KEY } from './new-rows';
@@ -26,6 +27,16 @@ const checkButton = () => screen.getByRole('button', { name: /^Check now/ });
 /** One second of the status poll. */
 const second = () => act(() => vi.advanceTimersByTimeAsync(1000));
 
+/** Jobs at /browse, a stand-in company page anywhere else: going there unmounts Jobs, as the app does. */
+function JobsOrCompany() {
+  const { pathname } = useLocation();
+  return pathname === '/browse' ? (
+    <BrowsePage />
+  ) : (
+    <Link to="/browse">Back to Jobs</Link>
+  );
+}
+
 async function open(setup: (c: FixtureClient) => void = () => {}) {
   const client = new FixtureClient(buildFixture('queue'));
   setup(client);
@@ -39,7 +50,7 @@ async function open(setup: (c: FixtureClient) => void = () => {}) {
 /** The sample check run to its end behind the page's back (as the crawler does), then the pulse's refetch of the list. */
 async function findNewJobs(client: FixtureClient, queryClient: QueryClient) {
   await client.checkNow({ requestId: `test-${Math.random()}` });
-  for (let i = 0; i < 5; i++) await client.checkStatus();
+  for (let i = 0; i < 4; i++) client.advanceCheck();
   await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll }));
 }
 
@@ -98,6 +109,7 @@ describe('Check now', () => {
     await user.click(checkButton());
     await waitFor(() => expect(asks).toHaveBeenCalledTimes(2));
     await expect(asks.mock.results[1]?.value).resolves.toMatchObject({ state: 'running' });
+    await second();
     // Still the same check, going on from where it was: no new start, no second walk.
     expect(await head().findByText(/^Checked 2,710 of 4,013 boards, 4 new/)).toBeInTheDocument();
     expect(head().queryByText(/^Waiting/)).not.toBeInTheDocument();
@@ -199,9 +211,52 @@ describe('new rows', () => {
     expect(within(row(9001)).queryByText('New')).not.toBeInTheDocument(); // a repost
     expect(within(row(9080)).queryByText('New')).not.toBeInTheDocument(); // found on its board's first read
     expect(within(row(9005)).queryByText('New')).not.toBeInTheDocument(); // first seen before the last visit
-    // Opening the page is the new last visit; the marks stay for this one.
+    // Opening the page changes nothing kept; leaving it (the tab closes or reloads) is the new last visit.
+    expect(window.localStorage.getItem(LAST_OPENED_KEY)).toBe('2026-11-08T00:00:00.000Z');
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
     expect(Date.parse(window.localStorage.getItem(LAST_OPENED_KEY) ?? '')).toBeGreaterThanOrEqual(mounted);
     expect(within(row(9000)).getByText('New')).toBeInTheDocument();
+  });
+
+  it('leaving Jobs for a company page and coming back keeps the New markers', async () => {
+    window.localStorage.setItem(LAST_OPENED_KEY, '2026-11-08T00:00:00.000Z');
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithApp(<JobsOrCompany />, { route: '/browse', client: new FixtureClient(buildFixture('queue')), queryClient });
+    await waitFor(() => expect(within(row(9000)).getByText('New')).toBeInTheDocument());
+    const user = userEvent.setup();
+    await user.click(within(row(9000)).getByRole('link', { name: 'Retell AI' }));
+    await user.click(await screen.findByRole('link', { name: 'Back to Jobs' }));
+    await waitFor(() => expect(within(row(9000)).getByText('New')).toBeInTheDocument());
+    expect(window.localStorage.getItem(LAST_OPENED_KEY)).toBe('2026-11-08T00:00:00.000Z');
+  });
+
+  it('with more pages to load, a check that finds rows never moves the row he is on', async () => {
+    const { client, queryClient } = await open();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Any time' }));
+    await waitFor(() => expect(rows()).toHaveLength(50));
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
+    const near = rows()[47] as HTMLElement;
+    const id = near.getAttribute('data-job');
+    fireEvent.click(near);
+    await waitFor(() => expect(near).toHaveAttribute('aria-current', 'true'));
+    scroller().scrollTop = 2400;
+    fireEvent.scroll(scroller());
+    const scrolls = vi.mocked(Element.prototype.scrollIntoView).mock.calls.length;
+    await findNewJobs(client, queryClient);
+    expect(await screen.findByRole('button', { name: '6 new' })).toBeInTheDocument();
+    expect(rows()).toHaveLength(50);
+    expect(row(Number(id))).toHaveAttribute('aria-current', 'true');
+    expect(rows()[47]).toHaveAttribute('data-job', id);
+    expect(scroller().scrollTop).toBe(2400);
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.calls.length).toBe(scrolls);
+    // Show more brings the rest, once each.
+    await user.click(screen.getByRole('button', { name: 'Show more' }));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(50));
+    const shownIds = rows().map((r) => r.getAttribute('data-job'));
+    expect(new Set(shownIds).size).toBe(shownIds.length);
   });
 
   it('nothing is marked new on a first visit', async () => {

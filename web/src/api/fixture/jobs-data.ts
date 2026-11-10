@@ -101,11 +101,12 @@ export function sortJobs(rows: JobRow[]): JobRow[] {
 }
 
 /**
- * Check now on the sample (#194): each status read after a click is one step of this walk, queued, then running, then
- * done, so a page that polls every second sees it all in about five seconds. `found` is how many new postings the check
- * has found by then; only the first check of a session finds any.
+ * Check now on the sample (#194): after a click the check moves one step of this walk a second (`CHECK_STEP_MS`),
+ * queued, then running, then done, so it ends about four seconds later; reading the status never moves it. `found` is
+ * how many new postings the check has found by then; only the first check of a session finds any.
  */
 export const CHECK_BOARDS = 4013;
+export const CHECK_STEP_MS = 1000;
 export const CHECK_WALK: readonly { state: 'queued' | 'running' | 'done'; checked: number; found: number }[] = [
   { state: 'queued', checked: 0, found: 0 },
   { state: 'running', checked: 1240, found: 3 },

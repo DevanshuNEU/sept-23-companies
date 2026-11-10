@@ -232,9 +232,14 @@ export default function BrowsePage() {
   const scroller = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
   const check = useCheckNow();
-  // His last visit marks what is new; opening the page is the next one.
+  // His last visit marks what is new, read once a mount. A visit ends when the tab closes or reloads (or at "N new"), not
+  // when he steps to a company page and back, so the marks stay for the whole sitting.
   const [since] = useState(readLastOpened);
-  useEffect(() => markOpened(), []);
+  useEffect(() => {
+    const leave = () => markOpened();
+    window.addEventListener('pagehide', leave);
+    return () => window.removeEventListener('pagehide', leave);
+  }, []);
   const [atTop, setAtTop] = useState(true);
   /** The rows on screen for one ask (`key`), so new rows can wait while he is scrolled down or on a row. */
   const [held, setHeld] = useState<{ key: string; rows: JobRow[] } | null>(null);
@@ -265,7 +270,7 @@ export default function BrowsePage() {
   // (a tab, a window, a search) starts from what it brings.
   const listKey = JSON.stringify(params);
   const sameAsk = !stale && query.data !== undefined && held?.key === listKey;
-  const shown = sameAsk && held ? heldRows(held.rows, loaded, atTop, active !== null) : { rows: loaded, waiting: 0 };
+  const shown = sameAsk && held ? heldRows(held.rows, loaded, atTop, active !== null, query.hasNextPage) : { rows: loaded, waiting: 0 };
   if (!stale && query.data !== undefined && (held?.key !== listKey || !sameRows(held.rows, shown.rows))) setHeld({ key: listKey, rows: shown.rows });
 
   const jobs = useMemo(() => shown.rows.filter((j) => !hidden.has(j.postingId)), [shown.rows, hidden]);

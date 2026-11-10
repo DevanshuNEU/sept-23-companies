@@ -93,7 +93,8 @@ class PoliteClient:
 
     def _begin(self, url: str) -> str:
         """Refuse a switched-off ATS's host and a tripped bucket, wait out the bucket's spacing, then refuse a bucket
-        that tripped meanwhile. Returns the bucket. Every request and every redirect hop starts here, so nothing reaches a switched-off host."""
+        that tripped meanwhile. Returns the bucket. Every request and every redirect hop starts here, so nothing
+        reaches a switched-off host."""
         host = _host(url)
         bucket = bucket_for(host, self.cfg)
         ats = self.cfg.off_host(host)

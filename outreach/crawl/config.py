@@ -51,6 +51,7 @@ class CrawlConfig:
     default_host_interval_s: float
     host_interval_s: dict[str, float]
     split_hosts: frozenset[str]  # buckets (host_interval_s keys) whose hosts are spaced one by one
+    workers: dict[str, int]  # ATS name or "default" -> threads that list its boards at once (#158)
     breaker_failures: int
     batch_rows: int
     decide_batch: int
@@ -113,8 +114,8 @@ def _load_big_board(table: object, floor_s: int, ceiling_s: int) -> BigBoardConf
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "split_hosts", "ats_off",
-                "big_board"):
+    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "split_hosts", "workers",
+                "ats_off", "big_board"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -134,6 +135,16 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     unknown = sorted(h for h in split if h.lower() not in {k.lower() for k in hosts})
     if unknown:
         raise ValueError(f"split_hosts names {', '.join(unknown)}, which is not a host_interval_s key")
+    workers = data["workers"]
+    if not isinstance(workers, dict):
+        raise ValueError("workers must be a table of thread counts per ATS, with a default")
+    if "default" not in workers:
+        raise ValueError("workers.default is missing from the config")
+    for name, n in workers.items():
+        if name != "default" and name not in ATS_HOSTS:
+            raise ValueError(f"workers.{name} is not an ATS the crawler reads (it reads: {', '.join(sorted(ATS_HOSTS))})")
+        if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 16:
+            raise ValueError(f"workers.{name} must be a whole number 1 to 16, got {n!r}")
     off = data["ats_off"]
     if not isinstance(off, dict):
         raise ValueError("ats_off must be a table of ATS names, each with the reason its reader is off")
@@ -166,6 +177,7 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}
     kwargs["split_hosts"] = frozenset(h.lower() for h in split)
+    kwargs["workers"] = dict(workers)
     kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
     kwargs["big_board"] = big
     return CrawlConfig(**kwargs)

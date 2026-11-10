@@ -63,6 +63,15 @@ body_refetch_days = 30
 "myworkdayjobs.com" = 1.0
 "oraclecloud.com" = 1.0
 
+# Threads that list boards at once (#158), per ATS; `default` is every ATS not named here (1 to 16 each). Spacing per
+# host and the breaker still hold across all of them, so more threads never mean more requests a second to one host.
+[workers]
+default = 2
+greenhouse = 6
+ashby = 4
+lever = 1
+workable = 1
+
 # Readers switched off (#46), each with the reason. A board on one of these ATSs is never read, probed or slug-probed,
 # and its state, postings and decisions stay as they are; no request goes to the ATS's host. Deleting a line turns
 # that reader back on. A name that is not one of the crawler's readers fails at load.

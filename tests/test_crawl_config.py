@@ -38,6 +38,17 @@ def _with_split(value):
     return _SPLIT_LINE.sub(lambda _: "" if value is None else f"split_hosts = {value}", text)
 
 
+_WORKERS_TABLE = re.compile(r"(?ms)^\[workers\]\n.*?(?=^\[|\Z)")
+
+
+def _with_workers(lines):
+    """The shipped config with its `[workers]` table replaced by these lines (None drops the table)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _WORKERS_TABLE.search(text), "the shipped config has a [workers] table"
+    table = "" if lines is None else "[workers]\n" + "".join(line + "\n" for line in lines) + "\n"
+    return _WORKERS_TABLE.sub(lambda _: table, text)
+
+
 _OFF_TABLE = re.compile(r"(?ms)^\[ats_off\]\n.*?(?=^\[|\Z)")
 
 
@@ -237,6 +248,30 @@ class CrawlConfigTests(unittest.TestCase):
                 p.write_text(broken, encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "host_interval_s"):
                     load_crawl_config(p)
+
+    def test_shipped_workers(self):
+        self.assertEqual(load_crawl_config().workers,
+                         {"default": 2, "greenhouse": 6, "ashby": 4, "lever": 1, "workable": 1})
+
+    def test_workers_default_is_required(self):
+        with self.assertRaisesRegex(ValueError, "workers.default"):
+            _load_text(_with_workers(["greenhouse = 6"]))
+
+    def test_a_missing_workers_table_is_named(self):
+        with self.assertRaisesRegex(KeyError, "workers"):
+            _load_text(_with_workers(None))
+
+    def test_workers_are_whole_numbers_from_1_to_16(self):
+        for bad in ("0", "17", "-1", "2.5", '"2"', "true"):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "workers.greenhouse"):
+                    _load_text(_with_workers(["default = 2", f"greenhouse = {bad}"]))
+        cfg = _load_text(_with_workers(["default = 1", "greenhouse = 16"]))
+        self.assertEqual(cfg.workers, {"default": 1, "greenhouse": 16})
+
+    def test_workers_name_only_ats_the_crawler_reads(self):
+        with self.assertRaisesRegex(ValueError, "workers.grenhouse"):
+            _load_text(_with_workers(["default = 2", "grenhouse = 6"]))
 
 
 if __name__ == "__main__":

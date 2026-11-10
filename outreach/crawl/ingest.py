@@ -7,9 +7,10 @@ next read repairs. The order is what keeps the read contract:
 2. for an `ok` read, diff the listing with the stored postings and find the list bodies that changed;
 2b. the first-read check of a board matched by name or by a guessed slug (ruling 8), before any posting of the
     read is written;
-3. write the new and listed postings; then, in units of `decide_batch`, each changed posting's new fields and new
-   body together with its decision, so a crash can never leave a title, location or body newer than the decision on
-   it (`save_body` resets a replaced body's decision itself);
+3. write the new and listed postings (a new one with its list time, its seen gap and the posting it reposts,
+   #193); then, in units of `decide_batch`, each changed posting's new fields and new body together with its
+   decision, so a crash can never leave a title, location or body newer than the decision on it (`save_body` resets
+   a replaced body's decision itself);
 4. decide every open posting with no current decision (a new posting a crash left undecided);
 5. close: `gone_from_board` after an `ok` read only, `board_empty_twice` on the second empty read in a row;
 6. fetch missing and due bodies one request at a time (`ok` and `unchanged` reads), storing and deciding each as it
@@ -26,6 +27,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.bodies import BODY_LANES, fetch_bodies, missing_body_ids, refetch_body_ids, save_body, stored_sha
@@ -42,8 +44,10 @@ from outreach.rules.config import default_config
 from outreach.rules.text import clean_text
 from outreach.rules.title import classify_title
 from outreach.store import atomic, body_sha256, describe_error, name_key
+from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["ReadOutcome", "read_board", "list_board", "full_read_due", "DOUBTFUL_JOBS", "FULL_READ_AFTER_S"]
+__all__ = ["ReadOutcome", "read_board", "list_board", "full_read_due", "seen_gap_s", "DOUBTFUL_JOBS",
+           "FULL_READ_AFTER_S"]
 
 # Ruling 8: every LCA company files 25 or fewer, so a board listing more jobs than this is likely another company's.
 DOUBTFUL_JOBS = 300
@@ -114,7 +118,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     if plan is not None:
         # Phase 3: new and listed postings; then each changed field or body with its decision, as one unit.
         ids = write_postings(conn, board, DiffPlan(plan.new, (), plan.present, plan.reopen, ()), now,
-                             batch_rows=cfg.batch_rows)
+                             batch_rows=cfg.batch_rows, seen_gap_s=seen_gap_s(board, now))
         listed_with_body = {ids[j.native_id] for j in result.jobs if j.body and j.native_id in ids}
         texts = {ids[nid]: text for nid, text in body_updates if nid in ids}
         decided += _apply_changes(conn, board, plan.changed, texts, now, cfg, rules_cfg, combiner)
@@ -167,6 +171,15 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     return ReadOutcome(board_id=board.board_id, result=result.result, new=new, changed=changed, reopened=reopened,
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped,
                        body_requests=body_requests, body_ms=body_ms)
+
+
+def seen_gap_s(board: BoardRow, now: str) -> int | None:
+    """Whole seconds from the board's last good read to `now` (never negative), or None when it has had none: a
+    posting this read finds was first seen this long after the board was last read well (#193)."""
+    if board.last_good_read_at is None:
+        return None
+    gap = datetime.strptime(now, ISO_FMT) - datetime.strptime(board.last_good_read_at, ISO_FMT)
+    return max(0, int(gap.total_seconds()))
 
 
 def full_read_due(conn: sqlite3.Connection, board: BoardRow, now: str) -> bool:

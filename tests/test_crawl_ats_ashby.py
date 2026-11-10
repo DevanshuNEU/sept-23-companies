@@ -112,6 +112,21 @@ class AshbyTests(unittest.TestCase):
                 r, _ = read({URL: board(jobs)})
                 self.assertEqual(r.jobs[0].posted_on, "2026-10-05")
 
+    def test_ashby_posted_at_from_published_at(self):
+        r, _ = read({URL: ok()})
+        self.assertEqual([j.posted_at for j in r.jobs], ["2026-09-15T10:21:33Z", "2026-10-02T09:00:00Z"])
+        jobs = fixture()["jobs"][:1]
+        jobs[0]["publishedAt"] = "2026-11-09T10:38:00.123-05:00"
+        r, _ = read({URL: board(jobs)})
+        self.assertEqual(r.jobs[0].posted_at, "2026-11-09T15:38:00Z")
+        # updatedAt is never the posting time, even when publishedAt is missing or unreadable.
+        for published in (None, "not a date", "2026-02-30", 5):
+            with self.subTest(published=published):
+                jobs[0]["publishedAt"] = published
+                jobs[0]["updatedAt"] = "2026-10-05T01:02:03.000+00:00"
+                r, _ = read({URL: board(jobs)})
+                self.assertIsNone(r.jobs[0].posted_at)
+
     def test_empty_board_is_empty(self):
         r, _ = read({URL: ok(EMPTY)})
         self.assertEqual((r.result, r.jobs, r.validators), ("empty", (), Validators()))

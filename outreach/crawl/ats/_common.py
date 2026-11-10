@@ -11,8 +11,9 @@ from collections.abc import Iterable, Mapping
 
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint, valid_token
 from outreach.net import FetchError, HttpClient, Response
+from outreach.store.timefmt import iso_utc
 
-__all__ = ["safe_token", "read_error", "fetch_list", "json_body", "finish_list", "d10"]
+__all__ = ["safe_token", "read_error", "fetch_list", "json_body", "finish_list", "d10", "utc_time"]
 
 
 def safe_token(ats: str, token: str) -> bool:
@@ -83,6 +84,7 @@ def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, 
 
 
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
 
 
 def d10(value) -> str | None:
@@ -110,4 +112,16 @@ def d10(value) -> str | None:
     try:
         return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%d")
     except (OverflowError, OSError, ValueError):
+        return None
+
+
+def utc_time(value) -> str | None:
+    """An ISO timestamp with a time of day as canonical UTC (`2026-11-09T10:38:00-05:00` is `2026-11-09T15:38:00Z`),
+    or None. A bare date, a number, an impossible date and any other text are None: a posting time must be a time.
+    A timestamp with no offset is read as UTC, as `iso_utc` reads it."""
+    if not isinstance(value, str) or not _ISO_TIME.match(value.strip()):
+        return None
+    try:
+        return iso_utc(value.strip())
+    except ValueError:
         return None

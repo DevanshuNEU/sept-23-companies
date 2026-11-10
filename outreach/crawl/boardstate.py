@@ -38,6 +38,8 @@ class BoardRow:
     # so a BoardRow built by hand without it fails loudly) and the stored error text.
     found_by: str
     last_error: str = ""
+    # The board's last ok, unchanged or empty read (#193): a new posting's seen gap is measured from it.
+    last_good_read_at: str | None = None
 
 
 _COLUMNS = tuple(f.name for f in dataclasses.fields(BoardRow))
@@ -58,6 +60,7 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
                       bucket: str | None = None) -> Streaks:
     """Record one read of `board` as one unit (its own BEGIN IMMEDIATE transaction, or a savepoint in the caller's).
 
+    `last_good_read_at` moves to `now` on an `ok`, `unchanged` or `empty` read; an `error` read leaves it (#193).
     Validators: `ok` stores the result's; `unchanged` and `error` keep the stored ones (an error result carries
     empty validators, which must never overwrite good ones); `empty` clears both, so a board that comes back after
     emptying can never be read as `unchanged` and its postings get the chance to reopen (Review Focus 4).
@@ -83,13 +86,15 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
         etag, fingerprint = board.etag, board.ids_fingerprint
     error = result.error if result.result == "error" else ""
     postings = open_postings if result.result == "unchanged" else len(result.jobs)
+    good_at = None if result.result == "error" else now  # an error read keeps the stored last good read
     with atomic(conn, "board_state"):
         conn.execute(
             "UPDATE board SET last_read = ?, last_read_at = ?, empty_streak = ?, error_streak = ?, streak_since = ?, "
             "last_error = ?, etag = ?, ids_fingerprint = ?, next_read_at = ?, "
-            "change_interval_s = coalesce(?, change_interval_s) WHERE board_id = ?",
+            "change_interval_s = coalesce(?, change_interval_s), last_good_read_at = coalesce(?, last_good_read_at) "
+            "WHERE board_id = ?",
             (streaks.last_read, now, streaks.empty_streak, streaks.error_streak, streaks.streak_since, error, etag,
-             fingerprint, next_read_at, interval_s, board.board_id))
+             fingerprint, next_read_at, interval_s, good_at, board.board_id))
         conn.execute(
             "INSERT INTO board_read(board_id, run_id, at, result, http_status, error, postings) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(board_id, run_id) DO NOTHING",

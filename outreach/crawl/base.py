@@ -19,7 +19,8 @@ class Validators:
 
 @dataclass(frozen=True)
 class JobRef:
-    """One posting in a board's list response. `body` is set only when the list response carries it."""
+    """One posting in a board's list response. `body` is set only when the list response carries it. `posted_at` is
+    the time the board says the job went up (canonical UTC), set only by an ATS whose time is trusted (#193)."""
     native_id: str
     title: str
     url: str
@@ -27,6 +28,7 @@ class JobRef:
     country: str | None
     posted_on: str | None
     body: str | None
+    posted_at: str | None = None
 
 
 _RESULTS = ("ok", "empty", "error", "unchanged")

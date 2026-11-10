@@ -13,7 +13,7 @@ from __future__ import annotations
 import html
 import re
 
-from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
+from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token, utc_time
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
 from outreach.net import FetchError, HttpClient, Response
@@ -44,7 +44,8 @@ def _native_id(job: dict) -> str:
 
 
 def _parse(job: object) -> JobRef | None:
-    """One posting, or None when it lacks an id or a title."""
+    """One posting, or None when it lacks an id or a title. `posted_at` is `first_published` only: `updated_at` moves
+    on every edit, so it is a fallback for the date and never the posting time (#193)."""
     if not isinstance(job, dict):
         return None
     native_id, title = _native_id(job), _text(job.get("title"))
@@ -52,7 +53,7 @@ def _parse(job: object) -> JobRef | None:
         return None
     return JobRef(native_id=native_id, title=title, url=_text(job.get("absolute_url")), location=_location(job),
                   country=None, posted_on=d10(job.get("first_published")) or d10(job.get("updated_at")),
-                  body=None)
+                  body=None, posted_at=utc_time(job.get("first_published")))
 
 
 class GreenhouseAdapter:

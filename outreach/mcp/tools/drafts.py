@@ -26,6 +26,7 @@ from pydantic import Field
 
 from outreach.drafting.brief import brief_id, check_brief, read_evidence
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
+from outreach.drafting.signature import read_signature
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, WORDS, DraftInput,
                                     cached_mx, email_domain, load_banned, run_checks)
 from outreach.drafts.followups import (MAX_FOLLOWUPS, company_map, due_followups, held_survivors, no_go_sets,
@@ -160,6 +161,7 @@ def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
         "person": one,
         "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
+        "signature": read_signature(),
         "limits": {"words": list(WORDS.get(kind, DEFAULT_WORDS)), "max_links": MAX_LINKS,
                    "banned_phrases_path": DEFAULT_BANNED_PHRASES},
     }

@@ -40,6 +40,13 @@ class DraftBriefCase(McpCase):
         self.assertEqual(got["limits"]["max_links"], 2)
         self.assertIn("can_draft_email", got)
 
+    def test_brief_carries_the_signature(self):
+        sig = Path(tempfile.mkdtemp(prefix="sig-")) / "signature.txt"
+        sig.write_text("Devanshu Chicholikar\nhttps://www.devanshuchicholikar.com\n(555) 010-0199\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
+            got = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertEqual(got["signature"], "Devanshu Chicholikar\nhttps://www.devanshuchicholikar.com\n(555) 010-0199")
+
     def test_brief_id_matches_the_checks_save_draft_will_run(self):
         got = self.ok("draft_brief", {"person_id": self.pat})
         want = brief_id(load_voice_pack(), read_evidence(self.me), self.pat)

@@ -50,6 +50,7 @@ class CrawlConfig:
     max_redirects: int
     default_host_interval_s: float
     host_interval_s: dict[str, float]
+    split_hosts: frozenset[str]  # buckets (host_interval_s keys) whose hosts are spaced one by one
     breaker_failures: int
     batch_rows: int
     decide_batch: int
@@ -112,7 +113,8 @@ def _load_big_board(table: object, floor_s: int, ceiling_s: int) -> BigBoardConf
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "ats_off", "big_board"):
+    for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "split_hosts", "ats_off",
+                "big_board"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -126,6 +128,12 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     hosts = data["host_interval_s"]
     if not isinstance(hosts, dict) or not all(_is_positive(v) for v in hosts.values()):
         raise ValueError("host_interval_s must map host suffixes to finite seconds above 0")
+    split = data["split_hosts"]
+    if not isinstance(split, list) or not all(isinstance(h, str) and h.strip() for h in split):
+        raise ValueError("split_hosts must be a list of host suffixes, each one a host_interval_s key")
+    unknown = sorted(h for h in split if h.lower() not in {k.lower() for k in hosts})
+    if unknown:
+        raise ValueError(f"split_hosts names {', '.join(unknown)}, which is not a host_interval_s key")
     off = data["ats_off"]
     if not isinstance(off, dict):
         raise ValueError("ats_off must be a table of ATS names, each with the reason its reader is off")
@@ -157,6 +165,7 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
 
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}
+    kwargs["split_hosts"] = frozenset(h.lower() for h in split)
     kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
     kwargs["big_board"] = big
     return CrawlConfig(**kwargs)

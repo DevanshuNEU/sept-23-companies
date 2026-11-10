@@ -28,6 +28,16 @@ def _load_text(text):
         return load_crawl_config(p)
 
 
+_SPLIT_LINE = re.compile(r"(?ms)^split_hosts\s*=\s*\[.*?\]")
+
+
+def _with_split(value):
+    """The shipped config with its `split_hosts` entry replaced by `split_hosts = <value>` (None drops it)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _SPLIT_LINE.search(text), "the shipped config has split_hosts"
+    return _SPLIT_LINE.sub(lambda _: "" if value is None else f"split_hosts = {value}", text)
+
+
 _OFF_TABLE = re.compile(r"(?ms)^\[ats_off\]\n.*?(?=^\[|\Z)")
 
 
@@ -102,9 +112,32 @@ class CrawlConfigTests(unittest.TestCase):
                          (2000, 100, 150, 500))
         self.assertEqual((cfg.tick_budget_s, cfg.top_companies), (1500, 300))
         self.assertEqual((cfg.watch_interval_s, cfg.watch_per_tick, cfg.watch_min_text_chars), (604800, 40, 200))
-        self.assertEqual(cfg.host_interval_s["greenhouse.io"], 0.25)
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
         self.assertEqual(len(cfg.host_interval_s), 14)
+
+    def test_rates(self):
+        hosts = load_crawl_config().host_interval_s
+        self.assertEqual((hosts["greenhouse.io"], hosts["ashbyhq.com"], hosts["lever.co"]), (0.05, 0.1, 1.0))
+
+    def test_shipped_split_hosts_are_the_tenant_hosts(self):
+        cfg = load_crawl_config()
+        self.assertIsInstance(cfg.split_hosts, frozenset)
+        self.assertEqual(cfg.split_hosts, frozenset({"myworkdayjobs.com", "oraclecloud.com", "bamboohr.com", "breezy.hr",
+                                                     "teamtailor.com", "recruitee.com", "applytojob.com"}))
+
+    def test_split_hosts_are_known_buckets(self):
+        with self.assertRaisesRegex(ValueError, "split_hosts.*nowhere.example"):
+            _load_text(_with_split('["myworkdayjobs.com", "nowhere.example"]'))
+
+    def test_split_hosts_must_be_a_list_of_text(self):
+        for bad in ('"myworkdayjobs.com"', "[1]", '[""]'):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "split_hosts"):
+                    _load_text(_with_split(bad))
+
+    def test_a_missing_split_hosts_is_named(self):
+        with self.assertRaisesRegex(KeyError, "split_hosts"):
+            _load_text(_with_split(None))
 
     def test_shipped_big_board_values(self):
         big = load_crawl_config().big_board
@@ -197,7 +230,7 @@ class CrawlConfigTests(unittest.TestCase):
     def test_a_host_interval_must_be_finite_and_positive(self):
         text = CONFIG_PATH.read_text(encoding="utf-8")
         for bad in ("nan", "inf", "0", "-1"):
-            broken = text.replace('"greenhouse.io" = 0.25', f'"greenhouse.io" = {bad}')
+            broken = text.replace('"greenhouse.io" = 0.05', f'"greenhouse.io" = {bad}')
             self.assertNotEqual(broken, text)
             with tempfile.TemporaryDirectory() as d:
                 p = Path(d) / "config.toml"

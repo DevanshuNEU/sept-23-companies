@@ -38,14 +38,19 @@ MX_TTL = timedelta(hours=24)
 NEW_YORK = ZoneInfo("America/New_York")
 
 PORTFOLIO = "devanshuchicholikar.com"
-WORDS = {"recruiter": (80, 100)}  # #9: about 90 for recruiters
-DEFAULT_WORDS = (80, 120)         # #9: engineers, managers, founders (and alums, others)
+DEFAULT_WORDS = (0, 120)          # #9, 2026-11-09: at most 120 words, anything under that is fine, every reader
 FOLLOWUP_MAX_WORDS = 80
 MAX_LINKS = 2
 SIMILAR = 0.8
 STALE_HOOK_DAYS = 30
-NEVER = ["bumping this", "bump this", "got buried", "gentle reminder", "in case you missed"]  # #9 Follow-ups
-WEAK_SUBJECT = ["quick question", "following up", "excited"]
+WEAK_SUBJECT = ["quick question", "following up", "excited", "opportunity", "hoping to connect", "touching base",
+                "checking in", "application for", "referral request"]
+SUBJECT_MAX_CHARS = 40  # about what Gmail shows of a subject on a phone
+# Lines about the email itself, the reader's inbox or their time: every lab judge read them as performed (2026-11-09).
+NARRATED = ("i'll be brief", "i'll keep this short", "i'll keep it short", "short one", "quick note",
+            "a lot of these", "many of these", "your inbox", "thank you for opening", "thanks for opening",
+            "you don't owe me", "i hope it's okay", "sorry to bother", "i know you're busy", "out of the blue",
+            "this cold email")
 SHORTENERS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "buff.ly", "is.gd", "rebrand.ly", "cutt.ly",
               "lnkd.in", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "t.ly"}
 DASHES = re.compile("[\u2012-\u2015]")
@@ -71,8 +76,8 @@ STOP_REPLIES = ("said_no", "asked_to_stop")
 
 BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown_link", "visa_line", "too_many_links",
                "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
-WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
-              "signature", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
+              "subject_reused", "link_count", "signature", "narrated_email", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -246,7 +251,7 @@ def _banned(d: DraftInput, banned: Sequence[tuple[str, re.Pattern]]) -> list[Che
                           "The banned phrases list could not be read, so this draft was not checked for banned "
                           "phrases. Fix the list (OUTREACH_BANNED_PHRASES, or banned_phrases.txt in DevVault), "
                           "then check again."))
-    rules = [(src, rx) for src, rx in banned] + [(p, re.compile(re.escape(p), re.I)) for p in NEVER]
+    rules = list(banned)
     for field, text in (("subject", d.subject), ("body", d.body)):
         for src, rx in rules:
             for m in rx.finditer(text):
@@ -356,8 +361,8 @@ def _length(d: DraftInput) -> Check:
     if d.seq >= 1:
         lo, hi, aim = 0, FOLLOWUP_MAX_WORDS, f"a follow-up is at most {FOLLOWUP_MAX_WORDS}"
     else:
-        lo, hi = WORDS.get(d.role_kind, DEFAULT_WORDS)
-        aim = f"aim for {lo} to {hi}"
+        lo, hi = DEFAULT_WORDS
+        aim = f"a first email is at most {hi}"
     if lo <= n <= hi:
         return _check("length", "pass", "Length is right", f"{n} words; {aim}.")
     return _check("length", "warn", "Too long" if n > hi else "Too short", f"{n} words; {aim}.")
@@ -388,6 +393,28 @@ def _subject_wording(d: DraftInput) -> Check:
     if problems:
         return _check("subject_wording", "warn", "Subject wording", "Subject: " + "; ".join(problems) + ".")
     return _check("subject_wording", "pass", "Subject reads well", "No weak subject wording.")
+
+
+def _subject_length(d: DraftInput) -> Check | None:
+    if d.seq >= 1:
+        return None  # a follow-up's subject is "Re: " plus the first one, set by code
+    n = len(d.subject.strip())
+    if n > SUBJECT_MAX_CHARS:
+        return _check("subject_length", "warn", "Subject too long",
+                      f"{n} characters. A phone shows about {SUBJECT_MAX_CHARS}; keep it to that so it reads whole.")
+    return _check("subject_length", "pass", "Subject fits a phone", f"{n} characters.")
+
+
+def _narrated(d: DraftInput) -> Check | None:
+    if d.seq >= 1:
+        return None  # a follow-up may say it is following up, or that they may be busy (#9, 2026-11-09)
+    spans = [_span("body", m.start(), m.end()) for phrase in NARRATED
+             for m in re.finditer(rf"(?<![\w']){re.escape(phrase)}(?![\w])", d.body.replace("\u2019", "'"), re.I)]
+    if spans:
+        return _check("narrated_email", "warn", "A line about the email itself",
+                      "This line talks about the email, their inbox or their time. Cut it; the specifics do the work.",
+                      spans=sorted(spans, key=lambda s: s["start"]))
+    return _check("narrated_email", "pass", "No lines about the email", "Nothing talks about the email itself.")
 
 
 def _recruiter(d: DraftInput) -> Check:
@@ -529,9 +556,11 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _visa_line(d),
         *_link_rules(d),
         _signature(d),
+        _narrated(d),
         _length(d),
         _stale_hook(d, now),
         _subject_wording(d),
+        _subject_length(d),
         _recruiter(d),
         *voice_checks(d.body, d.role_kind, ground=ground),
         _followup_subject(conn, d),

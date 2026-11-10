@@ -21,7 +21,7 @@ FIXTURE_BANNED = Path(__file__).resolve().parent / "fixtures" / "banned_phrases.
 PORTFOLIO = "https://www.devanshuchicholikar.com"
 SIGNATURE = f"Devanshu Chicholikar\n{PORTFOLIO}"  # the fallback signature: tests never read the real file
 PROJECT = "https://github.com/devanshu/runner"
-SUBJECT = "Your queue rewrite and the new grad backend role"
+SUBJECT = "your queue rewrite and the backend role"  # 39 characters: a phone shows it whole
 HOOK = "His post on the queue rewrite (2026-11-02)"
 BODY = (
     "Hi Pat,\n\n"
@@ -35,8 +35,9 @@ BODY = (
 )
 CLEAN_CODES = [
     "no_mail_server", "placeholder", "markdown_link", "visa_line", "too_many_links", "link_shortener",
-    "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
-    "link_count", "signature", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length",
+    "stale_hook", "subject_wording", "subject_length", "subject_reused", "link_count", "signature", "narrated_email",
+    "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
     "voice_rhythm",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
@@ -437,9 +438,6 @@ class Warns(ChecksCase):
         with self.subTest("[[:space:]] in a pattern matches any space"):
             body = BODY.replace("I build the same", "Not just  queues, but I build the same")
             self.assertEqual(self.one(self.run_on(body=body), "banned_phrase")["severity"], "warn")
-        with self.subTest("a follow-up never bumps"):
-            body = BODY.replace("Thanks,", "Just bumping this. Thanks,")
-            self.assertEqual(self.one(self.run_on(body=body), "banned_phrase")["severity"], "warn")
         with self.subTest("every dash from U+2012 to U+2015 warns, a hyphen does not"):
             for ch in "\u2012\u2013\u2014\u2015":
                 self.assertEqual(self.one(self.run_on(body=BODY + ch), "dash")["severity"], "warn")
@@ -447,11 +445,10 @@ class Warns(ChecksCase):
 
     def test_length_bands_per_role_kind(self):
         cases = [
-            ("engineer", 0, 79, "warn"), ("engineer", 0, 80, "pass"), ("engineer", 0, 120, "pass"),
+            ("engineer", 0, 30, "pass"), ("engineer", 0, 80, "pass"), ("engineer", 0, 120, "pass"),
             ("engineer", 0, 121, "warn"), ("manager", 0, 120, "pass"), ("founder", 0, 121, "warn"),
             ("alum", 0, 80, "pass"), ("other", 0, 119, "pass"),
-            ("recruiter", 0, 90, "pass"), ("recruiter", 0, 100, "pass"), ("recruiter", 0, 101, "warn"),
-            ("recruiter", 0, 79, "warn"),
+            ("recruiter", 0, 30, "pass"), ("recruiter", 0, 120, "pass"), ("recruiter", 0, 121, "warn"),
             ("engineer", 1, 80, "pass"), ("engineer", 1, 81, "warn"), ("engineer", 1, 20, "pass"),
             ("recruiter", 1, 81, "warn"),
         ]
@@ -479,6 +476,46 @@ class Warns(ChecksCase):
         for hook in ("His talk at the meetup", "(2026-01-01) his talk", ""):
             with self.subTest(hook=hook):
                 self.assertNotIn("stale_hook", [c["code"] for c in self.run_on(hook=hook)])
+
+    def test_length_has_no_floor(self):
+        self.assert_passes(self.run_on(role_kind="recruiter", body=words(30)), "length")
+
+    def test_length_warns_over_120(self):
+        check = self.one(self.run_on(body=words(121)), "length")
+        self.assertEqual((check["severity"], check["title"]), ("warn", "Too long"))
+
+    def test_subject_length_warns_over_40_chars(self):
+        check = self.one(self.run_on(subject="keeping intraday trade data right for traders"), "subject_length")
+        self.assertEqual(check["severity"], "warn")
+        self.assertIn("40", check["detail"])
+
+    def test_subject_length_passes_40_chars(self):
+        self.assert_passes(self.run_on(subject="x" * 40), "subject_length")
+        self.assertNotIn("subject_length", [c["code"] for c in self.run_on(seq=1, subject="Re: " + "x" * 60)])
+
+    def test_vague_subjects_warn(self):
+        for subject in ("Quick question", "Opportunity at Acme", "Hoping to connect", "Referral request",
+                        "Application for the backend role", "Touching base", "Checking in"):
+            with self.subTest(subject=subject):
+                self.assertEqual(self.one(self.run_on(subject=subject), "subject_wording")["severity"], "warn")
+
+    def test_narrated_email_warns_on_first_email(self):
+        for line in ("I'll be brief.", "Short one.", "You must get a lot of these.", "Your inbox is probably full.",
+                     "Thank you for opening this.", "I hope it's okay that I'm asking.", "Sorry to bother you.",
+                     "I know you're busy.", "This is out of the blue."):
+            with self.subTest(line=line):
+                check = self.one(self.run_on(body=BODY.replace("I build", line + " I build")), "narrated_email")
+                self.assertEqual(check["severity"], "warn")
+                self.assertTrue(check["spans"])
+        self.assert_passes(self.run_on(), "narrated_email")
+
+    def test_narrated_email_is_not_checked_on_followups(self):
+        found = self.run_on(seq=1, body=words(40).replace("Hi Pat,", "Hi Pat, if you're busy, one line back would help."))
+        self.assertNotIn("narrated_email", [c["code"] for c in found])
+
+    def test_followup_nudge_is_not_banned(self):
+        found = self.run_on(seq=1, body=words(40).replace("Hi Pat,", "Hi Pat, just bumping this in case it got buried."))
+        self.assertNotIn("banned_phrase", self.codes(found, "warn"))
 
     def test_weak_subject_and_re_prefix_warn(self):
         for subject in ("Quick question about Acme", "Following up on the role", "Excited about Acme",

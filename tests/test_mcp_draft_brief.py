@@ -36,9 +36,14 @@ class DraftBriefCase(McpCase):
         self.assertIn("94% Hit@1", got["evidence"])
         self.assertNotIn("installs", got["evidence"])
         self.assertEqual(got["person"]["person"]["id"], self.pat)
-        self.assertEqual(got["limits"]["words"], [80, 120])
+        self.assertEqual(got["limits"]["words"], [0, 120])
         self.assertEqual(got["limits"]["max_links"], 2)
         self.assertIn("can_draft_email", got)
+
+    def test_brief_limits_words_are_0_to_120(self):
+        rec = seed.person(self.db, self.acme, "Rae Recruiter", role_kind="recruiter", email="rae@acme.example")
+        for pid in (self.pat, rec):
+            self.assertEqual(self.ok("draft_brief", {"person_id": pid})["limits"]["words"], [0, 120])
 
     def test_brief_carries_the_signature(self):
         sig = Path(tempfile.mkdtemp(prefix="sig-")) / "signature.txt"
@@ -68,10 +73,6 @@ class DraftBriefCase(McpCase):
     def test_missing_me_md_refuses(self):
         self.me.unlink()
         self.assertEqual(self.error("draft_brief", {"person_id": self.pat})["code"], "voice_unreadable")
-
-    def test_recruiter_words_limit_is_80_to_100(self):
-        rec = seed.person(self.db, self.acme, "Rae Recruiter", email="rae@acme.example", role_kind="recruiter")
-        self.assertEqual(self.ok("draft_brief", {"person_id": rec})["limits"]["words"], [80, 100])
 
     def test_unknown_person_refuses_like_the_person_tool(self):
         _, via_person = self.call("person", {"person_id": 99999})

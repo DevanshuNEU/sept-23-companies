@@ -123,6 +123,8 @@ class ApproveTest(ApproveBase):
             "no_mail_server": mail_none,
             "banned_list_missing": banned_missing,
             "placeholder": body(BODY.replace("Thanks,", "TODO Thanks,")),
+            "markdown_link": body(BODY.replace(f"the runner is at {PROJECT}.", f"the runner is [here]({PROJECT}).")),
+            "visa_line": body(BODY.replace("I build", "I'm on F-1 OPT. I build")),
             "too_many_links": body(BODY.replace(f"at {PROJECT}.", f"at {PROJECT} and {PROJECT}/docs.")),
             "link_shortener": body(BODY.replace(PROJECT, "https://bit.ly/abc")),
             "followup_subject": followup,

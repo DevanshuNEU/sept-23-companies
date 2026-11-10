@@ -175,7 +175,8 @@ class Blocks(ChecksCase):
     def test_visa_line_blocks_for_every_reader(self):
         lines = ("I'm on F-1 OPT.", "I'm eligible for STEM OPT through 2029.", "I don't need sponsorship.",
                  "No H-1B needed.", "No H1B needed.", "I'm authorized to work now.", "My work authorization is fine.",
-                 "My visa is sorted.", "Nothing to sponsor here.", "I have a green card.", "Immigration is handled.")
+                 "My visa is sorted.", "Can you sponsor me?", "I'd need sponsorship.", "I have a green card.",
+                 "My immigration status is fine.")
         for kind in ("recruiter", "engineer", "manager", "founder"):
             for line in lines:
                 with self.subTest(kind=kind, line=line):
@@ -186,13 +187,17 @@ class Blocks(ChecksCase):
 
     def test_visa_line_ignores_opt_inside_words(self):
         for line in ("I optimize queries.", "Users can opt in.", "It was adopted across 3 sections.",
-                     "The options page works.", "Sponsors of the hackathon", "visage"):
+                     "The options page works.", "visage"):
             with self.subTest(line=line):
-                found = self.run_on(body=BODY.replace("I build", line + " I build"))
-                if line.startswith("Sponsors"):
-                    self.assertEqual(self.one(found, "visa_line")["severity"], "block")
-                else:
-                    self.assert_passes(found, "visa_line")
+                self.assert_passes(self.run_on(body=BODY.replace("I build", line + " I build")), "visa_line")
+
+    def test_visa_line_ignores_ordinary_words(self):
+        # A block also pulls an approved email back, so ordinary words must pass (review of #191).
+        for line in ("I saw Visa's payments team ship it.", "I built on the Visa API.", "The hackathon was sponsored by Stripe.",
+                     "It has GitHub Sponsors.", "Your immigration product looks useful.", "Its F-1 score was 0.89.",
+                     "The OPT-in flow was simple."):
+            with self.subTest(line=line):
+                self.assert_passes(self.run_on(body=BODY.replace("I build", line + " I build")), "visa_line")
 
     def test_recruiter_warn_no_longer_mentions_work_authorization(self):
         check = self.one(self.run_on(role_kind="recruiter"), "recruiter")
@@ -599,6 +604,27 @@ class Warns(ChecksCase):
         with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
             self.assertEqual(self.one(self.run_on(body=words(95)), "signature")["severity"], "warn")
             self.assert_passes(self.run_on(body=words(95) + "\n(555) 010-0199"), "signature")
+
+    def test_signature_phone_is_not_an_ungrounded_number(self):
+        sig = Path(tempfile.mkdtemp(prefix="sig-")) / "signature.txt"
+        sig.write_text(f"Devanshu Chicholikar\n{PORTFOLIO}\n(555) 010-0199\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
+            found = run_checks(self.conn, self.draft(body=words(95) + "\n(555) 010-0199"), banned=self.banned, now=NOW,
+                               ground="me.md has no phone number")
+        self.assert_passes(found, "voice_ungrounded")
+        self.assert_passes(found, "signature")
+
+    def test_signed_nudges_to_colleagues_are_not_near_identical(self):
+        # Every email now ends with the same signature and may be a short nudge; the shared parts are not a copy.
+        # These two read 87% alike with the signature and 65% without it (review of #191).
+        sig = Path(tempfile.mkdtemp(prefix="sig-")) / "signature.txt"
+        sig.write_text(f"Devanshu Chicholikar\n{PORTFOLIO}\n(555) 010-0199\n", encoding="utf-8")
+        signed = f"Devanshu Chicholikar\n{PORTFOLIO}\n(555) 010-0199"
+        nudge = "Hi {n},\n\nJust bumping this. {extra}\n\nThanks,\n" + signed
+        self.colleague(self.acme, "Sam Wu", body=nudge.format(n="Sam", extra="A short call next week?"))
+        with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
+            self.assert_passes(self.run_on(body=nudge.format(n="Pat", extra="Who owns the role now?")), "near_identical")
+            self.assert_blocks(self.run_on(body=nudge.format(n="Pat", extra="A short call next week?")), "near_identical")
 
     def test_recruiter_warns_with_the_role_kind_fix(self):
         found = self.run_on(role_kind="recruiter", body=words(90))

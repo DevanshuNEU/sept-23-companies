@@ -216,6 +216,19 @@ class BlocksTest(DrafterCase):
         self.assertIn("Number without a source", [b["title"] for b in model.calls[1][1]["blocks"]])
         self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
 
+    def test_a_visa_line_is_retried(self):
+        _, planned = self.thread("Sam Sent")
+        summary = self.run_it(FakeModel("Hi {name}, I'm on OPT and can start now. Could you refer me?\n\nDevanshu", GOOD))
+        self.assertEqual(summary.calls, 2)
+        self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
+
+    def test_a_markdown_link_is_retried(self):
+        _, planned = self.thread("Sam Sent")
+        bad = "Hi {name}, the demo is [here](https://www.devanshuchicholikar.com). Could you refer me?\n\nDevanshu"
+        summary = self.run_it(FakeModel(bad, GOOD))
+        self.assertEqual(summary.calls, 2)
+        self.assertEqual(self.row(planned[1])["body"], GOOD.format(name="Sam"))
+
     def test_a_block_the_model_cannot_fix_gets_no_retry(self):
         _, planned = self.thread("Sam Sent")
         with mock.patch.dict(os.environ, {"OUTREACH_BANNED_PHRASES": str(Path(self.path).parent / "missing.txt")}):

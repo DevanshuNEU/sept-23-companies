@@ -63,9 +63,11 @@ BARE = re.compile(r"(?<![\w@./-])(?:[a-z0-9-]+\.)+(?:com|ai|io|dev|app|co|org|ne
                   r"\b(?:/[^\s<>()\"']*)?", re.I)
 RE_PREFIX = re.compile(r"re\s*:", re.I)
 MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\]\(\s*https?://[^)\s]+\s*\)", re.I)
-# No visa, OPT or sponsorship in any email, to anyone (#9, 2026-11-09). OPT must be upper case: "opt in" is fine.
-VISA = re.compile(r"\bF-1\b|\bOPT\b|(?i:\bvisas?\b|\bsponsor(?:ship|ed|s|ing)?\b|\bH-?1B\b|work authori[sz]ation|"
-                  r"authori[sz]ed to work|\bgreen card\b|\bimmigration\b)")
+# No visa, OPT or sponsorship in any email, to anyone (#9, 2026-11-09). A block also pulls an approved email back, so
+# ordinary words pass: OPT only in upper case and not "OPT-in", "visa" only in lower case (Visa the company passes),
+# F-1 not as a score, sponsorship but not "sponsored by", immigration only as a status.
+VISA = re.compile(r"\bF-1\b(?!\s+score)|\bOPT\b(?!-in)|\bvisas?\b|(?i:\bsponsorship\b|\bsponsor (?:me|my|him)\b|"
+                  r"\bH-?1B\b|work authori[sz]ation|authori[sz]ed to work|\bgreen card\b|\bimmigration status\b)")
 HOOK_DATE = re.compile(r"\((\d{4}-\d{2}-\d{2})\)$")
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
@@ -485,6 +487,21 @@ def _closed(conn, chain: list[int]) -> Check:
                   f"{row['name']} is closed because it does not sponsor. Reopen it first if that changed.")
 
 
+def _core(body: str) -> str:
+    """The body without its greeting line, and without the signature and the sign-off word line before it."""
+    text = body.rstrip()
+    start = _signature_start(text)
+    if start is not None:
+        text = text[:start].rstrip()
+        last = text.rsplit("\n", 1)
+        if len(last) == 2 and len(last[1].split()) <= 3 and last[1].strip().endswith(","):
+            text = last[0].rstrip()
+    lines = text.split("\n", 1)
+    if len(lines) == 2 and re.match(r"^\s*(hi|hello|hey|dear)\b[^\n]{0,40},\s*$", lines[0], re.I):
+        text = lines[1]
+    return text.strip()
+
+
 def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
     rows = conn.execute(
         f"SELECT m.message_id, m.body, p.name FROM message m JOIN touch t ON t.touch_id = m.touch_id "
@@ -493,9 +510,10 @@ def _near_identical(conn, d: DraftInput, family: list[int]) -> Check:
         (*family, d.person_id, *OPEN_STATES, d.message_id)).fetchall()
     best, best_ratio = None, 0.0
     # autojunk off: on a body over 200 characters it junks common letters, so the score drops and depends on order.
-    matcher = difflib.SequenceMatcher(None, "", d.body.lower(), autojunk=False)
+    # The greeting, the sign-off word and the signature are the same in every email, so they are not compared.
+    matcher = difflib.SequenceMatcher(None, "", _core(d.body).lower(), autojunk=False)
     for row in rows:
-        matcher.set_seq1(row["body"].lower())
+        matcher.set_seq1(_core(row["body"]).lower())
         if matcher.real_quick_ratio() < SIMILAR or matcher.quick_ratio() < SIMILAR:
             continue  # both are upper bounds of ratio(), so skipping here never misses a match
         ratio = matcher.ratio()
@@ -547,6 +565,8 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         raise LookupError(f"no company {d.company_id}")
     chain = resolve_company(companies, d.company_id)
     family = _family(companies, chain[-1])
+    if ground is not None:
+        ground = ground + "\n" + "\n".join(signature_lines())  # his phone is in the signature, not in me.md
     found: list[Check | None] = [
         *_mail_server(d),
         *_banned(d, banned),

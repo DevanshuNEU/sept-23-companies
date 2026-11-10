@@ -53,7 +53,8 @@ _SPECS = {spec.name: spec for spec in tool_specs()}
 _MAX_DETAIL = 300
 # The checks a second call can fix: blocks in the text itself, and a number with no source in me.md or his paste. A
 # block about the store (no mail server, a no-go, the banned list unreadable) is the same whatever the model writes.
-FIXABLE = frozenset({"placeholder", "link_shortener", "too_many_links", "near_identical", "voice_ungrounded"})
+FIXABLE = frozenset({"placeholder", "link_shortener", "too_many_links", "near_identical", "voice_ungrounded",
+                     "visa_line", "markdown_link"})
 # What the model is held to: a follow-up's length, not a first email's (the brief's own limits are a first email's).
 FOLLOWUP_LIMITS = {"words": [25, FOLLOWUP_MAX_WORDS], "max_links": 2}
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import date
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -19,7 +20,10 @@ from pydantic import Field, field_validator
 from outreach.drafts.checks import normalise_domain
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
+from outreach.net import HttpClient, UrllibClient
 from outreach.mcp.tools.reads import MAX_ID, Family, resolve
+from outreach.research.store import Fact, store_company_facts
+from outreach.research.verify import check_facts
 from outreach.rules.facts import EvidenceDraft
 from outreach.rules.rebuild import record_evidence
 from outreach.sources.keys import classify_domain
@@ -113,6 +117,68 @@ def record_research(ctx: Ctx, args: ResearchInput) -> dict:
     drafts = [_draft(i, it) for i, it in enumerate(args.items)]  # every item is checked before anything is written
     added = record_evidence(ctx.conn, survivor, drafts, actor="claude", at=ctx.now)
     return {"company_id": survivor, "merged_note": note, "added": added, "already_known": len(drafts) - added}
+
+
+# ---------------------------------------------------------------------------------------------- save_research
+
+class FactItem(Input):
+    fact: str = Field(min_length=1, max_length=300, description="One plain fact, in your words.")
+    quote: str = Field(min_length=1, max_length=500, description="The words on that page that say it, copied.")
+    url: str = Field(max_length=500, pattern=HTTPS, description="The https page it came from (not LinkedIn).")
+    page_date: str | None = Field(None, max_length=10, pattern=DATE, description="YYYY-MM-DD the page is dated.")
+
+    @field_validator("page_date")
+    @classmethod
+    def real_date(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                raise ValueError(f"{value} is not a real date") from None
+        return value
+
+
+class SaveResearchInput(Input):
+    company_id: int = Field(ge=1, le=MAX_ID)
+    person_id: int | None = Field(None, ge=1, le=MAX_ID, description="Set when the facts are about this person at "
+                                                                     "the company; leave out for the company.")
+    facts: list[FactItem] = Field(min_length=1, max_length=8)
+
+
+def _client() -> HttpClient:
+    """The page fetcher. Tests replace this with a fake; nothing else in the server reaches the network."""
+    return UrllibClient()
+
+
+def save_research(ctx: Ctx, args: SaveResearchInput) -> dict:
+    conn = ctx.conn
+    family, survivor, note = resolve(conn, args.company_id)
+    if args.person_id is not None:
+        p = conn.execute("SELECT company_id FROM person WHERE person_id = ?", (args.person_id,)).fetchone()
+        if p is None:
+            raise ToolError("not_found", f"No person {args.person_id}.", "Use a person id from the company tool.")
+        if family.survivor(p["company_id"]) != survivor:
+            raise ToolError("wrong_company", f"Person {args.person_id} is not at company {args.company_id}.",
+                            "Use a person id from the company tool for this company. Nothing was written.")
+    facts = [Fact(f.fact.strip(), f.quote.strip(), f.url.strip(), f.page_date) for f in args.facts]
+    kept, rejected = check_facts(_client(), facts)  # the page fetches finish before any write begins
+    saved = 0
+    if kept:
+        with transaction(conn):
+            if args.person_id is None:
+                saved = store_company_facts(conn, survivor, kept, found_by="claude", now=ctx.now)
+            else:
+                for f in kept:
+                    saved += conn.execute(
+                        "INSERT INTO person_source(person_id, kind, url, label, quote, observed_on, recorded_at) "
+                        "VALUES (?, 'post', ?, ?, ?, ?, ?) ON CONFLICT (person_id, kind, url) DO NOTHING",
+                        (args.person_id, f.url, f.fact, f.quote, f.page_date, ctx.now)).rowcount
+            if saved:
+                append_event(conn, entity="company", kind="research_saved", actor="claude", entity_id=survivor,
+                             company_id=survivor, at=ctx.now,
+                             detail={"saved": saved, "person_id": args.person_id})
+    return {"company_id": survivor, "merged_note": note, "saved": saved, "already_known": len(kept) - saved,
+            "rejected": rejected}
 
 
 # ---------------------------------------------------------------------------------------------- review items
@@ -217,6 +283,13 @@ TOOLS = (
              "with its https page and the quote. Stored as a guess (a stage may be an estimate), never confirmed, "
              "so it never hides a company. A repeat is already_known.", ResearchInput, record_research,
              {"evidence": Grant(insert=True), "event": Grant(insert=True)}),
+    ToolSpec("save_research",
+             "Store facts you found about a company, or about one person there (give person_id), each with its "
+             "https page and the words on it. Code fetches every page and keeps a fact only when the quote is on "
+             "it (never LinkedIn, contact-data sites or login pages). Returns saved, already_known and rejected "
+             "with a reason each. At most 8 facts a call.", SaveResearchInput, save_research,
+             {"research_fact": Grant(insert=True), "person_source": Grant(insert=True),
+              "event": Grant(insert=True)}),
     ToolSpec("flag_review",
              "Raise a Needs-you item for Devanshu about a company (and maybe one of its postings or people). The "
              "same reason again returns the same item.", FlagInput, flag_review,

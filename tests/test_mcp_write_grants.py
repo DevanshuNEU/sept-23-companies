@@ -33,6 +33,7 @@ PINNED = {
                                                               "revision"})),
                            "review_item": INSERT, "event": INSERT},
     "record_research": {"evidence": INSERT, "event": INSERT},
+    "save_research": {"research_fact": INSERT, "person_source": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
     "mark_no_go": {"review_item": INSERT, "event": INSERT},
     "save_draft": {"touch": INSERT, "event": INSERT,

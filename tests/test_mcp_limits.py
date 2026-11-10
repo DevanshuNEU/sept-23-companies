@@ -21,6 +21,7 @@ from outreach.drafting.brief import brief_id, read_evidence
 from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
+from outreach.net import Response
 from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES, install_authorizer, install_triggers, open_guarded
 from outreach.mcp.tools import Input, ToolSpec
 from outreach.reader.types import FIELDS
@@ -30,12 +31,13 @@ from tests.mcptest import NOW, McpCase
 from tests.pipeline import stages_mcp
 from tests.pipeline.harness import STAGE_NAMES, PipelineHarness
 from tests.pipeline.test_flow import INVARIANTS
-from tests.test_mcp_boundary import FORBIDDEN_IMPORTS, forbidden, imported_names, sources
+from tests.test_mcp_boundary import FORBIDDEN_IMPORTS, forbidden, forbidden_loaded, imported_names, sources
 from tests.test_mcp_write_grants import table_hashes
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "tests" / "fixtures"
-ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_research", "flag_review", "mark_no_go",
+ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_research", "save_research", "flag_review",
+            "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
             "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent", "draft_brief",
              "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person", "check_draft")
@@ -77,6 +79,12 @@ class SweepCase(McpCase):
                                                "OUTREACH_MAIL_HOME": str(FIX / "plan")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        page = Response(200, "https://acme.example/about", b"<p>We build queue tools.</p>",
+                        {"content-type": "text/html"})
+        pages = mock.Mock(get=mock.Mock(return_value=page))  # save_research fetches through this, never the network
+        fetcher = mock.patch("outreach.mcp.tools.research._client", return_value=pages)
+        fetcher.start()
+        self.addCleanup(fetcher.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
         self.drafted = seed.message(self.db, seed.touch(self.db, self.pat), 0, subject="Pat and payments",
@@ -134,6 +142,9 @@ class SweepCase(McpCase):
             "record_research": ({"company_id": self.acme, "items": [
                 {"fact": "size", "value": "40", "num_low": 40, "source_kind": "website",
                  "source_ref": "https://acme.example/about", "quote": "A team of 40."}]}, None),
+            "save_research": ({"company_id": self.acme, "facts": [
+                {"fact": "Builds queue tools", "quote": "We build queue tools.",
+                 "url": "https://acme.example/about"}]}, None),
             "flag_review": ({"company_id": self.acme, "reason": "Only senior roles on the careers page."}, None),
             "mark_no_go": ({"person_id": self.pat, "reason": "not_a_fit", "note": "Works on hardware only."}, None),
             "add_people": ({"company_id": self.acme, "people": [{"name": "Ned New", "role_kind": "engineer",
@@ -179,7 +190,7 @@ class ToolListTest(unittest.TestCase):
     def test_the_tool_list_is_exactly_the_pinned_tools(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(sorted(names), sorted(ALL_TOOLS))
-        self.assertEqual(len(names), 26)
+        self.assertEqual(len(names), 27)
 
 
 class SweepTest(SweepCase):
@@ -253,7 +264,7 @@ class RawStoreTest(SweepCase):
         calls = self.valid()
         statements = self.statements()
         writers = [name for name in ALL_TOOLS if spec(name).grants]
-        self.assertEqual(len(writers), 16)
+        self.assertEqual(len(writers), 17)
         for name in writers:
             args, _named = calls[name] if name != "reader_submit" else self.valid()["reader_submit"]
             self.ok(name, args)
@@ -299,7 +310,7 @@ class OfflineTest(unittest.TestCase):
         network = ("socket", "ssl", "http", "urllib", "subprocess", "ctypes", "smtplib", "ftplib", "asyncio")
         for path in sources():
             names = imported_names(path)
-            self.assertEqual([n for n in names if forbidden(n)], [], path)
+            self.assertEqual([n for n in names if forbidden(n, path)], [], path)
             if path.name != "__main__.py":  # it uses shutil.which for the registration line, never a network module
                 self.assertEqual([n for n in names if n.split(".")[0] in network], [], path)
         modules = [m for m in server.GROUPS]
@@ -311,7 +322,7 @@ class OfflineTest(unittest.TestCase):
         out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(out.returncode, 0, out.stderr)
         loaded = json.loads(out.stdout)
-        self.assertEqual([m for m in loaded if forbidden(m)], [], FORBIDDEN_IMPORTS)
+        self.assertEqual(forbidden_loaded(loaded), [], FORBIDDEN_IMPORTS)
         self.assertTrue(set(modules) <= set(loaded))
 
     def test_the_live_store_is_refused_by_serve_check_and_a_tool_call(self):

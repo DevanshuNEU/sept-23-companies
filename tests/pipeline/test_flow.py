@@ -1201,7 +1201,12 @@ class PlanFlowTests(HarnessCase):
         # The 2026-10-26 case: the stage's people plan (person rows, the founder's email row) was built with the old
         # config and nothing on it was acted on. A replace with the shipped config gives company rows only, keeps the
         # blocked companies off, and leaves every person, note and touch the stage seeded.
-        h = self.flow()
+        # The stages stamp their rows from the wall clock, and "acted on today" counts anything at or after the start of
+        # TODAY, so from 2026-11-10 on the stage's own seeds read as today's work. Their clock is pinned to the week
+        # before while the stage is built (#198); the replace below keeps the real one.
+        with mock.patch("tests.plan_seed.utcnow", return_value="2026-11-02T12:00:00Z"), \
+                mock.patch("outreach.store.writes.utcnow", return_value="2026-11-02T12:00:00Z"):
+            h = self.flow()
         old = self.entries(h)
         self.assertTrue(any(r["person_id"] is not None for r in old))
         kept = {t: [tuple(r) for r in _rows(h, f"SELECT * FROM {t} ORDER BY rowid")] for t in

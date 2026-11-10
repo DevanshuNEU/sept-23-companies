@@ -37,7 +37,7 @@ CLEAN_CODES = [
     "no_mail_server", "placeholder", "markdown_link", "visa_line", "too_many_links", "link_shortener",
     "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length",
     "stale_hook", "subject_wording", "subject_length", "subject_reused", "link_count", "signature", "narrated_email",
-    "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "reused_sentence", "same_opening", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
     "voice_rhythm",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
@@ -625,6 +625,47 @@ class Warns(ChecksCase):
         with mock.patch.dict(os.environ, {"OUTREACH_SIGNATURE": str(sig)}):
             self.assert_passes(self.run_on(body=nudge.format(n="Pat", extra="Who owns the role now?")), "near_identical")
             self.assert_blocks(self.run_on(body=nudge.format(n="Pat", extra="A short call next week?")), "near_identical")
+
+    def first_emails(self, n: int, body: str) -> None:
+        for i in range(n):
+            pid = seed.person(self.conn, seed.company(self.conn, f"Co{i}"), f"Other {i}")
+            seed.message(self.conn, seed.touch(self.conn, pid), 0, subject=f"other {i}", body=body)
+
+    def test_reused_sentence_warns_at_3_other_emails(self):
+        line = "I graduated from Northeastern in May 2026 and I build agents."
+        self.first_emails(3, words(40).replace("Hi Pat, ", "Hi Sam,\n\n" + line + " "))
+        check = self.one(self.run_on(body=words(60).replace("Hi Pat, ", "Hi Pat,\n\n" + line + " ")), "reused_sentence")
+        self.assertEqual(check["severity"], "warn", check)
+        self.assertIn("3", check["detail"])
+        self.assertIn("northeastern", check["detail"].lower())
+
+    def test_reused_sentence_passes_at_2(self):
+        line = "I graduated from Northeastern in May 2026 and I build agents."
+        self.first_emails(2, words(40).replace("Hi Pat, ", "Hi Sam,\n\n" + line + " "))
+        self.assert_passes(self.run_on(body=words(60).replace("Hi Pat, ", "Hi Pat,\n\n" + line + " ")), "reused_sentence")
+
+    def test_same_opening_warns_at_5_of_last_100(self):
+        self.first_emails(5, "Hi Sam,\n\nI graduated from Northeastern and then built things.\n\nThanks,\n" + SIGNATURE)
+        body = "Hi Pat,\n\nI graduated from Northeastern in May, and I want in.\n\n" + PROJECT + "\n\nThanks,\n" + SIGNATURE
+        check = self.one(self.run_on(body=body), "same_opening")
+        self.assertEqual(check["severity"], "warn", check)
+        self.assertIn("5", check["detail"])
+
+    def test_sameness_is_not_checked_on_followups(self):
+        self.first_emails(5, "Hi Sam,\n\nI graduated from Northeastern and then built things.\n\nThanks,\n" + SIGNATURE)
+        found = self.run_on(seq=1, body="Hi Pat,\n\nI graduated from Northeastern and then built things.\n\n" + SIGNATURE)
+        self.assertNotIn("reused_sentence", [c["code"] for c in found])
+        self.assertNotIn("same_opening", [c["code"] for c in found])
+
+    def test_thousand_emails_check_quickly(self):
+        import time
+        for co, name in [(f"Co{i}", f"Person {i}") for i in range(1000)]:
+            pid = seed.person(self.conn, seed.company(self.conn, co), name)
+            seed.message(self.conn, seed.touch(self.conn, pid), 0, subject=co, body=BODY.replace("Hi Pat,", f"Hi {name},")
+                         .replace("forty thousand", f"{co} thousand"))
+        start = time.perf_counter()
+        self.run_on()
+        self.assertLess(time.perf_counter() - start, 1.0)
 
     def test_recruiter_warns_with_the_role_kind_fix(self):
         found = self.run_on(role_kind="recruiter", body=words(90))

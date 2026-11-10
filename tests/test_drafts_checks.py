@@ -34,10 +34,10 @@ BODY = (
     f"Thanks,\n{SIGNATURE}"
 )
 CLEAN_CODES = [
-    "no_mail_server", "placeholder", "too_many_links", "link_shortener", "near_identical", "no_go_person", "said_no",
-    "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
+    "no_mail_server", "placeholder", "markdown_link", "visa_line", "too_many_links", "link_shortener",
+    "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused",
     "link_count", "signature", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
-    "voice_rhythm", "voice_opt_line",
+    "voice_rhythm",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
                  "stop_reply", "not_a_fit", "other")
@@ -160,6 +160,43 @@ class Blocks(ChecksCase):
         self.assertEqual(body[check["spans"][0]["start"]:check["spans"][0]["end"]], PROJECT)
         self.assertEqual(body[check["spans"][-1]["start"]:check["spans"][-1]["end"]], PORTFOLIO)
         self.assert_passes(self.run_on(), "too_many_links")
+
+    def test_markdown_link_blocks(self):
+        body = BODY.replace(f"The runner is at {PROJECT}.", f"The runner is [here]({PROJECT}).")
+        check = self.assert_blocks(self.run_on(body=body), "markdown_link")
+        self.assertEqual(body[check["spans"][0]["start"]:check["spans"][0]["end"]], f"[here]({PROJECT})")
+        self.assert_blocks(self.run_on(subject=f"see [this]({PROJECT})"), "markdown_link")
+
+    def test_bare_link_passes_markdown(self):
+        self.assert_passes(self.run_on(), "markdown_link")
+        self.assert_passes(self.run_on(body=BODY.replace("I build", "I build [real] things and")), "markdown_link")
+
+    def test_visa_line_blocks_for_every_reader(self):
+        lines = ("I'm on F-1 OPT.", "I'm eligible for STEM OPT through 2029.", "I don't need sponsorship.",
+                 "No H-1B needed.", "No H1B needed.", "I'm authorized to work now.", "My work authorization is fine.",
+                 "My visa is sorted.", "Nothing to sponsor here.", "I have a green card.", "Immigration is handled.")
+        for kind in ("recruiter", "engineer", "manager", "founder"):
+            for line in lines:
+                with self.subTest(kind=kind, line=line):
+                    check = self.assert_blocks(self.run_on(role_kind=kind, body=BODY.replace("I build", line + " I build")),
+                                               "visa_line")
+                    self.assertTrue(check["spans"])
+        self.assert_blocks(self.run_on(subject="Backend role, on OPT"), "visa_line")
+
+    def test_visa_line_ignores_opt_inside_words(self):
+        for line in ("I optimize queries.", "Users can opt in.", "It was adopted across 3 sections.",
+                     "The options page works.", "Sponsors of the hackathon", "visage"):
+            with self.subTest(line=line):
+                found = self.run_on(body=BODY.replace("I build", line + " I build"))
+                if line.startswith("Sponsors"):
+                    self.assertEqual(self.one(found, "visa_line")["severity"], "block")
+                else:
+                    self.assert_passes(found, "visa_line")
+
+    def test_recruiter_warn_no_longer_mentions_work_authorization(self):
+        check = self.one(self.run_on(role_kind="recruiter"), "recruiter")
+        self.assertEqual(check["severity"], "warn")
+        self.assertNotIn("authorization", check["detail"].lower())
 
     def test_bare_domain_counts_as_a_link(self):
         self.assert_blocks(self.run_on(body=BODY + "\nThe team page is acme.com/team."), "too_many_links")

@@ -8,7 +8,9 @@ The checks only read. They never approve, send or change a message; the caller s
 
 Blocks are #9's safety list: no mail server, more than 2 links, a link shortener, near-identical to a colleague's
 draft, a no-go on the person or the company, a person who said no or asked to stop, a company closed for no
-sponsorship. An address with no usable domain counts as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
+sponsorship. Two more come from his 2026-11-09 rulings: a markdown link (email is plain text, so the brackets would
+arrive as typed) and any visa, OPT or sponsorship mention, for every reader. An address with no usable domain counts
+as no mail server. Placeholder text (TODO, ASK:, {{ }}) blocks,
 as it does in `mail/check_draft.py`. Two more block because a send could not be checked or could not thread: a
 banned phrases list that cannot be read (fail closed), and a follow-up subject that is not `Re: ` plus the first
 email's subject (#14). There is no attachment check because a message has no attachment column (a test pins that).
@@ -55,6 +57,10 @@ URL = re.compile(r"https?://[^\s<>()\"']+", re.I)
 BARE = re.compile(r"(?<![\w@./-])(?:[a-z0-9-]+\.)+(?:com|ai|io|dev|app|co|org|net|ly|gl|in|at|cc|id|me|sh|so|xyz|us)"
                   r"\b(?:/[^\s<>()\"']*)?", re.I)
 RE_PREFIX = re.compile(r"re\s*:", re.I)
+MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\]\(\s*https?://[^)\s]+\s*\)", re.I)
+# No visa, OPT or sponsorship in any email, to anyone (#9, 2026-11-09). OPT must be upper case: "opt in" is fine.
+VISA = re.compile(r"\bF-1\b|\bOPT\b|(?i:\bvisas?\b|\bsponsor(?:ship|ed|s|ing)?\b|\bH-?1B\b|work authori[sz]ation|"
+                  r"authori[sz]ed to work|\bgreen card\b|\bimmigration\b)")
 HOOK_DATE = re.compile(r"\((\d{4}-\d{2}-\d{2})\)$")
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
@@ -63,11 +69,11 @@ _DOMAIN = re.compile(rf"(?:{_LABEL}\.)+{_LABEL}")
 OPEN_STATES = ("drafted", "approved", "sending", "send_unknown", "sent", "failed")
 STOP_REPLIES = ("said_no", "asked_to_stop")
 
-BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "too_many_links", "link_shortener", "followup_subject",
-               "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
+BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown_link", "visa_line", "too_many_links",
+               "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_reused", "link_count",
               "signature", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
-              "voice_recital", "voice_rhythm", "voice_opt_line", "voice_ungrounded")
+              "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
 
@@ -275,6 +281,26 @@ def _placeholder(d: DraftInput) -> Check:
     return _check("placeholder", "pass", "No placeholder text", "No TODO, ASK: or {{ }} left in.")
 
 
+def _markdown_link(d: DraftInput) -> Check:
+    spans = [_span(f, m.start(), m.end()) for f, text in (("subject", d.subject), ("body", d.body))
+             for m in MARKDOWN_LINK.finditer(text)]
+    if spans:
+        return _check("markdown_link", "block", "Markdown link",
+                      "The email is plain text, so the brackets arrive as typed. Write the full link on its own line.",
+                      spans=spans)
+    return _check("markdown_link", "pass", "No markdown links", "Every link is a plain link.")
+
+
+def _visa_line(d: DraftInput) -> Check:
+    spans = [_span(f, m.start(), m.end()) for f, text in (("subject", d.subject), ("body", d.body))
+             for m in VISA.finditer(text)]
+    if spans:
+        return _check("visa_line", "block", "Visa mention",
+                      "No visa, OPT or sponsorship in any email (#9, 2026-11-09). Take this out; it comes up only if "
+                      "they ask.", spans=spans)
+    return _check("visa_line", "pass", "No visa mention", "Nothing about visa, OPT or sponsorship.")
+
+
 def _link_rules(d: DraftInput) -> list[Check]:
     found = _links(d.body)
     spans = [_span("body", s, e) for s, e, _ in found]
@@ -369,7 +395,7 @@ def _recruiter(d: DraftInput) -> Check:
         return _check("recruiter", "pass", "Not a recruiter", f"Role kind is {d.role_kind}.")
     return _check("recruiter", "warn", "Recruiter",
                   "This person is a recruiter. Email a recruiter only when no engineer, manager or founder is "
-                  "found, and put the work authorization line up front. If the role kind is wrong, change it.",
+                  "found, and name the exact role up front. If the role kind is wrong, change it.",
                   fix={"kind": "role_kind"})
 
 
@@ -499,6 +525,8 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         *_banned(d, banned),
         _dash(d),
         _placeholder(d),
+        _markdown_link(d),
+        _visa_line(d),
         *_link_rules(d),
         _signature(d),
         _length(d),

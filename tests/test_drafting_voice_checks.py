@@ -67,14 +67,10 @@ class VoiceChecksCase(unittest.TestCase):
     def test_voice_rhythm_passes_varied_sentences(self):
         self.assertEqual(one("voice_rhythm", CLEAN)["severity"], "pass")
 
-    def test_voice_opt_line_flags_a_non_recruiter(self):
-        self.assertEqual(one("voice_opt_line", "I'm on F-1 OPT and can start now.", "engineer")["severity"], "warn")
-
-    def test_recruiter_may_carry_the_opt_line(self):
-        self.assertEqual(one("voice_opt_line", "I'm on F-1 OPT and can start now.", "recruiter")["severity"], "pass")
-
-    def test_voice_opt_line_passes_a_clean_engineer_body(self):
-        self.assertEqual(one("voice_opt_line", CLEAN, "founder")["severity"], "pass")
+    def test_voice_checks_have_no_opt_check(self):
+        # The visa rule moved to the approve checks as a block for every reader (#191).
+        for kind in ("engineer", "recruiter"):
+            self.assertNotIn("voice_opt_line", [c["code"] for c in voice_checks("I'm on F-1 OPT.", kind)])
 
     def test_voice_ungrounded_flags_a_number_not_in_the_sources(self):
         c = one("voice_ungrounded", "It handled 12,345 users and 94% hits.", ground=GROUND)

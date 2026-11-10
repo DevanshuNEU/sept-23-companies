@@ -19,6 +19,11 @@ class TextTest(unittest.TestCase):
         self.assertEqual(sentences(body), ["i built a code search service for coding agents",
                                            "who should i write to about it"])
 
+    def test_a_link_ending_a_sentence_keeps_the_sentence_break(self):
+        body = email("My work is at https://x.com/a. I built a code search service for agents.")
+        self.assertEqual(sentences(body), ["i built a code search service for agents"])
+        self.assertEqual(first_sentence(body), "my work is at")
+
     def test_empty_body_has_no_sentences(self):
         self.assertEqual(sentences("Hi Pat,\n\nThanks,\n" + SIG), [])
         self.assertEqual(first_sentence("Hi Pat,\n\nThanks,\n" + SIG), "")

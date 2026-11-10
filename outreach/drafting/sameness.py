@@ -25,7 +25,7 @@ FIRST_EMAIL_STATES = ("drafted", "approved", "sending", "send_unknown", "sent", 
 MIN_WORDS = 6
 RUN = 6  # the length of a run of words the brief reports as overused
 GREETING = re.compile(r"^\s*(hi|hello|hey|dear)\b[^\n]{0,40},\s*$", re.I)
-URL = re.compile(r"https?://\S+", re.I)
+URL = re.compile(r"https?://\S+?(?=[.,;:!?)\]]*(?:\s|$))", re.I)  # a full stop after a link still ends the sentence
 ENDS = re.compile(r"(?<=[.!?])\s+|\n+")
 
 

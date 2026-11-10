@@ -305,7 +305,8 @@ def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
                          (touch["touch_id"],)).fetchone() if touch else None
     if args.seq == 0:
         why = why_not_email(p, main, family, conn, touch, first)
-        if why is not None and why != "already_emailed":
+        # A judge run tests new versions of emails he already wrote, approved or sent (lab, 2026-11-09).
+        if why is not None and why not in ("already_emailed", "approved_or_later", "edited_by_devanshu"):
             raise refuse(why, name=p["name"], company=main["name"])
         subject, message_id = text(args.subject, "subject"), first["message_id"] if first else None
     else:

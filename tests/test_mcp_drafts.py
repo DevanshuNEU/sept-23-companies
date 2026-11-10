@@ -478,6 +478,14 @@ class CheckDraftTest(DraftCase):
         got = self.ok("check_draft", self.check_args(body=body))
         self.assertNotIn("reused_sentence", [w["code"] for w in got["warns"]])  # 2 others, not 3 with its own
 
+    def test_check_draft_runs_on_an_approved_or_sent_first_email(self):
+        # A judge run tests new versions of emails he already approved or sent (lab, 2026-11-09).
+        self.ok("save_draft", self.draft_args())
+        self.db.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?",
+                        (NOW, self.first()["message_id"]))
+        got = self.ok("check_draft", self.check_args())
+        self.assertIn("blocks", got)
+
     def test_check_draft_is_registered_without_grants(self):
         from outreach.mcp import server
         spec = next(s for s in server.tool_specs() if s.name == "check_draft")

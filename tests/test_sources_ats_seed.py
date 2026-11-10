@@ -37,9 +37,15 @@ class GateTest(unittest.TestCase):
         got = self.gate(ok(job(1, "Account Executive"), job(2, "Product Designer"), job(3, "Recruiter")))
         self.assertEqual(got, Gate("no_us_engineering", 0, "Acme"))
 
-    def test_gate_does_not_count_an_unplaced_or_off_lane_posting(self):
-        got = self.gate(ok(job(1, "Software Engineer", ""), job(2, "Mechanical Engineer", "Austin, TX"),
-                           job(3, "Software Engineering Intern", "Austin, TX")))
+    def test_gate_counts_an_unplaced_posting_as_not_outside_the_us(self):
+        for location in ("", "Remote"):
+            with self.subTest(location=location):
+                got = self.gate(ok(job(1, "Software Engineer", location)))
+                self.assertEqual((got.result, got.open_us_engineering), ("promoted", 1))
+
+    def test_gate_does_not_count_an_off_lane_posting(self):
+        got = self.gate(ok(job(1, "Mechanical Engineer", "Austin, TX"),
+                           job(2, "Software Engineering Intern", "Austin, TX")))
         self.assertEqual(got.result, "no_us_engineering")
 
     def test_gate_error_is_error_not_rejection(self):

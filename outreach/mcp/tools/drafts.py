@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from pydantic import Field
 
 from outreach.drafting.brief import brief_id, check_brief, read_evidence
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
+from outreach.drafting.sameness import evidence_used, load_corpus, overused, recent_openings, recent_subjects
 from outreach.drafting.signature import read_signature
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, DraftInput,
                                     cached_mx, email_domain, load_banned, run_checks)
@@ -145,6 +146,18 @@ def voice_unreadable(caught: VoiceUnreadable) -> ToolError:
                      "Check OUTREACH_VOICE_DIR, the DevVault folder and mail/me.md. Nothing was drafted.")
 
 
+EVIDENCE_DAYS = 14
+
+
+def avoid(ctx: Ctx) -> dict:
+    """What he has used lately, so the drafter writes around it (#203): advice only, it never changes the brief id."""
+    corpus = load_corpus(ctx.conn, exclude_message_id=None)
+    since = (datetime.fromisoformat(ctx.now.replace("Z", "+00:00")) - timedelta(days=EVIDENCE_DAYS)
+             ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"recent_openings": recent_openings(corpus), "recent_subjects": recent_subjects(corpus),
+            "overused": overused(corpus), "evidence_used": evidence_used(ctx.conn, since=since)}
+
+
 def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
     """Everything the drafter is given for one person, assembled by code (#135): the person as the `person` tool
     reads them, his DevVault voice files, me.md above its open questions, and the limits. Its `brief_id` is what
@@ -161,6 +174,7 @@ def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
         "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
         "signature": read_signature(),
+        "avoid": avoid(ctx),
         "limits": {"words": list(DEFAULT_WORDS), "max_links": MAX_LINKS,
                    "banned_phrases_path": DEFAULT_BANNED_PHRASES},
     }

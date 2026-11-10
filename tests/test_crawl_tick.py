@@ -1235,6 +1235,40 @@ class ThreadedTickTests(TickCase):
         job, = self.jobs("read_boards")
         self.assertEqual(job["status"], "failed")
 
+    def wrong_shape_outage(self, *, read_ago, workers):
+        """12 Greenhouse boards last read ok `read_ago` seconds before T0, every one now answering a challenge page
+        (a 200 the polite breaker counts as healthy, so only the tick's own count trips the bucket), on a fresh
+        store. Returns the board states with the board's identity left out, sorted (which boards came first may
+        differ between threads), and the report's counts."""
+        conn = fresh_store()
+        self.addCleanup(conn.close)
+        then = at(-read_ago)
+        for i in range(12):
+            bid = seed_board(conn, seed_company(conn, f"G{i}"), "greenhouse", f"g{i}")
+            conn.execute("UPDATE board SET last_read = 'ok', last_read_at = ?, streak_since = ?, next_read_at = ? "
+                         "WHERE board_id = ?", (then, then, at(-60), bid))
+        client = FakeClient({gh(f"g{i}"): text_response("<html>Just a moment...</html>") for i in range(12)})
+        clock = Clock()
+        report = run_tick(conn, client, cfg=dataclasses.replace(self.cfg, breaker_failures=3), now_fn=lambda: T0,
+                          clock=clock, sleep=clock.sleep, workers=workers)
+        self.assertEqual(client.unrouted, [])
+        keep = ("last_read", "last_read_at", "empty_streak", "error_streak", "streak_since", "next_read_at",
+                "last_error")
+        states = sorted(tuple(r[k] for k in keep) for r in conn.execute("SELECT * FROM board"))
+        reads = conn.execute("SELECT count(*) FROM board_read").fetchone()[0]
+        return states, (report.error, report.deferred, reads, report.tripped)
+
+    def test_a_bucket_the_tick_tripped_defers_late_answers_as_serial_does(self):
+        # The tick's own breaker (three wrong-shape 200s in a row) trips the bucket on the writer's side, after the
+        # workers have already listed boards queued behind. Those late answers must be deferrals, as in a serial tick
+        # where they are never sent: no extra error reads, streaks or backoffs.
+        for read_ago in (3600, 2 * 86400):  # shielded, then past the grace
+            with self.subTest(read_ago=read_ago):
+                serial = self.wrong_shape_outage(read_ago=read_ago, workers=None)
+                threaded = self.wrong_shape_outage(read_ago=read_ago, workers=self.cfg.workers)
+                self.assertEqual(threaded, serial)
+        self.assertEqual(serial[1], (3, 9, 3, ("greenhouse.io",)))  # the unshielded case: three errors written
+
 
 if __name__ == "__main__":
     unittest.main()

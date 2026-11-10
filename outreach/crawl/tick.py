@@ -272,7 +272,12 @@ class _Pass:
 
     def take(self, listed: Listed) -> None:
         """Write one listed board, on the thread that owns the store. The time is taken here, when the board is
-        written, not when it was started."""
+        written, not when it was started.
+
+        The tick trips a bucket here, as it takes the error that reaches `breaker_failures`, but worker threads may
+        already have listed more of that bucket's boards by then. Their answers arrive late, and each is deferred,
+        as a serial tick that never sent them would: no read, no streak change. Those extra requests are bounded by
+        the bucket's boards already in flight or queued when the trip is taken."""
         if listed.adapter is None:  # due_boards selects the ATSs the crawler reads only
             return
         board, adapter, view, result = listed.board, listed.adapter, listed.view, listed.result
@@ -284,6 +289,10 @@ class _Pass:
             return
         self._profile(board.ats, boards=1, list_requests=view.requests, list_ms=listed.list_ms)
         bucket = view.first_bucket
+        if bucket is not None and bucket in self.down:  # listed before the writer took the trip: a late answer
+            self._push(board, add_seconds(now, self.cfg.defer_s))
+            self.counts["deferred"] += 1
+            return
         if bucket is not None:
             self.seen.add(bucket)
         if result.result == "error":

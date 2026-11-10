@@ -15,8 +15,9 @@ ALTER TABLE posting ADD COLUMN list_at TEXT CHECK (list_at IS strftime('%Y-%m-%d
 ALTER TABLE board ADD COLUMN last_good_read_at TEXT
   CHECK (last_good_read_at IS strftime('%Y-%m-%dT%H:%M:%SZ', last_good_read_at));
 
--- Postings stored before this keep their current date: the posted date (05:00 UTC), else the first-seen time.
-UPDATE posting SET list_at = coalesce(posted_on || 'T05:00:00Z', first_seen_at);
+-- Postings stored before this keep their current date: the posted date (05:00 UTC), else the first-seen time, and
+-- never later than the first sighting (SQLite's scalar min).
+UPDATE posting SET list_at = min(coalesce(posted_on || 'T05:00:00Z', first_seen_at), first_seen_at);
 -- A board's last good read: its last read when that was good, else the newest good read it keeps.
 UPDATE board SET last_good_read_at = CASE
   WHEN last_read IN ('ok', 'unchanged', 'empty') THEN last_read_at

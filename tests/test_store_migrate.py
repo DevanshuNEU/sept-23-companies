@@ -403,7 +403,7 @@ class ListTimeMigrationTest(unittest.TestCase):
     def test_0009_backfills_list_at_and_last_good_read(self):
         conn = self.old_store()
         company = seed_company(conn)
-        for key, posted_on in (("url:dated", "2026-10-01"), ("url:undated", None)):
+        for key, posted_on in (("url:dated", "2026-10-01"), ("url:undated", None), ("url:late", "2026-11-05")):
             conn.execute("INSERT INTO posting(company_id, source_key, title, posted_on, first_seen_at, last_seen_at) "
                          "VALUES (?, ?, 'Software Engineer', ?, ?, ?)", (company, key, posted_on, self.T2, self.T2))
         boards = {
@@ -420,6 +420,8 @@ class ListTimeMigrationTest(unittest.TestCase):
         rows = {r["source_key"]: r for r in conn.execute("SELECT * FROM posting")}
         self.assertEqual(rows["url:dated"]["list_at"], "2026-10-01T05:00:00Z")
         self.assertEqual(rows["url:undated"]["list_at"], self.T2)
+        # A posted date later than the first sighting is capped there: a row never sorts after it was first seen.
+        self.assertEqual(rows["url:late"]["list_at"], self.T2)
         for row in rows.values():
             self.assertEqual((row["posted_at"], row["seen_gap_s"], row["repost_of"]), (None, None, None))
         good = {name: conn.execute("SELECT last_good_read_at FROM board WHERE board_id = ?", (bid,)).fetchone()[0]

@@ -35,12 +35,16 @@ def list_at(ats: str, first_seen_at: str, posted_at: str | None, posted_on: str 
 
     `posted_at` when set; else `posted_on` at 00:00 New York for an ATS in `DATE_TRUSTED`; either one capped at
     `first_seen_at`. Else `first_seen_at` when the board had a good read before (`seen_gap_s` is not None), else None.
+    A `posted_on` too extreme to turn into a time (an OverflowError) counts as no date.
     """
     if posted_at:
         return min(posted_at, first_seen_at)
     if posted_on and ats in DATE_TRUSTED:
         midnight = datetime.combine(date.fromisoformat(posted_on), time(0, 0), tzinfo=_NY)
-        return min(midnight.astimezone(timezone.utc).strftime(ISO_FMT), first_seen_at)
+        try:
+            return min(midnight.astimezone(timezone.utc).strftime(ISO_FMT), first_seen_at)
+        except OverflowError:
+            pass
     if seen_gap_s is not None:
         return first_seen_at
     return None

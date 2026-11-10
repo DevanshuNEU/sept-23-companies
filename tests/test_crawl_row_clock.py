@@ -1,7 +1,10 @@
 """The list time of a posting row, and how a repost is found (#193, Part 3)."""
 import itertools
 import unittest
+from datetime import tzinfo
+from unittest import mock
 
+from outreach.crawl import row_clock
 from outreach.crawl.cadence import add_seconds
 from outreach.crawl.row_clock import DATE_TRUSTED, GAP_TAG_S, REPOST_DAYS, find_repost, list_at, repost_key
 from tests.storetest import fresh_store, seed_company
@@ -43,6 +46,19 @@ class ListAtTests(unittest.TestCase):
         self.assertIsNone(list_at("rippling", "2026-11-09T15:00:00Z", None, None, None))
         # A gap of zero seconds is still a gap: the board had been read.
         self.assertEqual(list_at("rippling", "2026-11-09T15:00:00Z", None, None, 0), "2026-11-09T15:00:00Z")
+
+    def test_list_at_overflowing_date_falls_back_as_if_no_date(self):
+        # An extreme date never stops the write: one the clock cannot turn into a time counts as no date.
+        self.assertEqual(list_at("workday", "2026-11-09T15:00:00Z", None, "9999-12-31", 300), "2026-11-09T15:00:00Z")
+
+        class Overflow(tzinfo):
+            def utcoffset(self, dt):
+                raise OverflowError("date value out of range")
+
+        with mock.patch.object(row_clock, "_NY", Overflow()):
+            self.assertEqual(list_at("workday", "2026-11-09T15:00:00Z", None, "9999-12-31", 300),
+                             "2026-11-09T15:00:00Z")
+            self.assertIsNone(list_at("workday", "2026-11-09T15:00:00Z", None, "9999-12-31", None))
 
 
 class RepostKeyTests(unittest.TestCase):

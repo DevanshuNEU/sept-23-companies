@@ -1,6 +1,14 @@
 # Drafts that read handwritten
 
-Date: 2026-11-09. Status: draft for Devanshu's review. Issue: to be opened when he approves.
+Date: 2026-11-09. Status: approved by Devanshu 2026-11-09 with the scope cut below. Issue: to be opened when he approves.
+
+## Scope (Devanshu, 2026-11-09)
+
+This work is the drafting part only: what a cold email or follow-up says. Other parts of Knock own the rest, and this
+work does not touch them. The job board finds the latest jobs. Devanshu reads them and decides where to apply and
+whom to contact, as many people per company as he likes. The scheduler sends. So no check here looks at whether a
+role is open or closed, how old a posting is, a posting's citizenship terms, or how many people at a company get
+email.
 
 ## Why
 
@@ -17,9 +25,6 @@ What the Outbox shows on 2026-11-09 (read only, 459 first emails: 275 approved, 
   text. The hook is often "thin: title only". So the emails fall back to his resume.
 - 77 of 459 put markdown links in the body (`[portfolio](https://...)`). The sender sends plain text
   (`outreach/sending/gmail.py`, `set_content`), so the brackets arrive as typed. 21 went out like that; 56 are approved.
-- 32 approved emails name a role Knock shows as closed: 23 at The Hartford (Tech Catalyst Program, closed
-  2026-11-09) and 9 at Qualtrics (Data Platform, closed 2026-11-06). Nothing rechecks the role after approval.
-  Another 43 approved emails name a role posted before August 2026 (Notability's Web Apps role is from 2025-09-22).
 - 13 non-recruiters got the work-authorization line, 6 of them still approved. #9 (2026-10-27) gives it to
   recruiters only, but `mail/me.md` says the line is "for recruiters and managers", and `voice_opt_line` only warns.
 - Follow-ups can switch roles mid-thread (Hark: first email about Computer-Use Agents, follow-up about LLM &
@@ -51,7 +56,7 @@ honest doubt reads as human. Feeling belongs to the work, never to the job hunt.
 
 ## Goals
 
-1. No email goes out naming a closed role, carrying markdown, or giving the visa line to a non-recruiter.
+1. No email carries markdown or gives the visa line to a non-recruiter.
 2. A draft cannot quietly repeat the openings and sentences of his other emails.
 3. Each engineer, manager or founder email carries one true, sourced fact about the person or their team when one
    exists, and says plainly that they haven't met when none does.
@@ -65,34 +70,33 @@ honest doubt reads as human. Feeling belongs to the work, never to the job hunt.
 - GPT does not write drafts. In the lab it wrote worse emails than Claude; it judges.
 - No reply analytics or style tagging yet: 1 reply in 184 is too little data. Revisit at 30+ replies (the DevVault
   outreach rule).
-- No change to #9's numbers (80 to 120 words, 2 links, 4 follow-ups) in this work. See "Open for Devanshu".
+- Out of scope (other parts of Knock): open or closed roles, posting age, citizenship or clearance terms, people
+  per company, send timing.
 - Anti-goal: a rule set that becomes the next template. The lab showed it: GPT applied the same advice to all 12
   and made a new mail merge. Every rule below is about what is true and specific, not a menu of openings.
 - Anti-goal: fake familiarity. A personal touch that isn't true is worse than "we haven't met".
 
 ## What changes
 
-### Part 1. Checks that stop the bad ones (code, first PR)
+### Part 1. Checks on what the draft says (code, first PR)
 
-New checks in `outreach/drafts/checks.py`, run by `save_draft`, `save_followup`, the approve route and the
-sender's pre-claim check (`outreach/sending/precheck.py`, which already reruns `run_checks` and moves any message
-that now blocks back to `drafted` for his review). So the 32, 56 and 6 above return to his Outbox on their own once
-this deploys, each with its reason.
+New and changed checks in `outreach/drafts/checks.py`, run by `save_draft`, `save_followup` and the approve route.
+The sender already reruns the same checks before each send (`outreach/sending/precheck.py`), so an approved email
+that now blocks goes back to drafted with its reason; that is existing sender behavior and this work does not change
+it.
 
 - `markdown_link` (block): a `[text](url)` in the body. Fix: write the bare URL on its own line.
 - `opt_line` (block): `voice_opt_line` becomes a block for any `role_kind` other than `recruiter`. `mail/me.md`'s
   line changes to "for recruiters only", matching #9.
-- `role_closed` (block): the body or subject names a posting of this company (normalised title match, as in the
-  lab script) and every posting it matches is closed. A draft that names no posting is not checked.
-- `role_old` (warn): the named posting was first posted more than 90 days ago.
-- `role_switched` (warn, follow-ups): a follow-up names a posting of the company that the first email did not.
+- `length` (warn): first emails at most 120 words, with no floor (Devanshu, 2026-11-09: "until that anything is
+  fine"). Replaces 80 to 120, and the recruiters' "about 90".
 - `reused_sentence` (warn): a sentence of 6 or more words that also appears in 3 or more of his other first emails
   (drafted, approved or sent), quoted with the count.
 - `same_opening` (warn): the first sentence after the greeting starts with the same 4 words as 5 or more of his last
   100 first emails.
 
-The sameness checks warn, never block: a block would pull back most of the 275 approved emails at once. Warnings
-show in the Outbox and `save_draft` returns them, and the skill fixes every one it can.
+The sameness checks warn, never block. Warnings show in the Outbox and `save_draft` returns them, and the skill
+fixes every one it can.
 
 ### Part 2. The brief carries what to avoid (code)
 
@@ -138,8 +142,11 @@ Replace the fixed "Shape" and the by-reader table's fixed asks with what the lab
 - Before saving, read the draft against `recent_openings` and `overused`; save; fix every `reused_sentence`,
   `same_opening` and `no_person_fact` warning the facts allow.
 
-The follow-up drafter's prompt (`outreach/followup_drafter/prompt.md`) gets the same lines that apply to a follow-up:
-stay on the first email's role, no markdown, vary the ask.
+Follow-ups (`outreach/followup_drafter/prompt.md` and the skill's follow-up section), Devanshu 2026-11-09: a
+follow-up may be a plain, short human nudge, the way people actually write one ("just bumping this in case it got
+buried", "if you're busy, one line back would really help"). The ban on saying you are following up or bumping the
+thread goes. Each follow-up no longer has to add a new fact; it may, when there is a good one. It stays on the first
+email's role, uses no markdown, and never repeats a sentence from the thread.
 
 ### Part 5. The blind judge (tool, on demand)
 
@@ -154,35 +161,17 @@ per-recipient scores, the deciding quotes, and phrases repeated across each set.
   it.
 - The judge's prompt is a file in the module, the one used in the lab, so scores stay comparable.
 
-## Open for Devanshu
+## Devanshu's rulings (2026-11-09)
 
-These change what gets built or how the emails read; each is his call.
-
-1. **Closed role at send time.** With `role_closed` a block, an approved email whose posting closes later goes back
-   to `drafted` before it sends. Keep it a block, or only warn? (Recommended: block. Asking about a closed role
-   wastes the one shot at that person.)
-2. **#9's 80-word floor and the two links.** The research's winners are mostly 3 to 5 lines, and the same two URLs
-   under every email look like a signature block. Keep 80 to 120 and exactly 2, or allow 50 to 120 and 1 to 2 links?
-   (Recommended: decide after the judge scores a short-email set against the current one.)
-3. **Follow-up style.** The prompt bans "following up" and makes each follow-up add a new fact. The research found
-   plain short bumps work and four fact-adding follow-ups read like a drip campaign. Keep, or allow a one or two line
-   plain follow-up for the first one?
-4. **People per company.** 26 approved at Notability, 23 at The Hartford, 19 at Factory. #9 says the best 6 to 8 get
-   email; the intake ruling made that a heads-up. Leave it, or add a warn above 8 first emails per company?
-5. **Factory's Software Engineer, Federal.** 19 approved emails point at it. Federal roles often require citizenship or
-   clearance, which the visa ruling hides. Worth a check of that posting before they go.
+- Closed or old roles, citizenship terms and people per company are not this work's concern (see Scope).
+- Length: at most 120 words; anything under that is fine.
+- Links: unchanged, exactly 2 in a first email.
+- Follow-ups: a plain human nudge is allowed (Part 4).
 
 ## Calls made in the design (Claude's, Devanshu can overrule)
 
-- **#9 first.** The three new blocks (`markdown_link`, `opt_line`, `role_closed`) join #9's "Approve checks" list.
-  Editing #9 is step one of the plan, once he approves this design.
-- **Which closures `role_closed` trusts.** It blocks when every matching posting closed with `page_closed`, `hand`
-  or `gone_from_board`. A posting closed by `board_empty_twice` or `imported_closed` (a crawler glitch or old data
-  can cause these) only warns, as `role_closed_maybe`.
-- **No sweep of the approved queue.** Only the sender moves an approved email back to drafted, and that stays true.
-  New blocks surface when the sender reaches each email. At deploy, a read-only command
-  (`python -m outreach.draft_lab queue-report`) lists every approved email that would now block or warn, so he can
-  unapprove any by hand before its turn. It writes nothing.
+- **#9 first.** The two new blocks (`markdown_link`, `opt_line`) join #9's "Approve checks" list, and #9 records
+  the length and follow-up rulings, before any code.
 - **A dry-run check tool.** New read-only MCP tool `check_draft` (person, subject, body, `seq`): runs every save
   check, stores nothing, and leaves the message's own stored text out of the sameness counts. The skill uses it to
   test a set of drafts for a judge run without touching the store; those drafts live in a JSON file.
@@ -192,10 +181,8 @@ These change what gets built or how the emails read; each is his call.
 
 ## Left to the builder
 
-- Exact thresholds (3 emails for `reused_sentence`, 5 of 100 for `same_opening`, 90 days for `role_old`) may be tuned
+- Exact thresholds (3 emails for `reused_sentence`, 5 of 100 for `same_opening`) may be tuned
   against the store before merge; say the chosen values in the PR.
-- Title normalisation for `role_closed` (strip location suffixes and parentheticals), and how a company family
-  (merged companies) is searched.
 - Whether the sameness checks read a cached table or compute per save; a save must stay fast at 1,000+ emails.
 - Order of PRs: Part 1 first (it protects the queue), then Parts 2 and 3 together, then Part 4 with a judge run,
   then Part 5 if it was not already needed for Part 4. One issue per part.

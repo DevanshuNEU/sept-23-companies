@@ -10,7 +10,7 @@ from outreach.crawl import tick
 from outreach.pipeline import alerts
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
-from tests.ranking_store import decision, evidence, no_go, posting
+from tests.ranking_store import BACKFILL, board, decision, evidence, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
 NOW = "2026-11-03T15:00:00Z"  # 10:00 on 2026-11-03 in New York (EST)
@@ -30,12 +30,15 @@ class AlertCase(unittest.TestCase):
     def alert(self, now=NOW):
         return alerts.run(self.conn, self.notify, now)
 
-    def job(self, title="Software Engineer", *, company=None, size=None, posted=TODAY, tier="new_grad", ok=1, **dec):
+    def job(self, title="Software Engineer", *, company=None, size=None, posted=TODAY, tier="new_grad", ok=1,
+            seen="2026-11-03T14:00:00Z", seen_gap_s=1800, posted_at=None, repost_of=None, list_at=BACKFILL, **dec):
+        """A posting first seen at 09:00 New York today on a board read half an hour before (not its first read);
+        its list time is what the 0009 backfill gives those dates unless `list_at` says otherwise."""
         cid = company or seed_company(self.conn, f"Company {next(_names)}")
         if size is not None:
             evidence(self.conn, cid, "size", num_low=size, num_high=size)
-        pid = posting(self.conn, cid, title, posted_on=posted, first_seen_at="2026-11-01T12:00:00Z",
-                      last_seen_at="2026-11-01T12:00:00Z")
+        pid = posting(self.conn, cid, title, posted_on=posted, first_seen_at=seen, last_seen_at=seen,
+                      seen_gap_s=seen_gap_s, posted_at=posted_at, repost_of=repost_of, list_at=list_at)
         decision(self.conn, pid, level_tier=tier, level_ok=ok, **dec)
         return pid
 
@@ -80,8 +83,8 @@ class OncePerPostingTests(AlertCase):
         self.assertIsNone(self.last_alert())
 
     def test_a_future_dated_row_does_not_silence_todays_alerts(self):
-        # An ATS date in UTC can be tomorrow's date in New York: it heads the list, and must not hide today's rows.
-        self.job("Tomorrow", posted="2026-11-04")
+        # A list time on tomorrow's New York date (a clock ahead): it heads the list, and must not hide today's rows.
+        self.job("Tomorrow", posted=None, list_at="2026-11-04T06:00:00Z")
         today = self.job("Today", company=seed_company(self.conn, "Acme"))
         self.assertEqual(self.alert(), 1)
         self.assertEqual(self.notices, [("New jobs at your level", "Today at Acme")])
@@ -97,7 +100,7 @@ class OncePerPostingTests(AlertCase):
     def test_a_posting_with_no_posted_date_uses_the_day_it_was_seen(self):
         cid = seed_company(self.conn, "Seen Co")
         pid = posting(self.conn, cid, "Seen Engineer", first_seen_at="2026-11-03T14:00:00Z",
-                      last_seen_at="2026-11-03T14:00:00Z")  # 09:00 NY today
+                      last_seen_at="2026-11-03T14:00:00Z", seen_gap_s=600)  # 09:00 NY today, the board read before
         decision(self.conn, pid, level_tier="new_grad", level_ok=1)
         self.assertEqual(self.alert(), 1)
 
@@ -109,6 +112,44 @@ class OncePerPostingTests(AlertCase):
         self.job("Banned Job", company=banned)
         no_go(self.conn, banned)
         self.assertEqual(self.alert(), 0)
+
+
+class ListTimeTests(AlertCase):
+    """An alert is for a job posted today on a board Knock already read, never a repost or a board's first read
+    (#193, design 4.4)."""
+
+    def test_job_posted_today_on_known_board_alerts(self):
+        cid = seed_company(self.conn, "Acme")
+        board(self.conn, cid, ats="greenhouse")
+        # Posted 09:30 New York, seen ten minutes later on a board read half an hour before.
+        today = self.job("Today", company=cid, posted=None, seen="2026-11-03T14:40:00Z",
+                         posted_at="2026-11-03T14:30:00Z", list_at="2026-11-03T14:30:00Z")
+        # Seen today on the same board, but the board says it went up yesterday: not new.
+        self.job("Yesterday", company=cid, posted=None, seen="2026-11-03T14:40:00Z",
+                 posted_at="2026-11-02T20:00:00Z", list_at="2026-11-02T20:00:00Z")
+        # Date unknown: no list time, never an alert.
+        self.job("Unknown", company=cid, posted=None, list_at=None)
+        self.assertEqual(self.alert(), 1)
+        self.assertEqual(self.notices, [("New jobs at your level", "Today at Acme")])
+        self.assertEqual([e["entity_id"] for e in self.events()], [today])
+
+    def test_first_read_never_alerts(self):
+        # A newly added board's job posted this morning: its list time is today, but it came in on the first read.
+        self.job("First read", posted=None, seen_gap_s=None, posted_at="2026-11-03T13:30:00Z",
+                 list_at="2026-11-03T13:30:00Z")
+        self.assertEqual(self.alert(), 0)
+        self.assertEqual((self.notices, self.events(), self.last_alert()), ([], [], None))
+
+    def test_repost_never_alerts(self):
+        cid = seed_company(self.conn, "Acme")
+        gone = posting(self.conn, cid, "Software Engineer", first_seen_at="2026-08-01T12:00:00Z",
+                       last_seen_at="2026-10-20T12:00:00Z", closed=True)
+        self.job("Software Engineer", company=cid, posted=None, repost_of=gone, posted_at="2026-11-03T13:30:00Z",
+                 list_at="2026-11-03T13:30:00Z")
+        fresh = self.job("Data Engineer", company=cid)
+        self.assertEqual(self.alert(), 1)
+        self.assertEqual(self.notices, [("New jobs at your level", "Data Engineer at Acme")])
+        self.assertEqual([e["entity_id"] for e in self.events()], [fresh])
 
 
 class QuietHoursTests(AlertCase):

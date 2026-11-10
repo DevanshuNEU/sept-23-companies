@@ -91,6 +91,9 @@ def _load(client: HttpClient, url: str) -> tuple[str | None, str | None]:
         return None, f"page could not be fetched: {e.kind}"
     if r.status != 200:
         return None, f"page answered {r.status}"
+    landed = refused_url(r.url) if r.url else None
+    if landed:
+        return None, landed
     ctype = (r.headers.get("content-type") or "").lower()
     if not (ctype.startswith("text/html") or ctype.startswith("text/plain")):
         return None, "page is not a text page"

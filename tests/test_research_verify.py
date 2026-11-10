@@ -6,8 +6,9 @@ from outreach.research.verify import check_facts, page_text, quote_on_page, refu
 
 
 class FakeClient:
-    def __init__(self, pages):
+    def __init__(self, pages, final=None):
         self.pages = pages
+        self.final = final or {}
         self.calls = []
 
     def get(self, url, headers=None, *, follow_redirects=False, max_bytes=None):
@@ -16,7 +17,7 @@ class FakeClient:
         if isinstance(page, Exception):
             raise page
         status, body, ctype = page
-        return Response(status=status, url=url, body=body.encode() if isinstance(body, str) else body,
+        return Response(status=status, url=self.final.get(url, url), body=body.encode() if isinstance(body, str) else body,
                         headers={"content-type": ctype})
 
 
@@ -72,6 +73,16 @@ class PageCheckTest(unittest.TestCase):
         kept, rejected = check_facts(c, [Fact("f", "q", "https://lnkd.in/a")])
         self.assertEqual((kept, c.calls), ([], []))
         self.assertEqual(rejected[0]["reason"], "LinkedIn pages are not used")
+
+    def test_redirect_to_a_refused_page_is_refused(self):
+        pages = {"https://a.example/r": (200, "<p>we ship daily</p>", HTML),
+                 "https://a.example/h": (200, "<p>we ship daily</p>", HTML)}
+        c = FakeClient(pages, final={"https://a.example/r": "https://www.linkedin.com/x",
+                                     "https://a.example/h": "http://a.example/plain"})
+        kept, rejected = check_facts(c, [Fact("a", "we ship daily", "https://a.example/r"),
+                                         Fact("b", "we ship daily", "https://a.example/h")])
+        self.assertEqual(kept, [])
+        self.assertEqual([r["reason"] for r in rejected], ["LinkedIn pages are not used", "only https pages"])
 
     def test_one_fetch_per_url(self):
         c = FakeClient({"https://a.example/x": (200, "<p>one two three</p>", HTML)})

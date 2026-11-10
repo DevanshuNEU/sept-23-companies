@@ -5,17 +5,18 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from outreach.crawl.ats import reading_ats
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.cadence import due_boards
 from outreach.crawl.config import load_crawl_config
 from outreach.crawl.polite import PoliteClient
-from outreach.rules import record_evidence
-from outreach.rules.facts import EvidenceDraft
+from outreach.crawl.tick import AlreadyRunning, tick_lock
 from outreach.rules.config import default_config
-from outreach.sources.ats_seed import (RETRY_DAYS, SEED_ATS, Gate, SeedConfig, SeedReport, gate, load_seed_config,
-                                       run_seed)
+from outreach.sources import ats_seed
+from outreach.sources.ats_seed import (SEED_ATS, Gate, SeedConfig, SeedReport, gate, load_seed_config, run_seed,
+                                       top_up_due)
 from tests.fakes import FakeClient, json_response, status_response
 from tests.storetest import fresh_store, seed_board, seed_company
 
@@ -87,7 +88,7 @@ class GateTest(unittest.TestCase):
         self.assertEqual(got.result, "error")
 
     def test_constants(self):
-        self.assertEqual((SEED_ATS, RETRY_DAYS), (("greenhouse", "ashby"), 30))
+        self.assertEqual(SEED_ATS, ("greenhouse", "ashby"))
 
 
 NOW = "2026-11-10T06:30:00Z"
@@ -251,16 +252,75 @@ class SeedRunTest(unittest.TestCase):
         self.assertEqual((report.read, report.promoted), (1, 1))
         self.assertEqual(self.client.requests, [ASHBY.format("gamma")])
 
-    def test_promoted_board_joins_existing_company_by_domain(self):
-        self.write("greenhouse", "Acme Robotics,acme,https://acme.com/careers\n")
-        company = seed_company(self.conn, "Acme Corporation")
-        record_evidence(self.conn, company, [EvidenceDraft("domain", "acme.com", "confirmed", "website")],
-                        actor="source")
+    def test_one_name_match_attaches_the_board_to_that_company(self):
+        removed = seed_company(self.conn, "Acme")  # removed and merged companies are never matched
+        merged = seed_company(self.conn, "Acme Co")
+        company = seed_company(self.conn, "Acme Inc.")
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'test' WHERE company_id = ?",
+                          (removed,))
+        self.conn.execute("UPDATE company SET status = 'removed', remove_reason = 'merged', merged_into = ? "
+                          "WHERE company_id = ?", (company, merged))
         report = self.run_seed(ats=("greenhouse",))
         self.assertEqual(report.promoted, 1)
+        board = self.board("greenhouse", "acme")
+        self.assertEqual((board["company_id"], board["found_by"]), (company, "stapply_name"))
+        self.assertEqual(self.candidate("greenhouse", "acme")["board_id"], board["board_id"])
+        self.assertEqual(self.count("SELECT count(*) FROM company"), 3)  # no new company
+        self.assertEqual(self.count("SELECT count(*) FROM review_item"), 0)  # and no merge item
+        self.assertEqual(self.count("SELECT count(*) FROM company_source WHERE company_id = ? AND source_name = "
+                                    "'stapply' AND source_ref = 'greenhouse:acme'", company), 1)
+
+    def test_a_legal_name_alias_counts_as_a_name(self):
+        company = seed_company(self.conn, "Zeta Holdings")
+        self.conn.execute("INSERT INTO company_alias(company_id, alias, alias_key, source, created_at) "
+                          "VALUES (?, 'Acme LLC', 'acme llc', 'legal_name', ?)", (company, NOW))
+        self.run_seed(ats=("greenhouse",))
         self.assertEqual(self.board("greenhouse", "acme")["company_id"], company)
-        self.assertEqual(self.count("SELECT count(*) FROM company"), 1)
-        self.assertEqual(self.candidate("greenhouse", "acme")["domain"], "acme.com")
+
+    def test_no_name_match_creates_a_company(self):
+        seed_company(self.conn, "Acme Robotics")  # another key: acmerobotics
+        self.run_seed(ats=("greenhouse",))
+        company = self.board("greenhouse", "acme")["company_id"]
+        self.assertEqual(self.conn.execute("SELECT name FROM company WHERE company_id = ?", (company,)).fetchone()[0],
+                         "Acme")
+        self.assertEqual(self.count("SELECT count(*) FROM company"), 2)
+
+    def test_several_name_matches_create_through_identity(self):
+        first, second = seed_company(self.conn, "Acme"), seed_company(self.conn, "Acme LLC")
+        self.run_seed(ats=("greenhouse",))
+        company = self.board("greenhouse", "acme")["company_id"]
+        self.assertNotIn(company, (first, second))
+        self.assertEqual(self.count("SELECT count(*) FROM company"), 3)
+
+    def test_two_lists_naming_one_company_make_one_company(self):
+        self.write("ashby", "Acme,acmehq,https://jobs.ashbyhq.com/acmehq\n")
+        self.routes[ASHBY.format("acmehq")] = ashby_answer(US_ENG)
+        report = self.run_seed()
+        self.assertEqual(report.promoted, 2)
+        self.assertEqual(self.board("greenhouse", "acme")["company_id"], self.board("ashby", "acmehq")["company_id"])
+
+    def test_a_board_another_writer_added_is_known_and_nothing_half_written(self):
+        other = seed_company(self.conn, "Other Co")
+        board_id = seed_board(self.conn, other, "greenhouse", "acme")
+        before = {t: self.count(f"SELECT count(*) FROM {t}") for t in ("company", "board", "review_item", "event")}
+        with mock.patch.object(ats_seed, "_known_boards", return_value=({}, set())):  # the run read the store first
+            report = self.run_seed(ats=("greenhouse",))
+        self.assertEqual((report.promoted, report.known), (0, 1))
+        acme = self.candidate("greenhouse", "acme")
+        self.assertEqual((acme["gate_result"], acme["board_id"], acme["open_us_engineering"]),
+                         ("known", board_id, None))
+        after = {t: self.count(f"SELECT count(*) FROM {t}") for t in ("company", "board", "review_item", "event")}
+        self.assertEqual(after, {**before, "event": before["event"] + 1})  # the run's own event only
+
+    def test_the_crawler_running_stops_the_seed_before_any_write(self):
+        path = self.conn.execute("PRAGMA database_list").fetchone()[2]
+        with tick_lock(path):
+            with self.assertRaises(AlreadyRunning):
+                self.run_seed()
+            self.assertEqual(self.client.requests, [])
+            self.assertEqual(self.count("SELECT count(*) FROM board_candidate"), 0)
+            self.assertEqual(self.run_seed(dry_run=True).left, 3)  # a dry run sends nothing, so it needs no lock
+        self.assertEqual(self.run_seed().promoted, 2)
 
     def test_two_rows_of_one_domain_make_one_company(self):
         self.write("greenhouse", "Acme,acme,https://acme.com/careers\nAcme Labs,acmelabs,https://jobs.acme.com/\n")
@@ -320,6 +380,22 @@ class SeedRunTest(unittest.TestCase):
     def test_workers_list_on_threads_and_write_the_same(self):
         report = self.run_seed(workers=load_crawl_config().workers)
         self.assertEqual(report, SeedReport(read=3, promoted=2, rejected=1, dead=0, errors=0, known=0, left=0))
+
+    def test_retry_days_come_from_the_config(self):
+        self.run_seed()
+        self.conn.execute("UPDATE board_candidate SET gated_at = ? WHERE token = 'betalabs'", (days_before(NOW, 3),))
+        self.run_seed(config=SeedConfig(enabled=True, weekly_limit=10, retry_days=2))
+        self.assertEqual(self.client.requests, [GH.format("betalabs")])
+
+    def test_top_up_counts_new_york_days_since_the_last_seed(self):
+        self.conn.execute("INSERT INTO event(at, recorded_at, entity, kind, actor, detail) VALUES "
+                          "('2026-11-03T23:30:00Z', '2026-11-03T23:30:00Z', 'source', 'ats_seed_run', 'source', "
+                          "'{\"limit\": null, \"ats\": [\"greenhouse\", \"ashby\"]}')")
+        # 18:30 on 3 November in New York; NOW is 01:30 on 10 November there: 7 days, though under 7 x 24 hours.
+        self.assertIsNone(top_up_due(self.conn, NOW))
+        self.assertIn("2026-11-03", top_up_due(self.conn, "2026-11-10T04:59:00Z"))  # 23:59 on 9 November
+        off = SeedConfig(enabled=False, weekly_limit=10, retry_days=30)
+        self.assertIn("enabled = false", top_up_due(self.conn, NOW, off))
 
     def test_every_run_records_an_event_and_a_dry_run_none(self):
         self.run_seed(dry_run=True)

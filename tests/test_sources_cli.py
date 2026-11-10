@@ -20,6 +20,7 @@ from unittest import mock
 import live_checkout
 from outreach.install import install
 from outreach.crawl.config import load_crawl_config
+from outreach.crawl.tick import tick_lock
 from outreach.net import FetchError
 from outreach.sources import __main__ as cli
 from outreach.sources.ats_seed import load_seed_config
@@ -406,6 +407,14 @@ class SeedAtsCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("limit", err)
 
+    def test_the_crawler_running_exits_1_and_says_so(self):
+        with tick_lock(self.db):
+            code, out, err = self.cli("seed-ats")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("the crawler is running", err)
+        self.assertEqual(self.client.requests, [])
+        self.assertEqual(count(self.conn(), "SELECT count(*) FROM board_candidate"), 0)
+
     def test_a_tripped_bucket_exits_1(self):
         for token in ("nimbusrobotics", "lumenapps", "meshsystems"):  # whichever the workers send first trips it
             self.client.routes[GH_LIST.format(token)] = status_response(429)
@@ -438,7 +447,7 @@ class RunDueTest(CliCase):
     def test_run_due_runs_hn_freehire_formd_stapply_resolve_find_boards_and_the_scorecard_in_order(self):
         report = self.due()
         self.assertEqual(list(report["steps"]),
-                         ["hn", "freehire", "formd", "stapply", "ats_seed", "resolve", "find_boards", "scorecard"])
+                         ["hn", "freehire", "formd", "stapply", "resolve", "find_boards", "ats_seed", "scorecard"])
         self.assertEqual({k: v["status"] for k, v in report["steps"].items()},
                          {"hn": "ok", "freehire": "ok", "formd": "ok", "stapply": "skipped", "ats_seed": "skipped",
                           "resolve": "ok", "find_boards": "ok", "scorecard": "ok"})
@@ -661,6 +670,52 @@ class RunDueTest(CliCase):
         self.assertEqual(step["status"], "skipped")  # once a week
         self.assertIn(NOW, step["reason"])
         self.assertFalse([u for u in self.client.requests[sent:] if u in seed_routes()])
+
+    def full_seed_before(self, at="2026-10-15T06:30:00Z"):
+        self.client.routes.update(seed_routes())
+        self.conn().execute("INSERT INTO event(at, recorded_at, entity, kind, actor, detail) "
+                            "VALUES (?, ?, 'source', 'ats_seed_run', 'source', ?)",
+                            (at, at, json.dumps({"limit": None, "ats": ["greenhouse", "ashby"]})))
+
+    def test_the_weekly_limit_bounds_the_top_up(self):
+        self.full_seed_before()
+        with open(self.sources / "stapply" / "greenhouse.csv", "a", encoding="utf-8") as f:  # boards no one has yet
+            f.write("Ytterby Labs,ytterby,https://boards.greenhouse.io/ytterby\n"
+                    "Zircon Works,zircon,https://boards.greenhouse.io/zircon\n")
+        extra = {GH_LIST.format(t): gh_list(("Software Engineer", "Boston, MA")) for t in ("ytterby", "zircon")}
+        self.client.routes.update(extra)
+        one = dataclasses.replace(load_seed_config(), weekly_limit=1)
+        with mock.patch("outreach.sources.__main__.load_seed_config", return_value=one):
+            step = self.due()["steps"]["ats_seed"]
+        report = step["report"]
+        due = report["read"] - report["known"]
+        self.assertGreaterEqual(due, 2, report)
+        self.assertEqual(len([u for u in self.client.requests if u in seed_routes() or u in extra]), 1)
+        self.assertEqual((report["left"], report["promoted"] + report["rejected"] + report["dead"]), (due - 1, 1))
+
+    def test_the_seed_runs_after_find_boards_so_a_board_found_today_is_known(self):
+        self.full_seed_before()
+        report = self.due()
+        conn = self.conn()
+        boards = {(r["ats"], r["token"]) for r in conn.execute("SELECT ats, token FROM board")}
+        rows = {(r["ats"], r["token"]): r["gate_result"] for r in conn.execute("SELECT * FROM board_candidate")}
+        found_today = {key for key in rows if key in boards and rows[key] == "known"}
+        self.assertTrue(found_today, (boards, rows))  # find-boards gave these companies their board first
+        self.assertEqual(report["steps"]["ats_seed"]["report"]["known"], len(found_today))
+        self.assertEqual(count(conn, "SELECT count(*) FROM review_item WHERE kind = 'merge_candidate' "
+                                     "AND reason LIKE '%stapply%'"), 0)
+
+    def test_a_running_crawler_skips_the_top_up_and_the_run_goes_on(self):
+        self.full_seed_before()
+        with tick_lock(self.db):
+            report = self.due()
+        step = report["steps"]["ats_seed"]
+        self.assertEqual(step["status"], "skipped")
+        self.assertIn("the crawler is running", step["reason"])
+        self.assertEqual(report["steps"]["scorecard"]["status"], "ok")
+        self.assertFalse([u for u in self.client.requests if u in seed_routes()])
+        self.assertIsNone(json.loads(self.conn().execute(  # no run recorded: the next run-due tries again
+            "SELECT detail FROM event WHERE kind = 'ats_seed_run' ORDER BY event_id DESC").fetchone()[0])["limit"])
 
     def test_the_weekly_top_up_off_is_skipped(self):
         off = dataclasses.replace(load_seed_config(), enabled=False)

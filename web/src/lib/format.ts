@@ -212,6 +212,7 @@ export function postedLabel(j: JobTime, asOf: IsoTime): string {
 }
 
 /** Over this many seconds between the board's last read and the first sighting, the row says how long it was. */
+// Keep in step with GAP_TAG_S in outreach/crawl/row_clock.py.
 const GAP_TAG_S = 7200;
 
 /**

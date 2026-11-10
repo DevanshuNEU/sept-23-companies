@@ -118,7 +118,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     if plan is not None:
         # Phase 3: new and listed postings; then each changed field or body with its decision, as one unit.
         ids = write_postings(conn, board, DiffPlan(plan.new, (), plan.present, plan.reopen, ()), now,
-                             batch_rows=cfg.batch_rows, seen_gap_s=seen_gap_s(board, now))
+                             batch_rows=cfg.batch_rows, seen_gap_s=seen_gap_s(board, now), closing=plan.gone)
         listed_with_body = {ids[j.native_id] for j in result.jobs if j.body and j.native_id in ids}
         texts = {ids[nid]: text for nid, text in body_updates if nid in ids}
         decided += _apply_changes(conn, board, plan.changed, texts, now, cfg, rules_cfg, combiner)

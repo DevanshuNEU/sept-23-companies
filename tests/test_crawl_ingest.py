@@ -17,6 +17,7 @@ from outreach.crawl.decisions import decide_postings
 from outreach.crawl.ingest import ReadOutcome, read_board
 from outreach.crawl.polite import HostTripped
 from outreach.net import Response
+from outreach.ranking.common import canonical_ids
 from outreach.rules import ruleset_version
 from outreach.store import body_sha256, start_job
 from tests.fakes import FakeClient, json_response, status_response, text_response, with_greenhouse_details
@@ -1081,6 +1082,29 @@ class ListTimeReadTests(IngestTestCase):
         self.assertEqual(again["repost_of"], swe["posting_id"])
         self.assertEqual((again["posted_at"], again["list_at"]), ("2026-10-23T13:00:00Z", "2026-10-23T13:00:00Z"))
         self.assertIsNone(self.posting(DATA)["repost_of"])
+
+    def test_a_repost_in_the_same_read_is_still_a_repost(self):
+        # One read: the new grad posting disappears and a new id with its title appears. The new row is written
+        # before the old one closes (phase 3, then 5a), and it is still linked.
+        self.read(ok())
+        swe = self.pid(SWE)
+
+        def swap(jobs):
+            old = jobs.pop(0)
+            jobs.append(self.gh_job(4099000001, old["title"], "2026-10-23T09:00:00-04:00"))
+
+        self.read(ok(board_json(swap)), at(1))
+        self.assertEqual(self.posting(SWE)["close_reason"], "gone_from_board")
+        self.assertEqual(self.posting("4099000001")["repost_of"], swe)
+        self.assertIsNone(self.posting(DATA)["repost_of"])
+
+    def test_the_company_family_is_built_once_per_write(self):
+        self.read(ok())
+        jobs = [self.gh_job(4099000000 + n, f"Platform Engineer {n}") for n in range(5)]
+        with mock.patch("outreach.crawl.row_clock.canonical_ids", wraps=canonical_ids) as canon:
+            self.read(ok(board_json(lambda listed: listed.extend(jobs))), at(1))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM posting WHERE seen_gap_s = 86400").fetchone()[0], 5)
+        self.assertEqual(canon.call_count, 1)
 
     def test_ashby_republish_does_not_move_known_job(self):
         ashby = seed_board(self.conn, self.company, "ashby", "acme")

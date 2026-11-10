@@ -2,7 +2,7 @@
 import itertools
 import unittest
 
-from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
+from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token, utc_time
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
 from outreach.crawl.polite import HostTripped
 from outreach.net import FetchError, Response
@@ -206,3 +206,23 @@ class D10Tests(unittest.TestCase):
                 "INSERT INTO posting(company_id, source_key, title, posted_on, first_seen_at, last_seen_at) "
                 "VALUES (?, ?, 'x', ?, '2026-10-22T00:00:00Z', '2026-10-22T00:00:00Z')",
                 (company, f"url:d10-{next(counter)}", out))
+
+
+class UtcTimeTests(unittest.TestCase):
+    def test_a_time_with_an_offset_is_canonical_utc(self):
+        self.assertEqual(utc_time("2026-11-09T10:38:00-05:00"), "2026-11-09T15:38:00Z")
+        self.assertEqual(utc_time("2026-09-15T10:21:33.000+00:00"), "2026-09-15T10:21:33Z")
+
+    def test_a_time_that_overflows_is_none(self):
+        # Moving these to UTC leaves the years datetime can hold: an OverflowError, never a crash.
+        for value in ("0001-01-01T00:00:00+05:00", "9999-12-31T23:00:00-05:00"):
+            with self.subTest(value=value):
+                self.assertIsNone(utc_time(value))
+
+    def test_a_year_outside_1970_to_9999_is_none(self):
+        for value in ("1969-12-31T23:59:59Z", "0500-06-01T00:00:00Z", "0001-01-01T05:00:00+00:00"):
+            with self.subTest(value=value):
+                self.assertIsNone(utc_time(value))
+        self.assertEqual(utc_time("1970-01-01T00:00:00Z"), "1970-01-01T00:00:00Z")
+        self.assertEqual(utc_time("9999-12-31T18:00:00-05:00"), "9999-12-31T23:00:00Z")
+

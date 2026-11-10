@@ -117,11 +117,13 @@ def d10(value) -> str | None:
 
 def utc_time(value) -> str | None:
     """An ISO timestamp with a time of day as canonical UTC (`2026-11-09T10:38:00-05:00` is `2026-11-09T15:38:00Z`),
-    or None. A bare date, a number, an impossible date and any other text are None: a posting time must be a time.
-    A timestamp with no offset is read as UTC, as `iso_utc` reads it."""
+    or None. A bare date, a number, an impossible date, a time whose UTC year falls outside 1970 to 9999 and any other
+    text are None: a posting time must be a time the store can hold. A timestamp with no offset is read as UTC, as
+    `iso_utc` reads it."""
     if not isinstance(value, str) or not _ISO_TIME.match(value.strip()):
         return None
     try:
-        return iso_utc(value.strip())
-    except ValueError:
+        out = iso_utc(value.strip())
+    except (ValueError, OverflowError):
         return None
+    return out if out is not None and "1970" <= out[:4] <= "9999" else None

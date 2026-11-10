@@ -133,6 +133,20 @@ class ListTimeTests(AlertCase):
         self.assertEqual(self.notices, [("New jobs at your level", "Today at Acme")])
         self.assertEqual([e["entity_id"] for e in self.events()], [today])
 
+    def test_a_date_unknown_row_after_todays_rows_ends_the_walk(self):
+        # Only today's dated rows and one Date unknown row: the walk reaches the undated row, stops there and raises
+        # nothing, and today's rows still alert.
+        cid = seed_company(self.conn, "Acme")
+        board(self.conn, cid, ats="greenhouse")
+        early = self.job("Early", company=cid, posted=None, posted_at="2026-11-03T13:30:00Z",
+                         list_at="2026-11-03T13:30:00Z")
+        late = self.job("Late", company=cid, posted=None, posted_at="2026-11-03T14:30:00Z",
+                        list_at="2026-11-03T14:30:00Z", seen="2026-11-03T14:40:00Z")
+        self.job("Unknown", company=cid, posted=None, list_at=None)
+        self.assertEqual(self.alert(), 2)
+        self.assertEqual(self.notices, [("New jobs at your level", "Late at Acme; Early at Acme")])
+        self.assertEqual(sorted(e["entity_id"] for e in self.events()), sorted([early, late]))
+
     def test_first_read_never_alerts(self):
         # A newly added board's job posted this morning: its list time is today, but it came in on the first read.
         self.job("First read", posted=None, seen_gap_s=None, posted_at="2026-11-03T13:30:00Z",

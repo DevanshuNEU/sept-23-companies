@@ -7,8 +7,10 @@ list time and sits in the "Date unknown" group.
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
+from collections.abc import Collection, Sequence
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,12 +18,13 @@ from outreach.crawl.cadence import add_seconds
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["REPOST_DAYS", "GAP_TAG_S", "DATE_TRUSTED", "list_at", "repost_key", "find_repost"]
+__all__ = ["REPOST_DAYS", "GAP_TAG_S", "DATE_TRUSTED", "list_at", "repost_key", "company_family", "find_repost"]
 
 REPOST_DAYS = 120  # a posting with the title of one closed this recently is a repost (the window #155 planned)
 GAP_TAG_S = 7200  # the "found after a gap" tag shows when the board had not been read for longer than this
 # The ATSs whose date-only `posted_on` is honest. Greenhouse and Ashby give `posted_at`; Lever's date comes from
-# `createdAt`, which runs days to a year early, so it is not trusted.
+# `createdAt`, which runs days to a year early, so it is not trusted. Rippling, BambooHR and JazzHR list no date
+# today; they are here in case they start to.
 DATE_TRUSTED = frozenset({"workable", "workday", "oracle_orc", "breezy", "teamtailor", "recruitee", "rippling",
                           "bamboohr", "jazzhr", "smartrecruiters", "pinpoint"})
 
@@ -55,17 +58,27 @@ def repost_key(title: str) -> str:
     return _NOT_ALNUM.sub(" ", title.lower()).strip()
 
 
-def find_repost(conn: sqlite3.Connection, company_id: int, title: str, now: str) -> int | None:
-    """The newest posting at the company (or a company merged with it) with the same `repost_key` that closed within
-    `REPOST_DAYS` of `now`, or None. An open posting with the same title is not a repost of anything."""
+def company_family(conn: sqlite3.Connection, company_id: int) -> list[int]:
+    """The company and every company merged with it (the same end of the `merged_into` chain), sorted. It reads the
+    whole company table, so a caller that looks up many reposts at one company computes it once."""
     canon = canonical_ids(conn)
     end = canon.get(company_id, company_id)
-    family = sorted(cid for cid, target in canon.items() if target == end) or [company_id]
+    return sorted({company_id, *(cid for cid, target in canon.items() if target == end)})
+
+
+def find_repost(conn: sqlite3.Connection, company_id: int, title: str, now: str, *,
+                family: Sequence[int] | None = None, closing: Collection[int] = ()) -> int | None:
+    """The newest posting at the company (or a company merged with it) with the same `repost_key` that closed within
+    `REPOST_DAYS` of `now`, or None. An open posting with the same title is not a repost of anything, except one in
+    `closing`: the postings the same read is about to close, so a job closed and reposted in one read still counts.
+    `family` is `company_family(conn, company_id)` when the caller already has it."""
+    family = company_family(conn, company_id) if family is None else family
     key = repost_key(title)
     rows = conn.execute(
-        f"SELECT posting_id, title FROM posting WHERE company_id IN ({', '.join('?' * len(family))}) "
-        "AND closed_at IS NOT NULL AND closed_at >= ? ORDER BY first_seen_at DESC, posting_id DESC",
-        (*family, add_seconds(now, -REPOST_DAYS * 86400)))
+        "SELECT posting_id, title FROM posting WHERE company_id IN (SELECT value FROM json_each(?)) "
+        "AND ((closed_at IS NOT NULL AND closed_at >= ?) OR posting_id IN (SELECT value FROM json_each(?))) "
+        "ORDER BY first_seen_at DESC, posting_id DESC",
+        (json.dumps(list(family)), add_seconds(now, -REPOST_DAYS * 86400), json.dumps(sorted(closing))))
     for posting_id, other in rows:
         if repost_key(other) == key:
             return posting_id

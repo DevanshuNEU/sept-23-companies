@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from outreach.crawl.base import JobRef
 from outreach.crawl.boardstate import BoardRow
-from outreach.crawl.row_clock import find_repost, list_at
+from outreach.crawl.row_clock import company_family, find_repost, list_at
 from outreach.store import atomic
 
 __all__ = ["source_key", "native_id_of", "Existing", "load_existing", "DiffPlan", "plan_diff", "write_postings",
@@ -99,7 +99,7 @@ def plan_diff(existing: dict[str, Existing], jobs: Sequence[JobRef], ats: str, t
 
 
 def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, now: str, *,
-                   batch_rows: int, seen_gap_s: int | None = None) -> dict[str, int]:
+                   batch_rows: int, seen_gap_s: int | None = None, closing: Sequence[int] = ()) -> dict[str, int]:
     """Apply the new, changed, present and reopen parts of `plan`. Returns native_id to posting_id for every job
     the plan names. One transaction per `batch_rows` postings (each posting is one row written); a re-run of the
     same plan inserts nothing twice (`ON CONFLICT(source_key) DO NOTHING`, then the ids are selected).
@@ -107,7 +107,9 @@ def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, no
     A new posting gets its list time fields once, on insert (#193): the board's `posted_at`, `seen_gap_s` (the
     seconds since the board's last good read, None on its first read), `list_at` (`row_clock.list_at`) and
     `repost_of` (`row_clock.find_repost`, looked up only when `seen_gap_s` is not None, so a board's first read links
-    nothing). A change to a known posting never moves them, so a republish on the board cannot lift an old job.
+    nothing). `closing` names the postings this read is about to close (its `gone`): they count as closed for the
+    repost lookup, so a job closed and reposted in one read is still a repost. A change to a known posting never
+    moves these fields, so a republish on the board cannot lift an old job.
 
     `posted_on` is set only where it is NULL. `last_seen_at` never moves back and so never falls before
     `first_seen_at`. Every update of an existing posting applies only while it is open or closed for a reason the
@@ -124,6 +126,7 @@ def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, no
             seen.add(pid)
             units.append(("old", pid))
     ids: dict[str, int] = {}
+    family = company_family(conn, board.company_id) if seen_gap_s is not None and plan.new else None
     for start in range(0, len(units), batch_rows):
         batch = units[start:start + batch_rows]
         with atomic(conn, "write_postings"):
@@ -136,7 +139,8 @@ def write_postings(conn: sqlite3.Connection, board: BoardRow, plan: DiffPlan, no
                     [(board.company_id, board.board_id, source_key(board.ats, board.token, j.native_id), j.title,
                       j.location, j.country, j.url, j.posted_on, now, now, j.posted_at, seen_gap_s,
                       list_at(board.ats, now, j.posted_at, j.posted_on, seen_gap_s),
-                      None if seen_gap_s is None else find_repost(conn, board.company_id, j.title, now))
+                      None if family is None else find_repost(conn, board.company_id, j.title, now, family=family,
+                                                              closing=closing))
                      for j in new_jobs])
                 keys = [source_key(board.ats, board.token, j.native_id) for j in new_jobs]
                 for key, pid in conn.execute(

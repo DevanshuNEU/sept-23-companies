@@ -2,6 +2,7 @@ import io
 import json
 import os
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from outreach.net import Response
@@ -110,6 +111,20 @@ class GptResearchTest(unittest.TestCase):
     def test_codex_runner_fails_plainly_without_codex(self):
         with mock.patch("shutil.which", return_value=None), self.assertRaisesRegex(RuntimeError, "codex"):
             CodexRunner().run("hi")
+
+    def test_codex_runner_without_search(self):
+        for search, expect in ((False, False), (True, True)):
+            seen = {}
+
+            def fake_run(cmd, **kw):
+                seen["cmd"] = cmd
+                Path(cmd[cmd.index("-o") + 1]).write_text("ok")
+                return mock.Mock(returncode=0)
+
+            with mock.patch("shutil.which", return_value="/bin/codex"), mock.patch("subprocess.run", fake_run):
+                self.assertEqual(CodexRunner(search=search).run("hi"), "ok")
+            self.assertEqual("--search" in seen["cmd"], expect)
+            self.assertEqual(seen["cmd"][:2][0], "/bin/codex")
 
 
 class CliTest(unittest.TestCase):

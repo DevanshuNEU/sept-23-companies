@@ -136,10 +136,10 @@ describe('ProgressPage', () => {
     expect(screen.getByRole('heading', { level: 2, name: /^Last 7 days, Nov 4 to 10/ })).toBeInTheDocument();
   });
 
-  it('fresh shows "Nothing logged yet. Log a request on Today and it counts here." and no NaN', async () => {
+  it('fresh shows "Nothing logged yet. A request or an email you send counts here." and no NaN', async () => {
     await open('fresh');
     expect(await screen.findByText('Nothing logged yet.')).toBeInTheDocument();
-    expect(screen.getByText('Log a request on Today and it counts here.')).toBeInTheDocument();
+    expect(screen.getByText('A request or an email you send counts here.')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/NaN|Infinity|of 0/);
     expect(screen.queryByRole('table', { name: /^Funnel/ })).not.toBeInTheDocument();
   });

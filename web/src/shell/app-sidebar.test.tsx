@@ -40,7 +40,7 @@ const sidebar = () => document.querySelector<HTMLElement>('[data-slot="sidebar"]
 const nav = (name: RegExp) => within(sidebar()).getByRole('link', { name });
 const ready = () => screen.findByRole('button', { name: /^Boards/ });
 
-async function shell(route = '/today', client = new FixtureClient()) {
+async function shell(route = '/browse', client = new FixtureClient()) {
   const view = renderWithApp(
     <>
       <AppShell />
@@ -88,8 +88,6 @@ describe('AppShell sidebar', () => {
 
   it('shows the counts by each view', async () => {
     await shell();
-    expect(within(nav(/^Today/)).getByText('2 of 7')).toBeInTheDocument();
-
     const outbox = nav(/^Outbox/);
     const replies = within(outbox).getByText('1');
     expect(replies.closest('[data-slot="badge"]')).toHaveAttribute('data-variant', 'ok');
@@ -105,15 +103,16 @@ describe('AppShell sidebar', () => {
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
 
-  it('Jobs is a link in Lists to its own page, marked current there', async () => {
+  it('sidebar has no Today and lists Jobs first', async () => {
     await shell('/browse');
-    const link = nav(/^Jobs/);
-    expect(link).toHaveAttribute('href', '/browse');
-    expect(within(sidebar()).getByRole('navigation', { name: 'Lists' })).toContainElement(link);
-    expect(link).toHaveAttribute('aria-current', 'page');
-    expect(nav(/^Today/)).not.toHaveAttribute('aria-current', 'page');
+    expect(within(sidebar()).queryByRole('link', { name: /^Today/ })).toBeNull();
+    const views = within(sidebar()).getByRole('navigation', { name: 'Views' });
+    const links = within(views).getAllByRole('link');
+    expect(links[0]).toHaveAccessibleName(/^Jobs/);
+    expect(links[0]).toHaveAttribute('href', '/browse');
+    expect(links[0]).toHaveAttribute('aria-current', 'page');
+    expect(within(sidebar()).getByRole('navigation', { name: 'Lists' })).not.toContainElement(links[0] as HTMLElement);
   });
-
 
   it('names what each count means for screen readers', async () => {
     await shell();
@@ -131,21 +130,10 @@ describe('AppShell sidebar', () => {
     const view = await client.needsYou();
     for (const i of view.open) i.holdsEmail = false;
     vi.spyOn(client, 'needsYou').mockResolvedValue(view);
-    await shell('/today', client);
+    await shell('/browse', client);
     await waitFor(() => expect(client.needsYou).toHaveBeenCalled());
     expect(within(nav(/^Needs you/)).queryByTestId('holds-email-dot')).toBeNull();
     expect(nav(/^Needs you/)).toHaveAccessibleName('Needs you, 5 open');
-  });
-
-  it('counts people done of today\'s plan, and says so in the link name', async () => {
-    await shell();
-    expect(nav(/^Today/)).toHaveAccessibleName('Today, 2 of 7 done');
-  });
-
-  it('shows no count by Today when nothing is planned', async () => {
-    await shell('/today', new FixtureClient(buildFixture('weekend')));
-    expect(nav(/^Today/)).toHaveAccessibleName('Today');
-    expect(within(nav(/^Today/)).queryByText(/ of /)).toBeNull();
   });
 
   it('puts Progress and Wins under Results, with no badge while no win is new', async () => {
@@ -158,7 +146,7 @@ describe('AppShell sidebar', () => {
   });
 
   it('shows a green count with a dot by Wins while a win is new', async () => {
-    await shell('/today', new FixtureClient(buildFixture('win')));
+    await shell('/browse', new FixtureClient(buildFixture('win')));
     const wins = nav(/^Wins/);
     expect(wins).toHaveAccessibleName('Wins, 1 new');
     const badge = within(wins).getByText('1').closest('[data-slot="badge"]');
@@ -201,7 +189,7 @@ describe('AppShell sidebar', () => {
     const db = buildFixture();
     const crawl = db.shell.jobs.find((j) => j.job === 'crawl')!;
     db.shell = { ...db.shell, jobs: db.shell.jobs.map((j) => (j === crawl ? { ...crawl, job: 'read_boards' as const } : j)) };
-    await shell('/today', new FixtureClient(db));
+    await shell('/browse', new FixtureClient(db));
     expect(screen.getByRole('button', { name: 'Boards read Mon 08:04' })).toBeInTheDocument();
   });
 
@@ -235,7 +223,7 @@ describe('AppShell sidebar', () => {
         tone: 'bad',
       },
     };
-    await shell('/today', new FixtureClient(db));
+    await shell('/browse', new FixtureClient(db));
     const line = screen.getByRole('button', { name: 'Coverage 21%, level 51%, 2 alarms' });
     expect(line).toHaveClass('text-bad');
     fireEvent.click(line);
@@ -248,7 +236,7 @@ describe('AppShell sidebar', () => {
   it('follows the tone the API sends: an idle line is plain text', async () => {
     const db = buildFixture();
     db.shell = { ...db.shell, pipeline: { text: 'Coverage 32%, level 51%', alarms: ['stale text'], tone: 'idle' } };
-    await shell('/today', new FixtureClient(db));
+    await shell('/browse', new FixtureClient(db));
     expect(screen.getByText('Coverage 32%, level 51%')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Coverage/ })).toBeNull();
   });
@@ -256,7 +244,7 @@ describe('AppShell sidebar', () => {
   it('leaves the line out when the summary has none', async () => {
     const db = buildFixture();
     db.shell = { ...db.shell, pipeline: null };
-    await shell('/today', new FixtureClient(db));
+    await shell('/browse', new FixtureClient(db));
     expect(screen.queryByText(/^Coverage/)).toBeNull();
   });
 
@@ -265,12 +253,12 @@ describe('AppShell sidebar', () => {
     expect(screen.getByTestId('sender-dot')).toHaveClass('ripple');
     expect(screen.getByTestId('sender-dot')).not.toHaveClass('animate-pulse');
     view.unmount();
-    await shell('/today', new FixtureClient(buildFixture('hard_block')));
+    await shell('/browse', new FixtureClient(buildFixture('hard_block')));
     expect(screen.getByTestId('sender-dot')).not.toHaveClass('ripple');
   });
 
   it('names a hard block in red in the footer', async () => {
-    await shell('/today', new FixtureClient(buildFixture('hard_block')));
+    await shell('/browse', new FixtureClient(buildFixture('hard_block')));
     expect(screen.getByText('Paused: hard block')).toBeInTheDocument();
     expect(screen.getByTestId('sender-dot')).toHaveClass('bg-bad-dot');
   });
@@ -278,12 +266,12 @@ describe('AppShell sidebar', () => {
   it('marks the current view with aria-current', async () => {
     await shell('/outbox/12');
     expect(nav(/^Outbox/)).toHaveAttribute('aria-current', 'page');
-    expect(nav(/^Today/)).not.toHaveAttribute('aria-current');
+    expect(nav(/^Jobs/)).not.toHaveAttribute('aria-current');
   });
 
   it('g then o goes to the Outbox, and every g chord goes to its view', async () => {
     await shell();
-    expect(nav(/^Today/)).toHaveAttribute('aria-current', 'page');
+    expect(nav(/^Jobs/)).toHaveAttribute('aria-current', 'page');
 
     press('g');
     press('o');
@@ -291,19 +279,24 @@ describe('AppShell sidebar', () => {
     expect(nav(/^Outbox/)).toHaveAttribute('aria-current', 'page');
 
     const chords: [string, string][] = [
-      ['t', '/today'],
       ['l', '/linkedin'],
       ['n', '/needs-you'],
       ['x', '/no-go'],
       ['d', '/done'],
       ['p', '/progress'],
       ['w', '/wins'],
+      ['b', '/browse'],
+      ['i', '/pipeline'],
     ];
     for (const [key, path] of chords) {
       press('g');
       press(key);
       expect(where()).toBe(path);
     }
+    // Today is gone, so g then t goes nowhere.
+    press('g');
+    press('t');
+    expect(where()).toBe('/pipeline');
   });
 
   it('escape goes back, after leaving a text field first', async () => {
@@ -313,7 +306,7 @@ describe('AppShell sidebar', () => {
         <Where />
         <Writer commit={vi.fn(() => Promise.resolve())} />
       </>,
-      { route: '/today' },
+      { route: '/browse' },
     );
     await ready();
     press('g');
@@ -327,7 +320,7 @@ describe('AppShell sidebar', () => {
     expect(where()).toBe('/outbox');
 
     press('Escape');
-    expect(where()).toBe('/today');
+    expect(where()).toBe('/browse');
   });
 
   it('mod+b collapses the sidebar once', async () => {
@@ -367,7 +360,7 @@ describe('AppShell sidebar', () => {
   });
 
   it('shows a failed job with its error', async () => {
-    await shell('/today', new FixtureClient(buildFixture('job_failed')));
+    await shell('/browse', new FixtureClient(buildFixture('job_failed')));
     fireEvent.click(screen.getByRole('button', { name: 'Boards read Mon 08:04' }));
     const daily = within(await screen.findByRole('dialog')).getByRole('listitem', { name: 'Daily list' });
     expect(within(daily).getByText('Failed').closest('[data-slot="badge"]')).toHaveAttribute('data-variant', 'bad');
@@ -405,13 +398,13 @@ describe('AppShell top bar', () => {
   it('hides the sample badge for a live client', async () => {
     const client = new FixtureClient();
     Object.defineProperty(client, 'source', { value: 'live' });
-    await shell('/today', client);
+    await shell('/browse', client);
     expect(screen.queryByText('Sample data. Nothing is saved.')).toBeNull();
   });
 });
 
 describe('AppShell keys and pending writes', () => {
-  async function withWriter(route = '/today') {
+  async function withWriter(route = '/browse') {
     const commit = vi.fn(() => Promise.resolve());
     renderWithApp(
       <>

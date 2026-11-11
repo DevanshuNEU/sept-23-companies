@@ -7,10 +7,10 @@ import { useHotkeys } from '@/keyboard/hotkeys';
 import { ageDays, formatClockTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
-import { quietLink } from './below-plan';
-import { KeyHint } from './plan-panel';
-import { formatMonthDay } from './short-dates';
-import { usePlanActions } from './use-plan-actions';
+import { quietLink } from '@/lib/quiet-link';
+import { KeyHint } from '@/components/key-hint';
+import { formatMonthDay } from '@/lib/short-dates';
+import { useOutcomeActions } from '@/hooks/use-outcome-actions';
 
 /** How many wins the strip names before "and N more". */
 const SHOWN = 3;
@@ -33,7 +33,7 @@ const whenOf = (win: Win, asOf: string): string =>
   ageDays(win.at, asOf) <= 0 ? formatClockTime(win.at) : `${formatMonthDay(win.at)}, ${formatClockTime(win.at)}`;
 
 /**
- * The win banner (design 16.4): at the top of Today while any win is unseen, as the API's own line for each (newest
+ * The win banner (design 16.4): at the top of the Pipeline page while any win is unseen, as the API's own line for each (newest
  * first, three at most, then "and N more"). It shows exactly what the server calls unseen, so a poll or a reload
  * changes nothing and it stays until he marks it seen (Mark seen or W, with Undo). It plays its one entrance only for
  * a win that arrives while the page is open: one already there on load, and one brought back by Undo, show complete.
@@ -41,10 +41,10 @@ const whenOf = (win: Win, asOf: string): string =>
  */
 export function WinStrip() {
   const client = usePageClient('plan');
-  const actions = usePlanActions();
+  const actions = useOutcomeActions();
   const wins = useViewQuery(queryKeys.wins, () => client.wins(), { pollMs: pollMs.default });
   const reduced = usePrefersReducedMotion();
-  // The unseen wins known so far, and whether the entrance is playing. Adjusted while rendering, as the day rail does.
+  // The unseen wins known so far, and whether the entrance is playing. Adjusted while rendering.
   const [state, setState] = useState<{ known: ReadonlySet<Id> | null; entered: boolean }>({ known: null, entered: false });
 
   const unseen = (wins.data?.wins ?? []).filter((w) => w.unseen).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
@@ -56,7 +56,7 @@ export function WinStrip() {
   }
 
   const markSeen = () => actions.seeWins(unseen.map((w) => w.winId), { undo: true });
-  useHotkeys([{ keys: 'w', label: 'Mark wins seen', group: 'Today', enabled: unseen.length > 0, run: markSeen }]);
+  useHotkeys([{ keys: 'w', label: 'Mark wins seen', group: 'Pipeline', enabled: unseen.length > 0, run: markSeen }]);
 
   if (!wins.data || unseen.length === 0) return null;
   const shown = unseen.slice(0, SHOWN);

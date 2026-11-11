@@ -11,7 +11,7 @@ function copyFor(row: CompanyEntry): { title: string; body: string; action: stri
   if (row.kind === 'removed') {
     return {
       title: `Bring back ${name}?`,
-      body: 'It goes back to the backlog on Today. A removed company is never proposed again on its own.',
+      body: 'It comes back to your lists. A removed company is never proposed again on its own.',
       action: 'Bring back',
     };
   }

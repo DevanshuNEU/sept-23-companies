@@ -31,8 +31,8 @@ const sidebarCount = (page: Page) => page.getByRole('navigation', { name: 'Views
 /** Leaving the view commits what waits in the 8 second undo window; coming back shows what the client stored. */
 async function commitByLeaving(page: Page) {
   await page.keyboard.press('g');
-  await page.keyboard.press('t');
-  await expect(page).toHaveURL(/\/today/);
+  await page.keyboard.press('b');
+  await expect(page).toHaveURL(/\/browse/);
   await page.keyboard.press('g');
   await page.keyboard.press('n');
   await expect(page.getByRole('heading', { level: 1, name: 'Needs you' })).toBeVisible();

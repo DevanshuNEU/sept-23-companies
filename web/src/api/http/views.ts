@@ -75,10 +75,11 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   // Browse companies (#120): every company, paged, and the swap.
   browse: 'plan',
   swapPick: 'plan',
-  // The job list (#156): the page, its two writes, and Check now (#194).
+  // The job list (#156): the page, Pass and Done (#195), and Check now (#194). Done's undo is a company write.
   jobs: 'plan',
   passJob: 'plan',
-  goAhead: 'plan',
+  markReached: 'plan',
+  clearReached: 'company',
   checkNow: 'plan',
   checkStatus: 'plan',
   saveNote: 'plan',

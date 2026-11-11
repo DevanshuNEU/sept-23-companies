@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Award, Ban, Building2, CalendarCheck, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope, Workflow } from 'lucide-react';
+import { Activity, Award, Ban, Building2, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope, Workflow } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type JobRunSummary, type PipelineLine, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -124,8 +124,6 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
   // The same query the Needs you view reads, so on that page it is shared and the sidebar adds no request.
   const review = useViewQuery(queryKeys.needsYou, () => client.needsYou(), { pollMs: pollMs.default });
   const holding = (review.data?.open ?? []).filter((i) => i.holdsEmail).length;
-  // The count is people done of today's plan; with nothing planned (a weekend, no list yet) there is no count.
-  const planned = s !== undefined && s.plan.total > 0;
   const outboxParts = s
     ? [
         s.unhandledReplies > 0 ? plural(s.unhandledReplies, 'reply to handle', 'replies to handle') : '',
@@ -136,9 +134,7 @@ function ViewItems({ s }: { s: ShellSummary | undefined }) {
     <SidebarGroup className="px-0 pt-2 pb-1">
       <nav aria-label="Views">
         <SidebarMenu className="gap-0.5">
-          <NavItem to="/today" icon={CalendarCheck} label="Today" described={planned ? `${s.plan.done} of ${s.plan.total} done` : undefined}>
-            {planned ? <Count value={`${s.plan.done} of ${s.plan.total}`} /> : null}
-          </NavItem>
+          <NavItem to="/browse" icon={Telescope} label="Jobs" />
           <NavItem to="/outbox" icon={Send} label="Outbox" described={outboxParts.join(', ') || undefined}>
             {s && s.unhandledReplies > 0 ? <CountBadge value={s.unhandledReplies} tone="ok" dot /> : null}
             {s && s.draftsToReview > 0 ? <Count value={s.draftsToReview} after={s.unhandledReplies > 0} /> : null}
@@ -182,7 +178,6 @@ function ListItems({ s }: { s: ShellSummary | undefined }) {
       <nav aria-label="Lists">
         <SidebarGroupLabel className="text-muted-foreground">Lists</SidebarGroupLabel>
         <SidebarMenu className="gap-0.5">
-          <NavItem to="/browse" icon={Telescope} label="Jobs" />
           <NavItem to="/pipeline" icon={Workflow} label="Pipeline" described={waiting > 0 ? plural(waiting, 'question', 'questions') + ' to answer' : undefined}>
             {waiting > 0 ? <Count value={waiting} /> : null}
           </NavItem>

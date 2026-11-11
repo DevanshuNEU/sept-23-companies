@@ -5,6 +5,7 @@ import { ArrowUp, Check, SearchX } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
+  useClient,
   usePageClient,
   type Id,
   type IsoTime,
@@ -23,8 +24,10 @@ import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAnnounce, useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { formatDueDay, gapTag, postedLabel, repostTag } from '@/lib/format';
+import { gapTag, postedLabel, repostTag } from '@/lib/format';
+import { quietLink } from '@/lib/quiet-link';
 import { openExternal, safeHref } from '@/lib/safe-href';
+import { formatDateMonthDay, formatMonthDay } from '@/lib/short-dates';
 import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
 import { CheckLineView, CheckNowButton, useCheckNow } from './check-now';
@@ -64,11 +67,12 @@ const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} day
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
 
 /**
- * What he has asked for and the server has not heard yet: postings passed and companies being gone ahead with. It is a
- * query only so the pending-write overlay can lay these over it (Undo drops them, a commit settles them).
+ * What he has asked for and the server has not heard yet: postings passed, and Done (#195): the postings he pressed it
+ * on and their companies, whose rows all show reached at once. It is a query only so the pending-write overlay can lay
+ * these over it (Undo drops them, a commit settles them).
  */
-interface Marks { hidden: Id[]; ahead: Id[] }
-const NO_MARKS: Marks = { hidden: [], ahead: [] };
+interface Marks { hidden: Id[]; done: Id[]; reached: Id[] }
+const NO_MARKS: Marks = { hidden: [], done: [], reached: [] };
 
 /** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
 function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContacted: boolean }): string {
@@ -84,11 +88,14 @@ function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContac
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }
 
-/** The row's tags: first what qualifies its time (a repost, a late find), then the company's flags. */
-function Flags({ job, asOf }: { job: JobRow; asOf: IsoTime }) {
+/**
+ * The row's tags: first what qualifies its time (a repost, a late find), then the company's flags, then the day he
+ * reached the company (a person contacted there, or his own Done mark). `reachedOn` is that day as words.
+ */
+function Flags({ job, asOf, reachedOn }: { job: JobRow; asOf: IsoTime; reachedOn: string | null }) {
   const repost = repostTag(job.repostedFrom, asOf);
   const gap = gapTag(job);
-  if (!repost && !gap && !job.saysNoSponsorship && !job.everify && !job.yc && !job.contactedOn) return null;
+  if (!repost && !gap && !job.saysNoSponsorship && !job.everify && !job.yc && !reachedOn) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {repost ? <Badge variant="idle">{repost}</Badge> : null}
@@ -96,7 +103,7 @@ function Flags({ job, asOf }: { job: JobRow; asOf: IsoTime }) {
       {job.saysNoSponsorship ? <Badge variant="warn">Says no sponsorship</Badge> : null}
       {job.everify ? <Badge variant="idle">E-Verify</Badge> : null}
       {job.yc ? <Badge variant="idle">YC</Badge> : null}
-      {job.contactedOn ? <Badge variant="info">You contacted them on {formatDueDay(job.contactedOn)}</Badge> : null}
+      {reachedOn ? <Badge variant="info">{`Reached ${reachedOn}`}</Badge> : null}
     </div>
   );
 }
@@ -106,22 +113,26 @@ function JobItem({
   asOf,
   current,
   fresh,
+  reachedOn,
   answer,
-  going,
+  marking,
   onSelect,
   onPass,
-  onGoAhead,
+  onDone,
 }: {
   job: JobRow;
   asOf: IsoTime;
   current: boolean;
   /** First seen since his last visit. */
   fresh: boolean;
+  /** The day his company was reached, as words ("Nov 9"), or null. */
+  reachedOn: string | null;
   answer: string | undefined;
-  going: boolean;
+  /** Done on this row waits in its undo window. */
+  marking: boolean;
   onSelect: () => void;
   onPass: () => void;
-  onGoAhead: () => void;
+  onDone: () => void;
 }) {
   const href = safeHref(job.url);
   return (
@@ -152,24 +163,24 @@ function JobItem({
           <span>{sizeLine(job)}</span>
           <span>{job.location}</span>
         </p>
-        <Flags job={job} asOf={asOf} />
+        <Flags job={job} asOf={asOf} reachedOn={reachedOn} />
       </div>
       {answer !== undefined ? (
         <p role="status" className="flex max-w-72 items-start gap-1.5 text-xs text-foreground">
           <Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-ok" />
           {answer}
         </p>
-      ) : going ? (
+      ) : marking ? (
         <p role="status" className="text-xs text-muted-foreground">
-          Going ahead
+          Marking reached
         </p>
       ) : (
         <div role="group" aria-label="Your answer" className="flex gap-1.5">
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
           </Button>
-          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'a' : undefined} onClick={onGoAhead}>
-            Go ahead
+          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onDone}>
+            Done
           </Button>
         </div>
       )}
@@ -180,6 +191,27 @@ function JobItem({
 /** The same rows in the same order (the server's copies may differ; `heldRows` takes those). */
 function sameRows(a: readonly JobRow[], b: readonly JobRow[]): boolean {
   return a.length === b.length && a.every((r, i) => r.postingId === b[i]?.postingId);
+}
+
+/**
+ * "Today: 34 sent, 2 replies", opening Progress (design 4.5): the emails the sender sent today (the sidebar's count)
+ * and the LinkedIn requests he logged, then today's replies, as Progress counts them. Nothing until both have loaded,
+ * and nothing when either did not: the line is a glance, never a guess.
+ */
+function OutreachLine() {
+  const client = useClient();
+  const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
+  const progress = useViewQuery(queryKeys.progress, () => client.progress(), { pollMs: pollMs.default });
+  if (!shell.data || !progress.data) return null;
+  const sent = shell.data.sending.sentToday + progress.data.today.requests;
+  const replies = progress.data.today.replied;
+  return (
+    <p aria-live="off">
+      <Link to="/progress" className={cn(quietLink, 'max-sm:inline-flex max-sm:min-h-6 max-sm:items-center')}>
+        {`Today: ${sent.toLocaleString('en-US')} sent, ${plural(replies, 'reply', 'replies')}`}
+      </Link>
+    </p>
+  );
 }
 
 function Skeletons() {
@@ -196,20 +228,23 @@ function Skeletons() {
 }
 
 /**
- * Jobs (sidebar, or F on Today; #156): the open engineering postings, newest first by when each was posted (#193), in
- * two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date, or when
- * Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the end. He
- * reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its company)
- * and Go ahead puts its company on today's list as his own pick. There is no score and no ranking text.
+ * Jobs (#156), the page Knock opens on (#195): the open engineering postings, newest first by when each was posted
+ * (#193), in two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date,
+ * or when Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the
+ * end. He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its
+ * company) and Done marks its company as reached, even when he reached it outside Knock. There is no score and no
+ * ranking text. Every row of a reached company says "Reached Nov 9" (a person contacted there, or his Done mark).
  *
- * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Go ahead keeps the
- * row and writes the API's own sentence in it ("Added ... to today's list.", or when it is kept for the next list).
+ * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Done keeps the row,
+ * tags every row of the company at once with Undo for the window, and then writes the API's own sentence in the row.
+ * His mark is taken back later from the company page. The line under the header is today's outreach from the sidebar's
+ * send count and Progress, and opens Progress.
  *
  * Check now (#194) asks the crawl job to read every Greenhouse and Ashby board; the line under the header says how it
  * is going. New rows show at once while he is at the top on no row; scrolled down or on a row, the list stays put and an
  * "N new" button shows them. A row first seen since his last visit (not a first read, not a repost) says New.
  *
- * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A goes ahead,
+ * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A marks done,
  * C checks now. The page sets no focus on arrival: the keys listen on the whole page.
  */
 export default function BrowsePage() {
@@ -227,7 +262,8 @@ export default function BrowsePage() {
   const write = usePendingWrite();
   const marks = useViewQuery(queryKeys.jobsMarks, () => Promise.resolve(NO_MARKS));
   const hidden = useMemo(() => new Set(marks.data?.hidden), [marks.data]);
-  const ahead = useMemo(() => new Set(marks.data?.ahead), [marks.data]);
+  const marking = useMemo(() => new Set(marks.data?.done), [marks.data]);
+  const reachedNow = useMemo(() => new Set(marks.data?.reached), [marks.data]);
   const list = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
@@ -307,7 +343,7 @@ export default function BrowsePage() {
   /** Nothing is sent now: the row leaves at once and the toast offers Undo. The pass goes out when the window closes, or when he leaves the page. */
   const pass = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
+    if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
     // The row he is on leaves, and the one below it (else the one above) becomes the current one.
     if (current?.postingId === id) setActive((jobs[index + 1] ?? jobs[index - 1])?.postingId ?? null);
     announce(`Passed. ${job.title} is off the list.`);
@@ -321,21 +357,27 @@ export default function BrowsePage() {
     });
   };
 
-  /** The same: the row says "Going ahead" with Undo for the window; the API's own sentence replaces it once it answers. */
-  const goAhead = (job: JobRow) => {
+  /**
+   * Done: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
+   * closes. The API's own sentence then replaces the row's buttons, and the list is read again before the mark is dropped,
+   * so the tag does not flash off. Nothing else stops it: Done on a company already reached just says when.
+   */
+  const markDone = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
-    const label = `Going ahead with ${job.companyName}.`;
+    const company = job.companyId;
+    if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
+    const label = `Marked ${job.companyName} reached.`;
     write({
-      id: `job-ahead:${id}`,
+      id: `job-done:${id}`,
       label,
       afterCommit: label,
-      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, ahead: [...m.ahead, id] }) }],
+      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, done: [...m.done, id], reached: [...m.reached, company] }) }],
       commit: (o) =>
-        client.goAhead(id, o).then((res) => {
+        client.markReached(id, o).then(async (res) => {
           setAnswers((a) => new Map(a).set(id, res.text));
           announce(res.text);
-          void queryClient.invalidateQueries({ queryKey: queryKeys.plan, exact: true });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.company(res.companyId) });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
         }),
     });
   };
@@ -357,11 +399,12 @@ export default function BrowsePage() {
       asOf={asOf ?? j.firstSeenAt}
       current={j.postingId === current?.postingId}
       fresh={isNew(j, since)}
+      reachedOn={reachedNow.has(j.companyId) && asOf ? formatMonthDay(asOf) : j.contactedOn ? formatDateMonthDay(j.contactedOn) : null}
       answer={answers.get(j.postingId)}
-      going={ahead.has(j.postingId)}
+      marking={marking.has(j.postingId)}
       onSelect={() => setActive(j.postingId)}
       onPass={() => pass(j)}
-      onGoAhead={() => goAhead(j)}
+      onDone={() => markDone(j)}
     />
   );
 
@@ -371,7 +414,7 @@ export default function BrowsePage() {
     { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
-    { keys: 'a', label: 'Go ahead', group: GROUP, enabled: open, run: () => current && goAhead(current) },
+    { keys: 'a', label: 'Done: mark the company reached', group: GROUP, enabled: open, run: () => current && markDone(current) },
     { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
   useHotkeys(bindings);
@@ -389,6 +432,7 @@ export default function BrowsePage() {
           summary={
             <>
               <p>{headline}</p>
+              <OutreachLine />
               {check.line ? <CheckLineView line={check.line} /> : null}
             </>
           }
@@ -417,7 +461,7 @@ export default function BrowsePage() {
             <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
             <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
-            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> go ahead</span>
+            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> done</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

@@ -5,9 +5,9 @@ import { renderWithApp } from '@/test/render';
 import PipelinePage from './index';
 
 /*
- * The Pipeline page (2026-11-06): what used to sit under the pick on Today. Last week is covered in last-week.test.tsx and
- * the Watch list in watch-list.test.tsx; this file holds In flight, Email today, the tabs and the empty states, on the
- * `queue` sample (8 picks, 6 more companies to email, 5 in flight).
+ * The Pipeline page (2026-11-06): Last week is covered in last-week.test.tsx and the Watch list in watch-list.test.tsx;
+ * this file holds In flight, the tabs and the empty states, on the `queue` sample (5 in flight). Email today is gone
+ * with Today (#195).
  */
 
 async function open(route: string, db: FixtureDb = buildFixture('queue')) {
@@ -18,17 +18,23 @@ async function open(route: string, db: FixtureDb = buildFixture('queue')) {
 }
 
 describe('the Pipeline page', () => {
-  it('has four tabs, each with its count, and says what is waiting in its summary', async () => {
+  it('has three tabs, each with its count, and says what is waiting in its summary', async () => {
     await open('/pipeline');
     await waitFor(() => expect(screen.getAllByRole('tab').every((t) => /\d$/.test(t.textContent ?? ''))).toBe(true));
-    expect(screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, '').trim())).toEqual(['Last week', 'In flight', 'Email today', 'Watch list']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, '').trim())).toEqual(['Last week', 'In flight', 'Watch list']);
     expect(await screen.findByText(/companies in flight$/)).toBeInTheDocument();
   });
 
   it('opens the tab in its address', async () => {
+    await open('/pipeline?tab=watch');
+    expect(await screen.findByRole('tab', { name: /^Watch list/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('an old Email today link opens the first tab with something in it', async () => {
     await open('/pipeline?tab=email-today');
-    expect(await screen.findByRole('tab', { name: /^Email today/ })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByRole('region', { name: 'Email today' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole('tab').every((t) => /\d$/.test(t.textContent ?? ''))).toBe(true));
+    expect(screen.queryByRole('tab', { name: /^Email today/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tab').filter((t) => t.getAttribute('aria-selected') === 'true')).toHaveLength(1);
   });
 
   it('In flight lists each company with where it stands, replies first', async () => {
@@ -42,19 +48,6 @@ describe('the Pipeline page', () => {
       'Resend3 asked today, room for 1 more, free again Nov 24',
     ]);
     expect(within(list).getByRole('link', { name: 'Warp' }).getAttribute('href')).toMatch(/^\/companies\/\d+$/);
-  });
-
-  it('Email today lists the companies beyond the picks by rank, with a website and no terminal button', async () => {
-    const db = buildFixture('queue');
-    await open('/pipeline?tab=email-today', db);
-    const list = await screen.findByRole('list', { name: 'Companies to email today' });
-    const names = within(list).getAllByRole('listitem').map((li) => li.querySelector('a')?.textContent);
-    expect(names).toEqual(['Retell AI', 'Railway', 'Graphite', 'Supabase', 'Fly.io', 'Weaviate']);
-    const picks = db.plan.rows.map((r) => r.company.name);
-    expect(names.filter((n) => n !== undefined && picks.includes(String(n)))).toEqual([]);
-    expect(screen.getByText(/^6 more companies you can email today, by rank\./)).toBeInTheDocument();
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Website known (retellai.example). About 40 people: a founder or engineer reads this');
-    expect(within(list).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('says plainly when a tab has nothing, in words that say how it fills up', async () => {

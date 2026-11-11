@@ -51,7 +51,7 @@ describe('route errors', () => {
     expect(screen.getByText('The app could not reach its files. Nothing was changed.')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Views' })).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected Application Error/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Go to Today' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Go to Jobs' })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(reload).toHaveBeenCalledTimes(1);
@@ -63,7 +63,7 @@ describe('route errors', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
-  it('shows the generic screen with the message, Reload and Go to Today, and keeps the sidebar', async () => {
+  it('shows the generic screen with the message, Reload and Go to Jobs, and keeps the sidebar', async () => {
     const router = renderRoute('/done');
     expect(await screen.findByRole('heading', { name: 'Something went wrong in this view' })).toBeInTheDocument();
     expect(screen.getByText('Nothing was changed.')).toBeInTheDocument();
@@ -71,9 +71,9 @@ describe('route errors', () => {
     expect(screen.getByRole('navigation', { name: 'Views' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('link', { name: 'Go to Today' }));
-    expect(router.state.location.pathname).toBe('/today');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('link', { name: 'Go to Jobs' }));
+    expect(router.state.location.pathname).toBe('/browse');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Jobs' })).toBeInTheDocument();
   });
 });
 

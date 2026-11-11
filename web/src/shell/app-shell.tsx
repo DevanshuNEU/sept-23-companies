@@ -23,8 +23,6 @@ import { ShortcutSheet } from './shortcut-sheet';
 import { useLivePulse } from './use-pulse';
 
 const VIEW_TITLE: Record<string, string> = {
-  today: 'Today',
-  proposals: 'All proposed companies',
   browse: 'Jobs',
   outbox: 'Outbox',
   linkedin: 'LinkedIn replies',
@@ -37,7 +35,7 @@ const VIEW_TITLE: Record<string, string> = {
 };
 
 const GO: [key: string, path: string, name: string][] = [
-  ['t', '/today', 'Today'],
+  ['b', '/browse', 'Jobs'],
   ['o', '/outbox', 'Outbox'],
   ['l', '/linkedin', 'LinkedIn'],
   ['n', '/needs-you', 'Needs you'],
@@ -45,7 +43,6 @@ const GO: [key: string, path: string, name: string][] = [
   ['d', '/done', 'Done'],
   ['p', '/progress', 'Progress'],
   ['w', '/wins', 'Wins'],
-  ['b', '/browse', 'Jobs'],
   ['i', '/pipeline', 'Pipeline'],
 ];
 
@@ -165,7 +162,7 @@ function TopBar({ onKeys }: { onKeys?: () => void }) {
         <Button
           variant="ghost"
           size="icon-sm"
-          className="size-7"
+          className="size-7 max-sm:size-11"
           aria-label="Keyboard shortcuts"
           aria-haspopup="dialog"
           onClick={onKeys}

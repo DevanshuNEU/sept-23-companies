@@ -4,11 +4,8 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture, ids, messageOf } from '@/api/fixture/data';
-import { SidebarProvider } from '@/components/ui/sidebar';
 import LinkedInPage from '@/routes/linkedin';
 import OutboxPage from '@/routes/outbox';
-import ProposalsPage from '@/routes/proposals';
-import { AppSidebar } from '@/shell/app-sidebar';
 import { renderWithApp } from '@/test/render';
 import { HotkeysProvider, useHotkeys, useSelectionSync, type LiveSelection } from './hotkeys';
 
@@ -65,40 +62,6 @@ describe('a key right after a selection change acts on the new row', () => {
     expect(approve).toHaveBeenCalledTimes(1);
     expect(approve.mock.calls[0]?.[0]).toBe(messageOf(nextTouch));
     expect(approve.mock.calls.some((c) => c[0] === messageOf(ids.touch.omar))).toBe(false);
-  });
-
-  it('Proposals: j then x picks the row he moved to and leaves the picked row he left alone', async () => {
-    renderWithApp(
-      <SidebarProvider>
-        <AppSidebar />
-        <ProposalsPage />
-      </SidebarProvider>,
-      { route: '/proposals', client: new FixtureClient() },
-    );
-    await screen.findByRole('checkbox', { name: 'Pick Pylon' });
-    const boxes = () => screen.getAllByRole('checkbox', { name: /^Pick / });
-    const nameOf = (b: HTMLElement) => (b.getAttribute('aria-label') ?? '').replace(/^Pick /, '');
-    // A picked row with an unpicked row right below it: pressing x on the wrong one unpicks instead of picks.
-    const list = boxes();
-    const at = list.findIndex((b, i) => (b as HTMLInputElement).getAttribute('aria-checked') === 'true' && list[i + 1]?.getAttribute('aria-checked') !== 'true');
-    const above = list[at];
-    const below = list[at + 1];
-    if (!above || !below) throw new Error('no picked row above an unpicked one');
-    const aboveName = nameOf(above);
-    const belowName = nameOf(below);
-    expect(above).toBeChecked();
-    expect(below).not.toBeChecked();
-
-    fireEvent.click(above.closest('tr') as HTMLElement);
-    sameTick(
-      () => press('j'),
-      () => press('x'),
-    );
-
-    expect(await screen.findByText(`Picked ${belowName}`)).toBeInTheDocument();
-    expect(screen.queryByText(`Unpicked ${aboveName}`)).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: `Pick ${belowName}` })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: `Pick ${aboveName}` })).toBeChecked();
   });
 
   it('LinkedIn: a click on a row then r logs for that row', async () => {

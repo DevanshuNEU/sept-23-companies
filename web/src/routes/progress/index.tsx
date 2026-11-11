@@ -121,7 +121,7 @@ export default function ProgressPage() {
                   ) : nothingLogged(current) ? (
                     <div className="max-w-[760px] rounded-lg border">
                       <EmptyState icon={ChartColumn} title="Nothing logged yet.">
-                        Log a request on Today and it counts here.
+                        A request or an email you send counts here.
                       </EmptyState>
                     </div>
                   ) : (

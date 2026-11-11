@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatMonthName } from '@/lib/format';
 import { formatRate, rateEnough } from '@/lib/progress';
 import { useViewQuery } from '@/pending/pending';
-import { formatDateMonthDay, formatMonthDay } from '@/routes/today/short-dates';
+import { formatDateMonthDay, formatMonthDay } from '@/lib/short-dates';
 
 /** One finding: the API's sentence as given, each group's count with its rate (only from 20), a caution, what changed. */
 function FindingCard({ finding }: { finding: Finding }) {

@@ -1,21 +1,18 @@
 import { expect, test } from './fixtures';
 
 // Jobs (#156), the full page at /browse: open engineering postings, newest first, in two tabs. He reads each one himself:
-// the arrows move, Enter opens the posting, X passes and A goes ahead. No score and no ranking text.
-test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard', async ({ page, consoleErrors }) => {
+// the arrows move, Enter opens the posting, X passes and A marks the company done (reached). No score and no ranking text.
+test('Jobs: Knock opens on it; the list, the tabs and filters, then pass and done by keyboard', async ({ page, consoleErrors }) => {
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
+  // Knock opens on the job list (#195), and the old Today address lands there too.
   await page.goto('/today?scenario=queue');
-  const rail = page.getByRole('listbox', { name: "Today's picks" });
-  await expect(rail.getByRole('option')).toHaveCount(8);
-
-  // The sidebar link opens the page; F on Today does the same.
-  await page.getByRole('link', { name: 'Jobs' }).click();
-  await expect(page).toHaveURL(/\/browse/);
+  await expect(page).toHaveURL(/\/browse\?scenario=queue$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
-  await page.goBack();
-  await expect(rail.getByRole('option')).toHaveCount(8);
-  await page.locator('body').press('f');
-  await expect(page).toHaveURL(/\/browse/);
+  const sidebar = page.locator('[data-slot="sidebar"]');
+  await expect(sidebar.getByRole('navigation', { name: 'Views' }).getByRole('link').first()).toHaveText('Jobs');
+  await expect(sidebar.getByRole('link', { name: /^Today/ })).toHaveCount(0);
+  // Today's outreach under the header, opening Progress.
+  await expect(page.getByRole('link', { name: /^Today: \d+ sent, \d+ repl(y|ies)$/ })).toHaveAttribute('href', '/progress');
 
   const jobs = page.getByRole('list', { name: 'Jobs' }).locator('> li[data-job]');
   await expect(page.getByText('22 at your level in the last 30 days')).toBeVisible();
@@ -57,23 +54,29 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await expect(jobs.nth(1)).toHaveAttribute('aria-current', 'true');
   await expect(jobs.nth(1)).toHaveAttribute('data-job', next ?? '');
 
-  // A goes ahead: the row keeps its place and says what happened, in the API's words.
+  // A marks the company done: every row of it says reached at once, with Undo; then the row says what happened.
   await page.keyboard.press('ArrowDown');
   await expect(jobs.nth(2)).toHaveAttribute('aria-current', 'true');
+  const company = (await jobs.nth(2).getAttribute('data-company')) ?? '';
+  const ofCompany = page.getByRole('list', { name: 'Jobs' }).locator(`> li[data-company="${company}"]`);
   await page.keyboard.press('a');
-  await expect(page.getByText('Going ahead with Baseten.')).toBeVisible();
-  await expect(jobs.nth(2)).toContainText('Going ahead');
-  await page.clock.runFor(9000); // the undo window closes and both writes go out
-  await expect(jobs.nth(2)).toContainText("Added Baseten to today's list.");
+  await expect(page.getByText(`Marked ${company} reached.`)).toBeVisible();
+  await expect(jobs.nth(2)).toContainText('Marking reached');
+  for (const r of await ofCompany.all()) await expect(r).toContainText('Reached Nov 10');
+  // Z takes it back inside the window.
+  await page.keyboard.press('z');
+  await expect(jobs.nth(2).getByRole('button', { name: /^Done/ })).toBeVisible();
+  await expect(jobs.nth(2)).not.toContainText('Reached');
+  await page.keyboard.press('a');
+  await page.clock.runFor(9000); // the undo window closes and the write goes out
+  await expect(jobs.nth(2)).toContainText(`Marked ${company} as reached.`);
+  for (const r of await ofCompany.all()) await expect(r).toContainText('Reached Nov 10');
   await expect(jobs).toHaveCount(19);
 
-  // A refusal is said, and the row keeps its buttons.
+  // A company he already contacted says when, and Not contacted yet hides it.
   await page.getByPlaceholder('Search by company name').fill('cerebrium');
   await expect(jobs.first()).toHaveAttribute('data-company', 'Cerebrium');
-  await jobs.first().getByRole('button', { name: /^Go ahead/ }).click();
-  await page.clock.runFor(9000); // the undo window closes
-  await expect(page.getByText('You contacted Cerebrium and are waiting for an answer.')).toBeVisible();
-  await expect(jobs.first().getByRole('button', { name: /^Go ahead/ })).toBeVisible();
+  await expect(jobs.first()).toContainText('Reached Nov 3');
 
   // Nothing matches: the page says what to widen.
   await page.getByPlaceholder('Search by company name').fill('zzzz');

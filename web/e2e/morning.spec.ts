@@ -25,23 +25,19 @@ async function expectCleanPage(page: Page, consoleErrors: string[], foreign: str
   expect(foreign).toEqual([]);
 }
 
-// The phase-1 Today, now at /proposals: its own capacity box. The sidebar count reads the plan (2 of 7) and does not move on a pick.
-const picked = (page: Page) => page.getByLabel('Capacity').locator('div').filter({ hasText: /^Picked today/ });
-
 const outboxLink = (page: Page) => page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Outbox/ });
 
-test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ page, consoleErrors }) => {
+test('the morning flow: Jobs, reply, mark done, fix, approve, LinkedIn, Done', async ({ page, consoleErrors }) => {
   const foreign = watchRequests(page);
   // The clock must run before the first load so runFor can drive the 8 second undo window.
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
 
-  // 1. Land on Today: the plan of people, on the first person to do.
-  await page.goto('/today');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
-  await expect(page.locator('[data-slot="sidebar"]').getByRole('link', { name: /^Today/ })).toContainText('2 of 7');
-  await expect(page.getByText('7 people, 2 done')).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Selected person' }).getByRole('heading', { level: 2, name: 'Lena Ortiz' })).toBeVisible();
+  // 1. Land on Jobs (#195): the open postings, newest first.
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/browse$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
+  const jobs = page.getByRole('list', { name: 'Jobs' }).locator('> li[data-job]');
+  await expect(jobs.first()).toHaveAttribute('aria-current', 'true');
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 2. Outbox: open the reply and tag it Interested.
@@ -59,19 +55,15 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
   await expect(interested).toHaveAttribute('aria-pressed', 'true');
   await expectCleanPage(page, consoleErrors, foreign);
 
-  // 3. Today, then All proposed companies: pick Pylon with x. Nothing is selected there on load, so the first j
-  // lands on Pylon.
+  // 3. Jobs: he reached the second row's company outside Knock, so A marks it done; every row of it says reached.
   await page.keyboard.press('g');
-  await page.keyboard.press('t');
-  await expect(page.getByText('7 people, 2 done')).toBeVisible();
-  await page.getByRole('link', { name: 'All proposed companies' }).click();
-  await expect(page).toHaveURL(/\/proposals$/);
-  await expect(picked(page)).toContainText('3 of 5');
-  await page.keyboard.press('j');
-  await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
-  await page.keyboard.press('x');
-  await expect(picked(page)).toContainText('4 of 5');
-  await expect(page.getByRole('checkbox', { name: 'Pick Pylon' })).toBeChecked();
+  await page.keyboard.press('b');
+  await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  const company = (await jobs.nth(1).getAttribute('data-company')) ?? '';
+  await page.keyboard.press('a');
+  await expect(page.getByText(`Marked ${company} reached.`)).toBeVisible();
+  await expect(jobs.nth(1)).toContainText('Reached Nov 10');
   await expectCleanPage(page, consoleErrors, foreign);
 
   // 4. Needs you: fix Cerebrium's domain.
@@ -137,8 +129,8 @@ test('the morning flow: reply, pick, fix, approve, LinkedIn, Done', async ({ pag
 test('every view loads clean: no foreign host, no console error, no Send button', async ({ page, consoleErrors }) => {
   const foreign = watchRequests(page);
   const views: [string, string][] = [
-    ['/today', 'Today'],
-    ['/proposals', 'All proposed companies'],
+    ['/browse', 'Jobs'],
+    ['/pipeline', 'Pipeline'],
     ['/outbox', 'Outbox'],
     ['/linkedin', 'LinkedIn replies'],
     ['/needs-you', 'Needs you'],
@@ -161,43 +153,10 @@ test('a blocked draft shows its block in full on a 1280 by 800 screen (the detai
   expect(consoleErrors).toEqual([]);
 });
 
-const geometry = (box: { x: number; y: number; width: number; height: number } | null) => {
-  if (!box) throw new Error('No box');
-  return { l: box.x, t: box.y, r: box.x + box.width, b: box.y + box.height };
-};
-const intersect = (a: ReturnType<typeof geometry>, b: ReturnType<typeof geometry>) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
-
-for (const width of [1440, 1280]) {
-  test(`Proposals at ${width}: the selected row's actions never cover its Sponsorship badge`, async ({ page, consoleErrors }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.goto('/proposals');
-    await expect(page.getByRole('heading', { name: 'Tuesday, November 10' })).toBeVisible();
-    await page.keyboard.press('j');
-    await expect(page.getByRole('complementary', { name: 'Pylon preview' })).toBeVisible();
-    const row = page.getByRole('row').filter({ hasText: 'Pylon' }).filter({ hasText: 'Says it sponsors' });
-    await row.hover();
-    const remove = row.getByRole('button', { name: 'Remove Pylon' });
-    const badge = row.getByText('Says it sponsors');
-    // The actions show on hover at both sizes, and on the selected row from 1400 px.
-    await expect(remove.locator('xpath=..')).toHaveCSS('opacity', '1');
-    if (await badge.isVisible()) {
-      expect(intersect(geometry(await badge.boundingBox()), geometry(await remove.boundingBox()))).toBe(false);
-      expect(intersect(geometry(await badge.boundingBox()), geometry(await row.getByRole('button', { name: 'Move Pylon to the backlog' }).boundingBox()))).toBe(false);
-    } else {
-      // Under 1400 px the badge steps aside while the actions show; it is never covered.
-      expect(width).toBeLessThan(1400);
-    }
-    await page.mouse.move(0, 0);
-    await expect(badge).toBeVisible();
-    expect(consoleErrors).toEqual([]);
-  });
-}
-
-test('1280: no page or table scrolls sideways on Today, Proposals, Done and No-go', async ({ page, consoleErrors }) => {
+test('1280: no page or table scrolls sideways on Jobs, Done and No-go', async ({ page, consoleErrors }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   for (const [path, heading, ready] of [
-    ['/today', 'Today', 'listbox'],
-    ['/proposals', 'All proposed companies', 'table'],
+    ['/browse', 'Jobs', 'list'],
     ['/done', 'Done companies', 'table'],
     ['/no-go', 'No-go list', 'table'],
   ] as const) {

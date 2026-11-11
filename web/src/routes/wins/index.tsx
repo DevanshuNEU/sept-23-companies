@@ -15,8 +15,8 @@ import { winKindLabel } from '@/lib/status';
 import { useUrlState } from '@/lib/url-state';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
-import { formatDateMonthDay, formatMonthDay, monthOf } from '@/routes/today/short-dates';
-import { usePlanActions } from '@/routes/today/use-plan-actions';
+import { formatDateMonthDay, formatMonthDay, monthOf } from '@/lib/short-dates';
+import { useOutcomeActions } from '@/hooks/use-outcome-actions';
 
 type Show = 'all' | 'big';
 const BIG_KINDS: ReadonlySet<Win['kind']> = new Set<Win['kind']>(['referred', 'interview', 'offer']);
@@ -115,7 +115,7 @@ function WinsSkeleton() {
  */
 export default function WinsPage() {
   const client = usePageClient('wins');
-  const actions = usePlanActions('wins');
+  const actions = useOutcomeActions('wins');
   const query = useViewQuery(queryKeys.wins, () => client.wins(), { pollMs: pollMs.default });
   const [show, setShow] = useUrlState('show', 'all');
   const filter: Show = show === 'big' ? 'big' : 'all';

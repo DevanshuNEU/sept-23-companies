@@ -39,21 +39,21 @@ class PageCheckTest(unittest.TestCase):
 
     def test_quote_not_on_page_is_rejected(self):
         c = FakeClient({"https://a.example/x": (200, "<p>hello world</p>", HTML)})
-        kept, rejected = check_facts(c, [Fact("f", "goodbye", "https://a.example/x")])
+        kept, rejected = check_facts(c, [Fact("f", "goodbye and good night", "https://a.example/x")])
         self.assertEqual(kept, [])
-        self.assertEqual(rejected, [{"url": "https://a.example/x", "quote": "goodbye",
+        self.assertEqual(rejected, [{"url": "https://a.example/x", "quote": "goodbye and good night",
                                      "reason": "quote not found on the page"}])
 
     def test_unreachable_page_rejects_only_that_fact(self):
         c = FakeClient({
-            "https://a.example/ok": (200, "<p>we ship daily</p>", HTML),
+            "https://a.example/ok": (200, "<p>we ship daily and often</p>", HTML),
             "https://b.example/down": FetchError("timeout"),
             "https://c.example/no": (403, "", HTML),
-            "https://d.example/pdf": (200, "we ship daily", "application/pdf"),
+            "https://d.example/pdf": (200, "we ship daily and often", "application/pdf"),
         })
-        good = Fact("g", "we ship daily", "https://a.example/ok")
-        facts = [good, Fact("t", "q", "https://b.example/down"), Fact("n", "q", "https://c.example/no"),
-                 Fact("p", "we ship daily", "https://d.example/pdf")]
+        good = Fact("g", "we ship daily and often", "https://a.example/ok")
+        facts = [good, Fact("t", "a quote long enough to check", "https://b.example/down"), Fact("n", "a quote long enough to check", "https://c.example/no"),
+                 Fact("p", "we ship daily and often", "https://d.example/pdf")]
         kept, rejected = check_facts(c, facts)
         self.assertEqual(kept, [good])
         reasons = {r["url"]: r["reason"] for r in rejected}
@@ -69,9 +69,51 @@ class PageCheckTest(unittest.TestCase):
         self.assertEqual(refused_url("http://a.example/x"), "only https pages")
         self.assertIsNone(refused_url("https://a.example/x"))
 
+    def test_linkedin_anywhere_in_the_url_is_refused(self):
+        for url in ("https://acme.example/blog?utm_source=linkedin.com", "https://acme.example/LinkedIn.com/x",
+                    "https://acme.example/r?to=https://lnkd.in/a"):
+            with self.subTest(url=url):
+                c = FakeClient({})
+                kept, rejected = check_facts(c, [Fact("f", "a quote long enough to check", url)])
+                self.assertEqual((kept, c.calls), ([], []))
+                self.assertEqual(rejected[0]["reason"], "LinkedIn pages are not used")
+
+    def test_shapes_the_table_refuses_are_rejected_before_any_fetch(self):
+        url = "https://a.example/x"
+        long_quote = "word " * 101
+        cases = [(Fact("  ", "a quote long enough to check", url), "fact is blank"),
+                 (Fact("x" * 301, "a quote long enough to check", url), "fact is too long (300 characters at most)"),
+                 (Fact("f", long_quote, url), "quote is too long (500 characters at most)")]
+        for f, reason in cases:
+            with self.subTest(reason=reason):
+                c = FakeClient({})
+                kept, rejected = check_facts(c, [f])
+                self.assertEqual((kept, c.calls), ([], []))
+                self.assertEqual(rejected[0]["reason"], reason)
+
+    def test_a_long_link_is_refused(self):
+        self.assertEqual(refused_url("https://a.example/" + "a" * 500), "link too long to check")
+        self.assertEqual(refused_url("https://a.example/x?" + "a" * 201), "link too long to check")
+        self.assertIsNone(refused_url("https://a.example/x?" + "a" * 200))
+        c = FakeClient({})
+        kept, rejected = check_facts(c, [Fact("f", "a quote long enough to check", "https://a.example/x?" + "a" * 201)])
+        self.assertEqual((kept, c.calls), ([], []))
+        self.assertEqual(rejected[0]["reason"], "link too long to check")
+
+    def test_a_trivial_quote_is_too_short_to_check(self):
+        c = FakeClient({"https://a.example/x": (200, "<p>We use AI and the cloud in every product we make.</p>", HTML)})
+        for quote in ("AI", "the", "we use AI", "a b c dddddddddddddd"[:19]):
+            with self.subTest(quote=quote):
+                kept, rejected = check_facts(c, [Fact("f", quote, "https://a.example/x")])
+                self.assertEqual(kept, [])
+                self.assertEqual(rejected[0]["reason"], "quote too short to check")
+        self.assertEqual(c.calls, [])
+        kept, _ = check_facts(c, [Fact("f", "AI and the cloud in every product", "https://a.example/x")])
+        self.assertEqual(len(kept), 1)
+
     def test_refused_url_is_never_fetched(self):
         c = FakeClient({})
-        kept, rejected = check_facts(c, [Fact("f", "q", "https://lnkd.in/a")])
+        kept, rejected = check_facts(c, [Fact("f", "a quote long enough to check", "https://lnkd.in/a")])
         self.assertEqual((kept, c.calls), ([], []))
         self.assertEqual(rejected[0]["reason"], "LinkedIn pages are not used")
 
@@ -84,7 +126,7 @@ class PageCheckTest(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(refused_url(url), "private or local addresses are not used")
                 c = FakeClient({})
-                kept, rejected = check_facts(c, [Fact("f", "q", url)])
+                kept, rejected = check_facts(c, [Fact("f", "a quote long enough to check", url)])
                 self.assertEqual((kept, c.calls), ([], []))
                 self.assertEqual(rejected[0]["reason"], "private or local addresses are not used")
 
@@ -98,29 +140,29 @@ class PageCheckTest(unittest.TestCase):
                                ("https://www.linkedin.com/x", "LinkedIn pages are not used")):
             with self.subTest(target=target):
                 c = FakeClient({"https://a.example/r": (302, "", {"location": target})})
-                kept, rejected = check_facts(c, [Fact("a", "q", "https://a.example/r")])
+                kept, rejected = check_facts(c, [Fact("a", "a quote long enough to check", "https://a.example/r")])
                 self.assertEqual((kept, c.calls), ([], ["https://a.example/r"]))
                 self.assertEqual(rejected[0]["reason"], reason)
 
     def test_a_normal_redirect_is_followed_and_the_quote_found_there(self):
         c = FakeClient({"https://a.example/old": (301, "", {"location": "/new"}),
-                        "https://a.example/new": (200, "<p>we ship daily</p>", HTML)})
-        kept, rejected = check_facts(c, [Fact("a", "we ship daily", "https://a.example/old")])
+                        "https://a.example/new": (200, "<p>we ship daily and often</p>", HTML)})
+        kept, rejected = check_facts(c, [Fact("a", "we ship daily and often", "https://a.example/old")])
         self.assertEqual((len(kept), rejected), (1, []))
         self.assertEqual(c.calls, ["https://a.example/old", "https://a.example/new"])
 
     def test_more_than_three_hops_is_rejected(self):
         pages = {f"https://a.example/{n}": (302, "", {"location": f"/{n + 1}"}) for n in range(6)}
         c = FakeClient(pages)
-        kept, rejected = check_facts(c, [Fact("a", "q", "https://a.example/0")])
+        kept, rejected = check_facts(c, [Fact("a", "a quote long enough to check", "https://a.example/0")])
         self.assertEqual(kept, [])
         self.assertEqual(rejected[0]["reason"], "page redirected too many times")
         self.assertEqual(len(c.calls), 4)
 
     def test_one_fetch_per_url(self):
-        c = FakeClient({"https://a.example/x": (200, "<p>one two three</p>", HTML)})
-        kept, _ = check_facts(c, [Fact("a", "one", "https://a.example/x"), Fact("b", "two", "https://a.example/x"),
-                                  Fact("c", "three", "https://a.example/x")])
+        c = FakeClient({"https://a.example/x": (200, "<p>one two three four five six seven eight nine ten</p>", HTML)})
+        kept, _ = check_facts(c, [Fact("a", "one two three four five", "https://a.example/x"), Fact("b", "two three four five six", "https://a.example/x"),
+                                  Fact("c", "three four five six seven", "https://a.example/x")])
         self.assertEqual(len(kept), 3)
         self.assertEqual(c.calls, ["https://a.example/x"])
 

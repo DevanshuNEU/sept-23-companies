@@ -47,8 +47,9 @@ def main(argv: list[str] | None = None, *, stdout=None, runner=None, client=None
                 continue
             res = research_company(conn, company_id, runner=runner or CodexRunner(), client=client or UrllibClient(),
                                    now=now or utcnow(), force=args.force)
-        except LookupError as err:
-            print(f"company {company_id}: {err}", file=stdout)
+        except Exception as err:  # one company failing never skips the rest
+            print(f"company {company_id}: failed ({err})" if not isinstance(err, LookupError)
+                  else f"company {company_id}: {err}", file=stdout)
             code = 1
             continue
         extra = f" ({res['error']})" if res.get("error") else ""

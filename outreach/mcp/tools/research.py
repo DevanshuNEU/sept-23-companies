@@ -293,7 +293,8 @@ TOOLS = (
              "https page and the words on it. Code fetches every page and keeps a fact only when the quote is on "
              "it (never LinkedIn, contact-data sites or login pages). Returns saved, already_known and rejected "
              "with a reason each. At most 8 facts a call.", SaveResearchInput, save_research,
-             {"research_fact": Grant(insert=True), "person_source": Grant(insert=True),
+             {"research_fact": Grant(insert=True, update=frozenset({"verified_at", "page_date"})),
+              "person_source": Grant(insert=True),
               "event": Grant(insert=True)}),
     ToolSpec("flag_review",
              "Raise a Needs-you item for Devanshu about a company (and maybe one of its postings or people). The "

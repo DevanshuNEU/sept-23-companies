@@ -17,6 +17,12 @@ __all__ = ["page_text", "quote_on_page", "refused_url", "check_facts"]
 
 MAX_BYTES = 3_000_000
 MAX_HOPS = 3
+MAX_URL = 500
+MAX_QUERY = 200
+MAX_FACT = 300
+MAX_QUOTE = 500
+MIN_QUOTE_WORDS = 4
+MIN_QUOTE_CHARS = 20
 _REDIRECTS = (301, 302, 303, 307, 308)
 _CONTACT_LABELS = {"rocketreach", "zoominfo", "lusha", "signalhire", "contactout"}
 _SKIP = {"script", "style", "noscript", "template", "head"}
@@ -87,6 +93,10 @@ def refused_url(url: str) -> str | None:
     """The reason a URL may not be used, or None."""
     parts = urlsplit(url.strip())
     host = (parts.hostname or "").lower().removesuffix(".")
+    if "linkedin.com" in url.lower() or "lnkd.in" in url.lower():  # the table refuses these anywhere in a link
+        return "LinkedIn pages are not used"
+    if len(url.strip()) > MAX_URL or len(parts.query) > MAX_QUERY:
+        return "link too long to check"
     labels = host.split(".")
     if host in ("linkedin.com", "lnkd.in") or host.endswith((".linkedin.com", ".lnkd.in")):
         return "LinkedIn pages are not used"
@@ -138,13 +148,27 @@ def _load(client: HttpClient, url: str) -> tuple[str | None, str | None]:
     return (page_text(body) if ctype.startswith("text/html") else _squash(body)), None
 
 
+def _shape_problem(f: Fact) -> str | None:
+    """The reason the table (or a useless quote) would refuse this fact, or None."""
+    if not f.fact.strip():
+        return "fact is blank"
+    if len(f.fact) > MAX_FACT:
+        return f"fact is too long ({MAX_FACT} characters at most)"
+    if len(f.quote) > MAX_QUOTE:
+        return f"quote is too long ({MAX_QUOTE} characters at most)"
+    q = _squash(f.quote)
+    if len(q.split()) < MIN_QUOTE_WORDS or len(q) < MIN_QUOTE_CHARS:
+        return "quote too short to check"
+    return None
+
+
 def check_facts(client: HttpClient, facts: Sequence[Fact]) -> tuple[list[Fact], list[dict]]:
     """Kept facts, and {url, quote, reason} for each rejected one. One fetch per URL."""
     kept: list[Fact] = []
     rejected: list[dict] = []
     pages: dict[str, tuple[str | None, str | None]] = {}
     for f in facts:
-        reason = refused_url(f.url)
+        reason = refused_url(f.url) or _shape_problem(f)
         if reason is None:
             if f.url not in pages:
                 pages[f.url] = _load(client, f.url)

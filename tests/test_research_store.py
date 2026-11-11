@@ -48,6 +48,24 @@ class ResearchStoreTest(unittest.TestCase):
         self.assertEqual(store_company_facts(self.conn, self.company, [fact()], found_by="hand", now=NOW), 0)
         self.assertEqual(self.conn.execute("SELECT count(*) FROM research_fact").fetchone()[0], 1)
 
+    def test_a_recheck_after_15_days_makes_the_fact_fresh_again(self):
+        store_company_facts(self.conn, self.company, [fact()], found_by="gpt", now="2026-10-01T10:00:00Z")
+        later = "2026-10-20T10:00:00Z"
+        self.assertEqual(fresh_company_facts(self.conn, self.company, now=later), [])
+        self.assertEqual(store_company_facts(self.conn, self.company, [fact(page_date=None)], found_by="claude",
+                                             now=later), 1)
+        rows = fresh_company_facts(self.conn, self.company, now=later)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["verified_at"], rows[0]["found_by"], rows[0]["page_date"]),
+                         (later, "gpt", "2026-11-01"))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM research_fact").fetchone()[0], 1)
+
+    def test_an_older_check_never_makes_a_fact_staler(self):
+        store_company_facts(self.conn, self.company, [fact()], found_by="gpt", now=NOW)
+        self.assertEqual(store_company_facts(self.conn, self.company, [fact()], found_by="gpt",
+                                             now="2026-11-01T10:00:00Z"), 0)
+        self.assertEqual(self.conn.execute("SELECT verified_at FROM research_fact").fetchone()[0], NOW)
+
     def test_merged_company_uses_the_survivor(self):
         survivor = seed.company(self.conn, "Acme Inc")
         self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'duplicate' "

@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from outreach.drafts.followups import canonical_company
 from outreach.net import HttpClient
 from outreach.research.store import Fact, fresh_company_facts, store_company_facts
-from outreach.research.verify import check_facts
+from outreach.research.verify import MAX_FACT, MAX_QUOTE, check_facts
 
 __all__ = ["Runner", "CodexRunner", "build_prompt", "parse_reply", "research_company", "company_info"]
 
@@ -83,7 +83,7 @@ def _date(value: object) -> str | None:
 
 
 def parse_reply(text: str) -> list[Fact]:
-    """The facts in the first JSON object of `text`. Items missing fact, quote or url, or with a non-https url, are skipped."""
+    """The facts in the first JSON object of `text`. Items missing fact, quote or url, with a non-https url, or with a fact or quote the table would refuse for length, are skipped."""
     obj = _first_object(text or "")
     items = obj.get("facts") if isinstance(obj, dict) else None
     if not isinstance(items, list):
@@ -95,7 +95,7 @@ def parse_reply(text: str) -> list[Fact]:
         fact, quote, url = (item.get(k) for k in ("fact", "quote", "url"))
         if not all(isinstance(v, str) and v.strip() for v in (fact, quote, url)):
             continue
-        if urlsplit(url.strip()).scheme != "https":
+        if urlsplit(url.strip()).scheme != "https" or len(fact.strip()) > MAX_FACT or len(quote.strip()) > MAX_QUOTE:
             continue
         facts.append(Fact(fact.strip(), quote.strip(), url.strip(), _date(item.get("date"))))
     return facts
@@ -131,5 +131,5 @@ def research_company(conn: sqlite3.Connection, company_id: int, *, runner: Runne
     kept, rejected = check_facts(client, facts)
     if not kept:
         return {"status": "nothing", "kept": 0, "rejected": rejected}
-    store_company_facts(conn, company_id, kept, found_by="gpt", now=now)
-    return {"status": "stored", "kept": len(kept), "rejected": rejected}
+    written = store_company_facts(conn, company_id, kept, found_by="gpt", now=now)
+    return {"status": "stored", "kept": written, "rejected": rejected}

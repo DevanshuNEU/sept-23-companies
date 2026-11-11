@@ -11,7 +11,7 @@ from tests.mcptest import NOW, McpCase
 from tests.test_mcp_reads import merge
 
 PAGE = "https://acme.example/about"
-HTML = "<html><body><p>We build queue tools for small teams.</p><p>Founded in 2021.</p></body></html>"
+HTML = "<html><body><p>We build queue tools for small teams.</p><p>Founded in 2021 by two friends.</p></body></html>"
 
 
 class FakeClient:
@@ -80,20 +80,32 @@ class SaveResearchTest(SaveResearchCase):
         self.assertEqual(self.rows("research_fact"), [])
 
     def test_a_second_fact_on_the_same_page_for_a_person_is_already_known(self):
-        got = self.call_save([fact(), fact("Founded in 2021.")], person_id=self.pat)
+        got = self.call_save([fact(), fact("Founded in 2021 by two friends.")], person_id=self.pat)
         self.assertEqual((got["saved"], got["already_known"]), (1, 1))
         self.assertEqual(len(self.rows("person_source")), 1)
 
     def test_rejected_facts_are_reported_and_not_stored(self):
-        got = self.call_save([fact("We build rockets."), fact(url="https://www.linkedin.com/company/acme"), fact()])
+        got = self.call_save([fact("We build rockets for the moon."), fact(url="https://www.linkedin.com/company/acme"), fact()])
         self.assertEqual(got["saved"], 1)
         self.assertEqual([(r["quote"], r["reason"]) for r in got["rejected"]],
-                         [("We build rockets.", "quote not found on the page"),
+                         [("We build rockets for the moon.", "quote not found on the page"),
                           ("We build queue tools for small teams.", "LinkedIn pages are not used")])
         self.assertEqual(len(self.rows("research_fact")), 1)
 
+    def test_a_link_the_table_refuses_does_not_lose_the_other_facts(self):
+        got = self.call_save([fact(url=PAGE + "?utm_source=linkedin.com"), fact()])
+        self.assertEqual((got["saved"], [r["reason"] for r in got["rejected"]]), (1, ["LinkedIn pages are not used"]))
+        self.assertEqual(len(self.rows("research_fact")), 1)
+
+    def test_a_recheck_after_the_fact_went_stale_refreshes_it(self):
+        self.call_save([fact()])
+        self.db.execute("UPDATE research_fact SET verified_at = '2026-01-01T00:00:00Z'")
+        got = self.call_save([fact()])
+        self.assertEqual((got["saved"], got["already_known"]), (1, 0))
+        self.assertEqual(self.rows("research_fact")[0]["verified_at"], NOW)
+
     def test_nothing_kept_writes_nothing_and_no_event(self):
-        got = self.call_save([fact("We build rockets.")])
+        got = self.call_save([fact("We build rockets for the moon.")])
         self.assertEqual(got["saved"], 0)
         self.assertEqual(self.rows("research_fact"), [])
         self.assertEqual(self.db.execute("SELECT 1 FROM event WHERE kind = 'research_saved'").fetchall(), [])
@@ -117,7 +129,7 @@ class SaveResearchTest(SaveResearchCase):
     def test_tool_is_registered_with_its_grants(self):
         tool = next(s for s in server.tool_specs() if s.name == "save_research")
         self.assertEqual({t: (g.insert, set(g.update)) for t, g in tool.grants.items()},
-                         {"research_fact": (True, set()), "person_source": (True, set()), "event": (True, set())})
+                         {"research_fact": (True, {"verified_at", "page_date"}), "person_source": (True, set()), "event": (True, set())})
 
     def test_outside_the_live_checkout_nothing_is_fetched(self):
         with mock.patch.object(live_checkout, "is_live", return_value=False):

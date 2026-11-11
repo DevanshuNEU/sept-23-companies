@@ -28,15 +28,19 @@ class Fact:
 
 def store_company_facts(conn: sqlite3.Connection, company_id: int, facts: Sequence[Fact], *, found_by: str,
                         now: str) -> int:
-    """Store checked facts on the company's merge survivor. Returns how many were new; a repeat (same url and
-    quote) is ignored and keeps its first row. All or none: a refused fact undoes the whole call."""
+    """Store checked facts on the company's merge survivor. Returns how many rows were written: a new fact, or a
+    repeat (same url and quote) re-checked later, which gets the newer verified_at (and a page_date if it had none)
+    and keeps its first found_by. A repeat that is not newer changes nothing. All or none: a refused fact undoes
+    the whole call."""
     survivor = canonical_company(conn, company_id)
     inserted = 0
     with atomic(conn, "research_facts"):
         for f in facts:
             cur = conn.execute(
                 "INSERT INTO research_fact(company_id, fact, quote, url, page_date, found_by, verified_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company_id, url, quote) DO NOTHING",
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (company_id, url, quote) DO UPDATE SET "
+                "verified_at = excluded.verified_at, page_date = coalesce(excluded.page_date, research_fact.page_date) "
+                "WHERE excluded.verified_at > research_fact.verified_at",
                 (survivor, f.fact, f.quote, f.url, f.page_date, found_by, now))
             inserted += cur.rowcount
     return inserted

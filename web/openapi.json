@@ -548,6 +548,24 @@
         "title": "CheckStatus",
         "type": "object"
       },
+      "ClearDoneResult": {
+        "properties": {
+          "cleared": {
+            "title": "Cleared",
+            "type": "boolean"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "companyId",
+          "cleared"
+        ],
+        "title": "ClearDoneResult",
+        "type": "object"
+      },
       "CloseCompanyBody": {
         "additionalProperties": false,
         "properties": {
@@ -1959,6 +1977,34 @@
         "title": "DoneMetrics",
         "type": "object"
       },
+      "DoneResult": {
+        "properties": {
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "reachedOn": {
+            "title": "Reachedon",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "reachedOn",
+          "text"
+        ],
+        "title": "DoneResult",
+        "type": "object"
+      },
       "DoneView": {
         "properties": {
           "asOf": {
@@ -2476,67 +2522,6 @@
           "knockHasBoard"
         ],
         "title": "GapCompany",
-        "type": "object"
-      },
-      "GoAheadResult": {
-        "properties": {
-          "companyId": {
-            "title": "Companyid",
-            "type": "integer"
-          },
-          "entryId": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Entryid"
-          },
-          "listDate": {
-            "title": "Listdate",
-            "type": "string"
-          },
-          "postingId": {
-            "title": "Postingid",
-            "type": "integer"
-          },
-          "rank": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rank"
-          },
-          "state": {
-            "enum": [
-              "added",
-              "requested"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "postingId",
-          "companyId",
-          "state",
-          "rank",
-          "entryId",
-          "listDate",
-          "text"
-        ],
-        "title": "GoAheadResult",
         "type": "object"
       },
       "HealthBoards": {
@@ -3107,7 +3092,7 @@
       },
       "JobWriteBody": {
         "additionalProperties": false,
-        "description": "The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.",
+        "description": "The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's\nkey.",
         "properties": {},
         "title": "JobWriteBody",
         "type": "object"
@@ -9769,6 +9754,121 @@
         ]
       }
     },
+    "/api/companies/{company_id}/reached/clear": {
+      "post": {
+        "description": "Take back his Done mark. A company with no mark answers `cleared: false` and writes nothing.",
+        "operationId": "clear_reached",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearDoneResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Clear Reached",
+        "tags": [
+          "company"
+        ]
+      }
+    },
     "/api/companies/{company_id}/release-hold": {
       "post": {
         "operationId": "release_hold",
@@ -11295,9 +11395,10 @@
         ]
       }
     },
-    "/api/jobs/{posting_id}/go-ahead": {
+    "/api/jobs/{posting_id}/done": {
       "post": {
-        "operationId": "go_ahead",
+        "description": "Done: his mark that the posting's company has been reached. Undo is `/api/companies/{companyId}/reached/clear`.",
+        "operationId": "done",
         "parameters": [
           {
             "in": "path",
@@ -11326,7 +11427,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GoAheadResult"
+                  "$ref": "#/components/schemas/DoneResult"
                 }
               }
             },
@@ -11403,7 +11504,7 @@
             "description": "busy: the store is in use, nothing was saved, try again"
           }
         },
-        "summary": "Go Ahead",
+        "summary": "Done",
         "tags": [
           "jobs"
         ]

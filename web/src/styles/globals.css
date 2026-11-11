@@ -57,7 +57,7 @@
   --idle-bd: #e4e4e7;
   --idle-dot: #a1a1aa;
 
-  /* Monogram tiles on Today's rail (one calm hue per company name, never the brand violet): text on tile at 6:1 or more. */
+  /* Monogram tiles (one calm hue per company name, never the brand violet): text on tile at 6:1 or more. */
   --mono-teal-bg: #d3eeea;
   --mono-teal-fg: #0b5650;
   --mono-cyan-bg: #d2ebf6;

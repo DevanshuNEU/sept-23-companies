@@ -181,7 +181,7 @@ describe('WatchList', () => {
       await waitFor(() => expect(tab).toHaveTextContent('3'));
       expect(await screen.findByRole('region', { name: /Watch list/ })).toBeInTheDocument();
       const tabs = screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, '').trim());
-      expect(tabs).toEqual(['Last week', 'In flight', 'Email today', 'Watch list']);
+      expect(tabs).toEqual(['Last week', 'In flight', 'Watch list']);
     });
   });
 });

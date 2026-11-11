@@ -420,10 +420,13 @@ export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
 export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; after?: string | null; limit?: number }
 /** Pass: the posting is hidden; the company is untouched. */
 export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
-/** Go ahead: the company is on today's list as his own pick ('added') or kept for today's list and put first when the plan is built ('requested'). `text` is the sentence to show. */
-export interface GoAheadResult {
-  postingId: Id; companyId: Id; entryId: Id | null; state: 'added' | 'requested'; rank: number | null; listDate: IsoDate; text: string;
-}
+/**
+ * Done (#195): his mark that the posting's company has been reached. `companyId` is the survivor of any merge, `reachedOn`
+ * the New York day of the standing mark (the first one when it was already marked), `text` the API's sentence.
+ */
+export interface DoneResult { postingId: Id; companyId: Id; reachedOn: IsoDate; text: string }
+/** Done taken back: `cleared` is false when there was no mark, and nothing was written. */
+export interface ClearDoneResult { companyId: Id; cleared: boolean }
 /**
  * Check now (#194): `started`, the request is recorded and the crawl job asked to run; `running`, a check already waits
  * or runs and nothing new was recorded; `not_live`, the request is recorded but nothing was started (not the live

@@ -54,7 +54,7 @@ function NoGoForm({
       <AlertDialogHeader>
         <AlertDialogTitle>{`Add ${name} to the no-go list?`}</AlertDialogTitle>
         <AlertDialogDescription>
-          It leaves Today and the backlog, and every queued email there stops. You can take it off the no-go list later.
+          Its jobs leave the job list, and every queued email there stops. You can take it off the no-go list later.
         </AlertDialogDescription>
       </AlertDialogHeader>
       <RadioGroup value={reason} onValueChange={(v) => setReason(v as NoGoReason)} aria-label="Reason" className="gap-2.5">

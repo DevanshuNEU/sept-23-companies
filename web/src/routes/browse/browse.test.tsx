@@ -4,7 +4,6 @@ import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import type { GoAheadResult } from '@/api';
 import { toast } from 'sonner';
 import { renderWithApp } from '@/test/render';
 import { AppShell } from '@/shell/app-shell';
@@ -13,8 +12,8 @@ import BrowsePage from './index';
 /*
  * The job list (#156, the /browse page), on the sample: 82 postings from 11 companies, newest first by when each was
  * posted. At your level: 62 (22 in the last 30 days, 8 in the last 7, each counting the 2 with no date); at higher
- * levels: 20 (6 in the last 30 days). He reads every posting himself: Pass hides one, Go ahead puts its company on
- * today's list.
+ * levels: 20 (6 in the last 30 days). He reads every posting himself: Pass hides one, Reached marks its company as
+ * reached.
  */
 
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
@@ -53,6 +52,9 @@ async function open(o: { shell?: boolean } = {}) {
   return { ...view, client, queryClient };
 }
 
+/** The row's reached tag ("Reached Nov 10"), not the Mark reached button beside it. */
+const REACHED_TAG = /Reached [A-Z][a-z]{2} \d/;
+
 describe('the Jobs page', () => {
   // Toasts live in a global store: one test's toast must not be another's Undo.
   beforeEach(() => {
@@ -78,7 +80,11 @@ describe('the Jobs page', () => {
     expect(first).toHaveTextContent('E-Verify');
     expect(first).toHaveTextContent('YC');
     expect(within(first).getByRole('button', { name: /^Pass/ })).toBeInTheDocument();
-    expect(within(first).getByRole('button', { name: /^Go ahead/ })).toBeInTheDocument();
+    expect(within(first).getByRole('button', { name: /^Mark reached/ })).toBeInTheDocument();
+    // One word per meaning: the key legend names A as the button does, and Done stays the closed companies' page.
+    const legend = screen.getByText('pass').closest('p') as HTMLElement;
+    expect(legend).toHaveTextContent(/A\s*mark reached/);
+    expect(legend).not.toHaveTextContent(/done/i);
   });
 
   it('lists newest first by when each job was posted, and has no score or ranking text', async () => {
@@ -156,7 +162,7 @@ describe('the Jobs page', () => {
     expect(of('Axiom')).not.toHaveTextContent('Big company');
     expect(of('Granite Systems')).toHaveTextContent('Big company, size not known'); // guessed big: no size on file
     expect(of('Helix')).toHaveTextContent('Says no sponsorship');
-    expect(of('Cerebrium')).toHaveTextContent('You contacted them on Tue Nov 3');
+    expect(of('Cerebrium')).toHaveTextContent('Reached Nov 3');
     expect(of('Cerebrium')).toHaveTextContent('18 people');
   });
 
@@ -361,35 +367,48 @@ describe('the Jobs page', () => {
     });
   });
 
-  describe('Go ahead', () => {
-    const goButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Go ahead/ });
+  describe('Reached', () => {
+    const reachedButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Mark reached/ });
+    const retell = () => rows().filter((r) => r.getAttribute('data-company') === 'Retell AI');
 
-    it('says it is going ahead with an Undo, and sends nothing until the window closes', async () => {
+    it('Reached marks the company and every row of it shows reached', async () => {
       const user = userEvent.setup();
       const { client } = await open();
-      const sent = vi.spyOn(client, 'goAhead');
-      await user.click(goButton(rows()[0] as HTMLElement));
-      expect(await screen.findByText('Going ahead with Retell AI.')).toBeInTheDocument();
+      const sent = vi.spyOn(client, 'markReached');
+      expect(retell().length).toBeGreaterThan(1);
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
+      await user.click(reachedButton(rows()[0] as HTMLElement));
+      expect(await screen.findByText('Marked Retell AI reached.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-      expect(within(rows()[0] as HTMLElement).queryByRole('button', { name: /^Go ahead/ })).not.toBeInTheDocument();
+      // At once, on every row of the company, before anything is sent.
+      for (const r of retell()) expect(r).toHaveTextContent('Reached Nov 10');
+      expect(rows().find((r) => r.getAttribute('data-company') === 'Pylon')).not.toHaveTextContent(REACHED_TAG);
       expect(sent).not.toHaveBeenCalled();
+      await leavePage();
+      await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+      expect(sent.mock.calls[0]?.[0]).toBe(9000);
+      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI reached.')).toBeInTheDocument();
+      // The list read again says the same: the mark is the company's reached day now.
+      await waitFor(() => expect(retell().every((r) => /Reached Nov 10/.test(r.textContent ?? ''))).toBe(true));
+      expect(rows()).toHaveLength(20); // the postings stay where they were
     });
 
-    it('Undo inside the window gives the row its buttons back and sends nothing', async () => {
+    it('Reached can be undone in the undo window', async () => {
       const user = userEvent.setup();
       const { client } = await open();
-      const sent = vi.spyOn(client, 'goAhead');
-      await user.click(goButton(rows()[0] as HTMLElement));
+      const sent = vi.spyOn(client, 'markReached');
+      await user.click(reachedButton(rows()[0] as HTMLElement));
       await user.click(await screen.findByRole('button', { name: 'Undo' }));
-      await waitFor(() => expect(goButton(rows()[0] as HTMLElement)).toBeEnabled());
+      await waitFor(() => expect(reachedButton(rows()[0] as HTMLElement)).toBeEnabled());
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
       await leavePage();
       await settle(0);
       expect(sent).not.toHaveBeenCalled();
     });
 
-    it('when the window closes it sends one request and shows the sentence the API gave', async () => {
+    it('when the window closes it sends one request', async () => {
       const { client } = await open();
-      const sent = vi.spyOn(client, 'goAhead');
+      const sent = vi.spyOn(client, 'markReached');
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         press('a');
@@ -397,34 +416,60 @@ describe('the Jobs page', () => {
       } finally {
         vi.useRealTimers();
       }
-      expect(await within(rows()[0] as HTMLElement).findByText("Added Retell AI to today's list.")).toBeInTheDocument();
+      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI reached.')).toBeInTheDocument();
       expect(sent).toHaveBeenCalledTimes(1);
-      expect(sent.mock.calls[0]?.[0]).toBe(9000);
-      expect(rows()).toHaveLength(20); // the posting stays where it was
     });
 
-    it('leaving the page commits it at once, with the sentence for a posting kept for the next list', async () => {
-      const user = userEvent.setup();
-      const { client } = await open();
-      const kept: GoAheadResult = {
-        postingId: 9000, companyId: 7001, entryId: null, state: 'requested', rank: null, listDate: '2026-11-16',
-        text: 'Retell AI is kept for Monday, Nov 16. It goes first on that day\u2019s list.',
-      };
-      vi.spyOn(client, 'goAhead').mockResolvedValue(kept);
-      await user.click(goButton(rows()[0] as HTMLElement));
-      await leavePage();
-      expect(await within(rows()[0] as HTMLElement).findByText(kept.text)).toBeInTheDocument();
-    });
-
-    it('a refusal is said plainly and the row keeps its buttons', async () => {
+    it('a company he already contacted says Reached on its day, and Reached still works there', async () => {
       const user = userEvent.setup();
       await open();
       const row = rows().find((r) => r.getAttribute('data-company') === 'Cerebrium') as HTMLElement;
-      await user.click(goButton(row));
+      expect(row).toHaveTextContent('Reached Nov 3');
+      expect(row).not.toHaveTextContent('You contacted them');
+      await user.click(reachedButton(row));
       await leavePage();
-      expect(await screen.findByText('You contacted Cerebrium and are waiting for an answer. Nothing was saved.')).toBeInTheDocument();
-      await waitFor(() => expect(goButton(row)).toBeEnabled());
-      expect(within(row).getByRole('button', { name: /^Pass/ })).toBeEnabled();
+      expect(await within(row).findByText('Marked Cerebrium reached.')).toBeInTheDocument();
+    });
+
+    it('a failed Reached says so and the row keeps its buttons', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      vi.spyOn(client, 'markReached').mockRejectedValue(new ApiError('network', 'Cannot reach the Knock server'));
+      await user.click(reachedButton(rows()[0] as HTMLElement));
+      await leavePage();
+      await waitFor(() => expect(reachedButton(rows()[0] as HTMLElement)).toBeEnabled());
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
+    });
+  });
+
+  describe('the outreach line', () => {
+    const openWith = async (sentToday: number, requests: number, replied: number) => {
+      const db = buildFixture('queue');
+      db.shell.sending.sentToday = sentToday;
+      db.progress.today = { ...db.progress.today, requests, replied };
+      renderWithApp(<BrowsePage />, { route: '/browse', client: new FixtureClient(db) });
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    };
+
+    it("header shows today's outreach line linking to Progress", async () => {
+      // Emails the sender sent today and LinkedIn requests he logged both count as sent.
+      await openWith(31, 3, 2);
+      const line = await screen.findByRole('link', { name: 'Today: 34 sent, 2 replies' });
+      expect(line).toHaveAttribute('href', '/progress');
+      expect(line.closest('header')).toContainElement(screen.getByRole('heading', { level: 1, name: 'Jobs' }));
+    });
+
+    it('says 1 reply, and 0 sent on a quiet day', async () => {
+      await openWith(0, 0, 1);
+      expect(await screen.findByRole('link', { name: 'Today: 0 sent, 1 reply' })).toBeInTheDocument();
+    });
+
+    it('waits for both counts and shows nothing when one did not load', async () => {
+      const client = new FixtureClient(buildFixture('queue'));
+      vi.spyOn(client, 'progress').mockRejectedValue(new ApiError('network', 'Cannot reach the Knock server'));
+      renderWithApp(<BrowsePage />, { route: '/browse', client });
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+      expect(screen.queryByRole('link', { name: /^Today:/ })).not.toBeInTheDocument();
     });
   });
 
@@ -465,27 +510,28 @@ describe('the Jobs page', () => {
       expect(sent.mock.calls[0]?.[0]).toBe(9001);
     });
 
-    it('A goes ahead on the row he is on, and Z takes it back', async () => {
+    it('A marks the row he is on reached, and Z takes it back', async () => {
       const { client } = await open({ shell: true });
-      const sent = vi.spyOn(client, 'goAhead');
+      const sent = vi.spyOn(client, 'markReached');
       press('ArrowDown');
       press('a');
-      expect(await screen.findByText('Going ahead with Pylon.')).toBeInTheDocument();
+      expect(await screen.findByText('Marked Pylon reached.')).toBeInTheDocument();
       press('z');
-      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Go ahead/ })).toBeEnabled());
+      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Mark reached/ })).toBeEnabled());
+      expect(rows()[1]).not.toHaveTextContent(REACHED_TAG);
       press('a');
-      await screen.findByText('Going ahead with Pylon.');
+      await screen.findByText('Marked Pylon reached.');
       await leavePage();
       await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
       expect(sent.mock.calls[0]?.[0]).toBe(9001);
-      expect(await within(rows()[1] as HTMLElement).findByText("Added Pylon to today's list.")).toBeInTheDocument();
+      expect(await within(rows()[1] as HTMLElement).findByText('Marked Pylon reached.')).toBeInTheDocument();
     });
 
-    it('typing in the search box never passes or goes ahead, and the arrows leave it for the list', async () => {
+    it('typing in the search box never passes or marks done, and the arrows leave it for the list', async () => {
       const user = userEvent.setup();
       const { client } = await open();
       const pass = vi.spyOn(client, 'passJob');
-      const ahead = vi.spyOn(client, 'goAhead');
+      const ahead = vi.spyOn(client, 'markReached');
       await user.click(search());
       await user.keyboard('xa');
       expect(search()).toHaveValue('xa');
@@ -503,9 +549,11 @@ describe('the Jobs page', () => {
       const pass = vi.spyOn(client, 'passJob');
       await user.type(search(), 'zzzz');
       await screen.findByText(/^No jobs/);
+      const done = vi.spyOn(client, 'markReached');
       press('x');
       press('a');
       expect(pass).not.toHaveBeenCalled();
+      expect(done).not.toHaveBeenCalled();
     });
   });
 });

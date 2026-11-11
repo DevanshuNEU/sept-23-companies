@@ -1,13 +1,15 @@
 import { ApiError, type OutreachClient, type WriteOptions } from '../client';
 import type {
-  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
+  Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoDate, IsoTime, JobRow, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult, CheckNowResult, CheckStatus,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
 import { buildJobs, CHECK_BOARDS, CHECK_STEP_MS, CHECK_TOOK_S, CHECK_WALK, foundJobs, jobsView, sortJobs } from './jobs-data';
+import { REACHED, REACHED_CLEARED, standingMark } from '@/lib/reached';
+import { formatDateMonthDay } from '@/lib/short-dates';
 import { benchOrder, browseView, buildExtras, rowToBench, toBrowse } from './browse-data';
 import { askedToday, benchRoom, benchRoomText, benchToRow, emailCountOf, emailTextOf, laneTextOf, pickOrder } from './queue-data';
 
@@ -113,10 +115,10 @@ export class FixtureClient implements OutreachClient {
   /** Browse companies: the stored position of each company, fixed the first time it is seen, and the 30 below the bench. */
   private readonly browseRanks = new Map<Id, number>();
   private extras: BenchCompany[] | undefined;
-  /** The job list (#156): the sample postings, the ones he passed, and the companies he said Go ahead to (by company id). */
+  /** The job list (#156): the sample postings, the ones he passed, and his standing Done marks (#195), company id to the day. */
   private jobList: ReturnType<typeof buildJobs> | undefined;
   private readonly passedJobs = new Set<Id>();
-  private readonly wentAhead = new Map<Id, GoAheadResult>();
+  private readonly reachedMarks = new Map<Id, IsoDate>();
   /** Check now: the step of `CHECK_WALK` the check is at, how many checks were asked for (only the first finds postings), and the timer that walks it. */
   private check: { step: number; nth: number; timer: ReturnType<typeof setInterval> | null } | null = null;
   private found = 0;
@@ -1167,7 +1169,12 @@ export class FixtureClient implements OutreachClient {
       for (const r of finds) ages.set(r.postingId, 0);
       this.jobList = { rows: sortJobs([...this.jobList.rows, ...finds]), higher: this.jobList.higher, ages };
     }
-    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)), higher: this.jobList.higher, ages: this.jobList.ages };
+    // As the API: a company's reached day is the later of a real touch and his own Done mark.
+    const reached = (r: JobRow): JobRow => {
+      const mark = this.reachedMarks.get(r.companyId);
+      return mark !== undefined && (r.contactedOn === null || mark > r.contactedOn) ? { ...r, contactedOn: mark } : r;
+    };
+    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)).map(reached), higher: this.jobList.higher, ages: this.jobList.ages };
   }
 
   /** The job list, as the API: tab, window, size, contacted filter and company search, 50 a page by cursor. Never a posting he passed. */
@@ -1185,21 +1192,34 @@ export class FixtureClient implements OutreachClient {
     });
   }
 
-  /** Go ahead, as the API: the company is on today's list; a company already there, or one on today's list, is refused. */
-  goAhead(postingId: Id, o: WriteOptions): Promise<GoAheadResult> {
+  /** Done, as the API: his mark that the company was reached, once per company. Nothing else stops it. */
+  markReached(postingId: Id, o: WriteOptions): Promise<DoneResult> {
     return this.write(o, () => {
-      const pool = this.jobPool();
-      const row = pool.rows.find((r) => r.postingId === postingId);
+      const row = this.jobPool().rows.find((r) => r.postingId === postingId);
       if (!row) throw new ApiError('not_found', `There is no posting ${postingId}.`);
-      if (this.wentAhead.has(row.companyId) || this.db.plan.rows.some((r) => r.company.id === row.companyId)) throw notAllowed(`${row.companyName} is already on today's list. Nothing was saved.`);
-      if (row.contactedOn !== null) throw notAllowed(`You contacted ${row.companyName} and are waiting for an answer. Nothing was saved.`);
-      const date = this.db.plan.date;
-      const result: GoAheadResult = {
-        postingId, companyId: row.companyId, entryId: this.nextId++, state: 'added', rank: this.db.plan.rows.length + this.wentAhead.size + 1, listDate: date,
-        text: `Added ${row.companyName} to today's list.`,
-      };
-      this.wentAhead.set(row.companyId, result);
-      return result;
+      const standing = this.reachedMarks.get(row.companyId);
+      if (standing !== undefined) {
+        return { postingId, companyId: row.companyId, reachedOn: standing, text: `${row.companyName} was already marked reached on ${formatDateMonthDay(standing)}.` };
+      }
+      const on = this.db.plan.date;
+      this.reachedMarks.set(row.companyId, on);
+      this.db.companies[row.companyId]?.events.unshift({ id: this.nextId++, at: this.now, kind: REACHED, text: 'Company reached', actor: 'devanshu', importSource: null });
+      return { postingId, companyId: row.companyId, reachedOn: on, text: `Marked ${row.companyName} reached.` };
+    });
+  }
+
+  /** Done taken back, as the API: a company with no mark answers `cleared: false` and nothing is written. */
+  clearReached(companyId: Id, o: WriteOptions): Promise<ClearDoneResult> {
+    return this.write(o, () => {
+      const view = this.db.companies[companyId];
+      const marked = this.reachedMarks.has(companyId) || (view !== undefined && standingMark(view.events) !== null);
+      if (!marked) {
+        if (!view && !this.jobPool().rows.some((r) => r.companyId === companyId)) throw new ApiError('not_found', `There is no company ${companyId}.`);
+        return { companyId, cleared: false };
+      }
+      this.reachedMarks.delete(companyId);
+      view?.events.unshift({ id: this.nextId++, at: this.now, kind: REACHED_CLEARED, text: 'Company reached cleared', actor: 'devanshu', importSource: null });
+      return { companyId, cleared: true };
     });
   }
 

@@ -1,5 +1,5 @@
 import type { ProgressPeriod } from '@/api';
-import { formatDateMonthDay } from '@/routes/today/short-dates';
+import { formatDateMonthDay } from '@/lib/short-dates';
 
 /** "Nov 4 to 10", or "Oct 28 to Nov 3" across a month. Calendar dates: no zone moves them. */
 export function periodRange(p: Pick<ProgressPeriod, 'from' | 'to'>): string {

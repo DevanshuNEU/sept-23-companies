@@ -42,7 +42,8 @@ GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads", "outreach.mcp.tools.resea
 
 INSTRUCTIONS = """\
 Outreach store for Devanshu's job search: ranked companies, the people at them, their drafts and due follow-ups,
-postings to read for the reader queue, and companies where the daily plan wants someone found.
+postings to read for the reader queue, and ranked companies where someone could be found. The daily plan is off
+(#9): Knock opens on the job list.
 
 Hard limits: Claude never approves, sends, skips, unapproves or pauses an email, and never marks anyone no-go.
 Devanshu approves every email himself in the Outbox; the sender sends only what he approved. No tool here can do

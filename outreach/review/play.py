@@ -1,7 +1,10 @@
-"""Which companies he has picked or planned, and which he is emailing (#16, Decisions).
+"""Which companies are in play (picked, planned, marked or reached), and which he is emailing (#16, Decisions).
 
 A company is picked or planned only by the latest daily list, never by its status: the importer sets `working` on
-every company he ever touched, so status says nothing about what he chose today.
+every company he ever touched, so status says nothing about what he chose today. Since the first to see ruling (#9,
+2026-11-10) no daily list is built, so a company is also in play when he marked it reached in the last
+`reached_days` days and has not cleared the mark (`outreach.pipeline.reached`), or when he reached a person there in
+those days (any channel, from `outreach.plan.outbound.load_outbound`). The old lists still count while they are recent, for history.
 
 Items for size and domain are raised only for these companies, so the list never floods: of 18,000 stored
 companies a plan names at most 60. Each function is a few set-based queries, never one per company.
@@ -10,14 +13,17 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from outreach.pipeline import reached
+from outreach.plan.outbound import load_outbound
 from outreach.ranking.common import canonical_ids
 
 __all__ = ["ny_date", "live_company_ids", "recent_list_date", "in_play", "emailing"]
 
 _NEW_YORK = ZoneInfo("America/New_York")
+REACHED_DAYS = 14  # the default of `[sweep] reached_days`: a company reached this many days ago is still in play
 # A message in one of these states, on an open touch, is an email he is about to send or must look at.
 _LIVE_MESSAGE_STATES = ("planned", "drafted", "approved", "sending", "send_unknown", "failed")
 # A plan row he dropped or deferred is not a plan to email.
@@ -47,7 +53,8 @@ def live_company_ids(conn: sqlite3.Connection, *, canon: Mapping[int, int] | Non
 def recent_list_date(conn: sqlite3.Connection, today: str, planned_days: int) -> str | None:
     """The newest daily list's date, when it is no more than `planned_days` before `today`; else None.
 
-    None also means "no recent plan": a job that needs a plan to judge by (the stale sweep) skips on it."""
+    None means no recent plan: `in_play` and `emailing` then read no list rows (the stale sweep no longer needs one,
+    first to see ruling, #9 2026-11-10)."""
     row = conn.execute("SELECT MAX(list_date) FROM daily_list").fetchone()
     if row is None or row[0] is None:
         return None
@@ -56,15 +63,20 @@ def recent_list_date(conn: sqlite3.Connection, today: str, planned_days: int) ->
 
 
 def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
-            canon: Mapping[int, int] | None = None) -> dict[int, str]:
-    """Live company id to `'picked'` or `'planned'` (picked wins).
+            canon: Mapping[int, int] | None = None, reached_days: int = REACHED_DAYS) -> dict[int, str]:
+    """Live company id to `'picked'`, `'planned'`, `'marked'` or `'reached'` (the first that holds, in that order).
 
-    A plan row or person on a company merged into another counts for the company it ended up in.
+    A plan row, mark or person on a company merged into another counts for the company it ended up in.
 
     Picked: the latest list has it as `picked`. Planned: the latest list has it `proposed`, with or without a named
-    person (company first, #9 2026-10-26: a company row with nobody on it is what the plan proposes). The latest list counts only when its date is within `planned_days` of `today`, so with no recent list
-    nobody is in play. Status plays no part here beyond `live_company_ids`: a `working` company on no plan is not in
-    play. `canon` as in `live_company_ids`.
+    person (company first, #9 2026-10-26: a company row with nobody on it is what the plan proposes). The latest list
+    counts only when its date is within `planned_days` of `today`. Marked: he marked it reached (first to see, #9
+    2026-11-10) within `reached_days` days before `today` and has not cleared the mark (an older mark counts like
+    an old touch, so Needs you never grows without a bound). Reached: a person there was reached, on any channel, within
+    `reached_days` days before `today` (`Outbound.reached`: a sent email counts while its follow-ups wait; a first
+    email still in the Outbox is not reached yet, and `emailing` covers it).
+    Status plays no part here beyond `live_company_ids`: a `working` company on no plan, with no mark and no recent
+    touch, is not in play. `canon` as in `live_company_ids`.
     """
     canon = canonical_ids(conn) if canon is None else canon
     live = live_company_ids(conn, canon=canon)
@@ -79,6 +91,13 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
                 out[cid] = "picked"
             elif row["state"] in _ROW_STATES_KEPT:
                 out.setdefault(cid, "planned")
+    since = date.fromisoformat(today) - timedelta(days=reached_days)
+    for cid, day in reached.marks(conn, dict(canon)).items():
+        if cid in live and date.fromisoformat(day) >= since:
+            out.setdefault(cid, "marked")
+    for o in load_outbound(conn, canon, tz="America/New_York"):
+        if o.reached and o.sent_on >= since and o.company_id in live:
+            out.setdefault(o.company_id, "reached")
     return out
 
 

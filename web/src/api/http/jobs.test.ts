@@ -14,14 +14,14 @@ describe('the job list methods', () => {
     expect(get).toHaveBeenLastCalledWith('/api/jobs?view=your_level&window=30&size=any', undefined);
   });
 
-  it('pass and go ahead post an empty body to the posting, with the request id as the key', async () => {
+  it('pass and done post an empty body to the posting, with the request id as the key', async () => {
     const send = vi.fn(async () => ({}));
     const t = { get: vi.fn(), send } as unknown as Transport;
     const o = { requestId: 'req-12345678' };
     await planMethods(t).passJob!(9000, o);
     expect(send).toHaveBeenLastCalledWith('POST', '/api/jobs/9000/pass', {}, o);
-    await planMethods(t).goAhead!(9000, o);
-    expect(send).toHaveBeenLastCalledWith('POST', '/api/jobs/9000/go-ahead', {}, o);
+    await planMethods(t).markReached!(9000, o);
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/jobs/9000/done', {}, o);
   });
 
   it('check now posts an empty body with the request id as the key; the status is a plain read', async () => {

@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Kbd } from '@/components/ui/kbd';
 import { formatDayTime, formatDueDay } from '@/lib/format';
+import { standingMark } from '@/lib/reached';
+import { formatMonthDay } from '@/lib/short-dates';
 import { readResultStatus, sponsorshipStatus, type Tone } from '@/lib/status';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
@@ -21,12 +23,13 @@ const DOT: Record<Tone, string> = {
   idle: 'bg-idle-dot',
 };
 
-export type CompanyHandlers = { onPause: () => void; onResume: () => void; onClose: () => void; onReopen: () => void };
+export type CompanyHandlers = { onPause: () => void; onResume: () => void; onClose: () => void; onReopen: () => void; onClearMark: () => void };
 
 export function CompanyHeader({ view, handlers }: { view: CompanyView; handlers: CompanyHandlers }) {
   const c = view.company;
   const can = companyActions(c);
   const boardUrl = safeHref(view.board?.url);
+  const mark = standingMark(view.events);
   return (
     <header className="mb-4 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-6 gap-y-3">
       <div>
@@ -39,6 +42,19 @@ export function CompanyHeader({ view, handlers }: { view: CompanyView; handlers:
           </div>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{view.summary}</p>
+        {mark ? (
+          // His Done mark from the job list (#195), and its undo for any time after the job list's window.
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-3 text-[13px] text-muted-foreground">
+            <span>{`Reached ${formatMonthDay(mark)} (your mark)`}</span>
+            <button
+              type="button"
+              onClick={handlers.onClearMark}
+              className="rounded-sm text-foreground underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70 max-sm:min-h-11"
+            >
+              Clear mark
+            </button>
+          </p>
+        ) : null}
       </div>
       <div className="flex items-center gap-2">
         {can.resume ? (

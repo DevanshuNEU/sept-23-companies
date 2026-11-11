@@ -1,17 +1,16 @@
 import { useSearchParams } from 'react-router';
-import { CircleCheck, Hourglass, Inbox, Radar } from 'lucide-react';
+import { CircleCheck, Hourglass, Radar } from 'lucide-react';
 import { pollMs, queryKeys, usePageClient } from '@/api';
 import { EmptyState } from '@/components/state-views';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useViewQuery } from '@/pending/pending';
-import { WinStrip } from '../today/win-strip';
-import { EmailLaneList } from './email-today';
+import { WinStrip } from './win-strip';
 import { InFlightList } from './in-flight';
 import { OutcomePrompt } from './last-week';
 import { WatchList } from './watch-list';
 
-const TABS = ['last-week', 'in-flight', 'email-today', 'watch'] as const;
+const TABS = ['last-week', 'in-flight', 'watch'] as const;
 type Tab = (typeof TABS)[number];
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
@@ -21,23 +20,21 @@ function Count({ n }: { n: number | undefined }) {
 }
 
 /**
- * Pipeline (2026-11-06): the four things that used to sit under the pick on Today, in their own place. Last week is
- * the 7-day question, In flight is every company with a wave out or a reply, Email today is the companies beyond the
- * picks that can be emailed, and the Watch list is what changed on the outside. One tab at a time, with each count on
- * its tab, and the tab is in the address (`?tab=`) so a link opens it. It opens on the first tab with something in it.
+ * Pipeline (2026-11-06): Last week is the 7-day question, In flight is every company with a wave out or a reply, and
+ * the Watch list is what changed on the outside. One tab at a time, with each count on its tab, and the tab is in the
+ * address (`?tab=`) so a link opens it. It opens on the first tab with something in it. Email today went with Today
+ * (#195), so an old `?tab=email-today` link opens like `/pipeline`.
  */
 export default function PipelinePage() {
   const client = usePageClient('plan');
   const [params, setParams] = useSearchParams();
   const plan = useViewQuery(queryKeys.plan, () => client.plan(), { pollMs: pollMs.default });
-  const bench = useViewQuery(queryKeys.bench, () => client.bench(), { pollMs: pollMs.default });
   const outcomes = useViewQuery(queryKeys.outcomePrompt, () => client.outcomePrompt(), { pollMs: pollMs.default });
   const watch = useViewQuery(queryKeys.watch, () => client.watchList(), { pollMs: pollMs.default });
 
   const counts: Record<Tab, number | undefined> = {
     'last-week': outcomes.data?.touches.length,
     'in-flight': plan.data?.inFlight.length,
-    'email-today': bench.data?.emailLane.length,
     watch: watch.data?.items.length,
   };
   const loaded = TABS.every((t) => counts[t] !== undefined);
@@ -75,10 +72,6 @@ export default function PipelinePage() {
             In flight
             <Count n={counts['in-flight']} />
           </TabsTrigger>
-          <TabsTrigger value="email-today" className="h-10 flex-none gap-2 px-0.5">
-            Email today
-            <Count n={counts['email-today']} />
-          </TabsTrigger>
           <TabsTrigger value="watch" className="h-10 flex-none gap-2 px-0.5">
             Watch list
             <Count n={counts.watch} />
@@ -108,15 +101,6 @@ export default function PipelinePage() {
                 </EmptyState>
               ) : (
                 <InFlightList items={plan.data?.inFlight ?? []} />
-              )}
-            </TabsContent>
-            <TabsContent value="email-today">
-              {counts['email-today'] === 0 || !bench.data ? (
-                <EmptyState icon={Inbox} title="No more companies to email today.">
-                  Companies beyond today&apos;s picks that can be emailed show here, by rank.
-                </EmptyState>
-              ) : (
-                <EmailLaneList lane={bench.data.emailLane} text={bench.data.emailLaneText} />
               )}
             </TabsContent>
             <TabsContent value="watch">

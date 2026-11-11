@@ -1,7 +1,9 @@
 """`python -m outreach.plan <command>`: today's people plan by hand (#15, Task 11).
 
-- `build [--date YYYY-MM-DD] [--no-read-boards] [--dry-run] [--force-weekend]`: build the day's plan (once per date; a
-  second run changes nothing) and print the status, the capacity and one line per row. The default date is today in
+- `build [--date YYYY-MM-DD] [--no-read-boards] [--dry-run] [--force-weekend]`: while `plan.enabled` is false (the
+  shipped value: first to see, #9, 2026-11-10) it prints `plan is off (first to see ruling, #9)` and exits 0, touching
+  nothing (no store, no board read, no job run), whatever the flags. Otherwise it builds the day's plan (once per
+  date; a second run changes nothing) and print the status, the capacity and one line per row. The default date is today in
   New York. Unless `--no-read-boards` is given it refuses to run outside the live checkout before it opens anything,
   because it then asks the crawler to read boards and the ranker to re-rank. `--dry-run` computes and prints and writes
   nothing, not even a job run. A weekend builds nothing unless `--force-weekend`.
@@ -134,7 +136,13 @@ def _start_caffeinate() -> None:
         print(f"build: caffeinate did not start ({err}); building anyway", file=sys.stderr)
 
 
+PLAN_OFF_LINE = "plan is off (first to see ruling, #9)"
+
+
 def _build(args: argparse.Namespace, root: str | None, live_root: str | None, stdout) -> int:
+    if default_plan_config().get("plan", "enabled") is not True:  # first to see (#9): say so, touch nothing
+        print(PLAN_OFF_LINE, file=stdout)
+        return 0
     if args.reason is not None and not args.replace:
         raise ValueError("--reason goes with --replace")
     day = args.date or _today()

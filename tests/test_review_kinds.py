@@ -106,10 +106,15 @@ class ConfigTest(unittest.TestCase):
 
     def test_config_loads_and_refuses_an_unknown_key_or_zero(self):
         self.assertEqual(load_review_config(), ReviewConfig(sponsorship_top_n=150, planned_days=4, stale_days=14,
-                                                            crawler_scope_top=150, crawler_cap_per_run=10))
+                                                            crawler_scope_top=150, crawler_cap_per_run=10,
+                                                            reached_days=14))
         scope = "[needs_you]\ncrawler_scope_top = 20\ncrawler_cap_per_run = 5\n"
-        good = "[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\nstale_days = 3\n" + scope
-        self.assertEqual(self._load(good), ReviewConfig(10, 2, 3, 20, 5))
+        good = "[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\nstale_days = 3\nreached_days = 7\n" + scope
+        self.assertEqual(self._load(good), ReviewConfig(10, 2, 3, 20, 5, 7))
+        with self.assertRaisesRegex(ValueError, "reached_days"):
+            self._load(good.replace("reached_days = 7\n", ""))
+        with self.assertRaisesRegex(ValueError, "reached_days"):
+            self._load(good.replace("reached_days = 7", "reached_days = 0"))
         with self.assertRaisesRegex(ValueError, "sweep_top"):
             self._load(good + "sweep_top = 1\n")
         with self.assertRaisesRegex(ValueError, r"\[needs_you\] is missing"):
@@ -125,7 +130,7 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale_days"):
             self._load(good.replace("stale_days = 3", "stale_days = -1"))
         with self.assertRaisesRegex(ValueError, "stale_days"):
-            self._load("[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\n" + scope)
+            self._load("[sweep]\nsponsorship_top_n = 10\nplanned_days = 2\nreached_days = 7\n" + scope)
         with self.assertRaisesRegex(ValueError, "sponsorship_top_n"):
             self._load(good.replace("sponsorship_top_n = 10", "sponsorship_top_n = 1.5"))
 

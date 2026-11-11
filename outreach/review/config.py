@@ -6,7 +6,7 @@ from pathlib import Path
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
 _SECTIONS = {
-    "sweep": ("sponsorship_top_n", "planned_days", "stale_days"),
+    "sweep": ("sponsorship_top_n", "planned_days", "stale_days", "reached_days"),
     "needs_you": ("crawler_scope_top", "crawler_cap_per_run"),
 }
 
@@ -18,6 +18,7 @@ class ReviewConfig:
     stale_days: int
     crawler_scope_top: int = 150
     crawler_cap_per_run: int = 10
+    reached_days: int = 14
 
 
 def load_review_config(path: Path | str | None = None) -> ReviewConfig:

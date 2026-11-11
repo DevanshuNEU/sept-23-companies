@@ -96,9 +96,11 @@ describe('LinkedIn replies', () => {
     expect(row('Ethan Wu')).toHaveTextContent('No email found');
   });
 
-  it('points to Today\'s plan in one line', async () => {
+  it('points to Jobs, where he picks the companies to reach, in one line', async () => {
     await setup();
-    expect(screen.getByRole('link', { name: "Today's plan" })).toHaveAttribute('href', '/today');
+    expect(screen.getByText(/^You pick the companies to reach on/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Jobs' })).toHaveAttribute('href', '/browse');
+    expect(screen.queryByRole('link', { name: "Today's plan" })).toBeNull();
   });
 
   it('says so when nobody has replied yet', async () => {

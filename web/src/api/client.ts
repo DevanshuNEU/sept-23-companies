@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult, CheckNowResult, CheckStatus } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -93,8 +93,10 @@ export interface OutreachClient {
   jobs(params: JobsParams): Promise<JobsView>;
   /** Pass hides one posting, never its company; the same request id answers the same. */
   passJob(postingId: Id, o: WriteOptions): Promise<PassJobResult>;
-  /** Go ahead puts the posting's company on today's list as his own pick. 'not_allowed' says why not (a no-go company, one already on the list, someone contacted and waiting). */
-  goAhead(postingId: Id, o: WriteOptions): Promise<GoAheadResult>;
+  /** Done (#195): marks the posting's company as reached, even when he reached it outside Knock. Nothing else stops it; Done again on a marked company writes nothing. */
+  markReached(postingId: Id, o: WriteOptions): Promise<DoneResult>;
+  /** Takes his Done mark back (the company page's Undo). A company with no mark answers `cleared: false`. */
+  clearReached(companyId: Id, o: WriteOptions): Promise<ClearDoneResult>;
   /** Check now (#194): records the request and starts the crawl job; a check already waiting or running is only reported. */
   checkNow(o: WriteOptions): Promise<CheckNowResult>;
   /** How the check is going (never cached): the page polls it every second while it is queued or running. */

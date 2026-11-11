@@ -238,6 +238,16 @@ class RealToolsTest(unittest.TestCase):
             self.assertLessEqual(len(spec.description), 600, spec.name)
             self.assertFalse(any(c in spec.description for c in (chr(0x2013), chr(0x2014))), spec.name)
 
+    def test_no_description_and_no_skill_step_waits_on_a_daily_list(self):
+        # First to see (#9, 2026-11-10): he picks companies on Jobs, from every board, so the cold-email skill finds
+        # any company with `company`, not the ranking's top 60.
+        ranked = next(s for s in server.tool_specs() if s.name == "ranked_companies")
+        self.assertNotIn("Today", ranked.description)
+        skill = (ROOT / ".claude" / "skills" / "cold-email" / "SKILL.md").read_text(encoding="utf-8")
+        step = skill[skill.index("1. **Inputs.**"):skill.index("2. **Role.**")]
+        self.assertIn("`company`", step)
+        self.assertNotIn("ranked_companies", step)
+
     def test_instructions_state_the_limits_point_at_the_skill_and_use_no_dashes(self):
         text = server.INSTRUCTIONS
         self.assertLessEqual(len(text), 2100)

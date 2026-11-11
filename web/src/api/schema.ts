@@ -89,6 +89,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/reached/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Reached
+         * @description Take back his Done mark. A company with no mark answers `cleared: false` and writes nothing.
+         */
+        post: operations["clear_reached"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/release-hold": {
         parameters: {
             query?: never;
@@ -354,7 +374,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs/{posting_id}/go-ahead": {
+    "/api/jobs/{posting_id}/done": {
         parameters: {
             query?: never;
             header?: never;
@@ -363,8 +383,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Go Ahead */
-        post: operations["go_ahead"];
+        /**
+         * Done
+         * @description Done: his mark that the posting's company has been reached. Undo is `/api/companies/{companyId}/reached/clear`.
+         */
+        post: operations["done"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1485,6 +1508,13 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ClearDoneResult */
+        ClearDoneResult: {
+            /** Cleared */
+            cleared: boolean;
+            /** Companyid */
+            companyId: number;
+        };
         /** CloseCompanyBody */
         CloseCompanyBody: {
             /**
@@ -1925,6 +1955,17 @@ export interface components {
             repliesThisMonth: number;
             replyRate: components["schemas"]["ReplyRate"];
         };
+        /** DoneResult */
+        DoneResult: {
+            /** Companyid */
+            companyId: number;
+            /** Postingid */
+            postingId: number;
+            /** Reachedon */
+            reachedOn: string;
+            /** Text */
+            text: string;
+        };
         /** DoneView */
         DoneView: {
             /** Asof */
@@ -2099,26 +2140,6 @@ export interface components {
             knockKnowsCompany: boolean;
             /** Listings */
             listings: number;
-        };
-        /** GoAheadResult */
-        GoAheadResult: {
-            /** Companyid */
-            companyId: number;
-            /** Entryid */
-            entryId: number | null;
-            /** Listdate */
-            listDate: string;
-            /** Postingid */
-            postingId: number;
-            /** Rank */
-            rank: number | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "added" | "requested";
-            /** Text */
-            text: string;
         };
         /** HealthBoards */
         HealthBoards: {
@@ -2311,7 +2332,8 @@ export interface components {
         };
         /**
          * JobWriteBody
-         * @description The body of Pass and Go ahead: nothing. The page's `Idempotency-Key` header is the write's key.
+         * @description The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's
+         *     key.
          */
         JobWriteBody: Record<string, never>;
         /** JobsView */
@@ -4785,6 +4807,95 @@ export interface operations {
             };
         };
     };
+    clear_reached: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearDoneResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     release_hold: {
         parameters: {
             query?: never;
@@ -5962,7 +6073,7 @@ export interface operations {
             };
         };
     };
-    go_ahead: {
+    done: {
         parameters: {
             query?: never;
             header?: never;
@@ -5983,7 +6094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GoAheadResult"];
+                    "application/json": components["schemas"]["DoneResult"];
                 };
             };
             /** @description bad_request: the request was not valid */

@@ -244,7 +244,7 @@ def ranked_companies(ctx: Ctx, args: RankedInput) -> dict:
 # ---------------------------------------------------------------------------------------------- company
 
 class CompanyInput(Input):
-    company_id: int = Field(ge=1, le=MAX_ID, description="A company id from ranked_companies or person.")
+    company_id: int = Field(ge=1, le=MAX_ID, description="A company id from contact_check, person or ranked_companies.")
 
 
 def fact_text(fact: str, value: str) -> str:
@@ -466,9 +466,9 @@ def followups_due(ctx: Ctx, args: FollowupsInput) -> dict:
 
 TOOLS = (
     ToolSpec("ranked_companies",
-             "Today's companies until the people plan exists: the latest ranking's companies that have a lane, no "
-             "live touch, no active no-go and no hold, best first. Each has its rank reason and confidence, the role "
-             "to name and the people already known.", RankedInput, ranked_companies),
+             "The latest ranking's companies that have a lane, no live touch, no active no-go and no hold, best "
+             "first. Each has its rank reason and confidence, the role to name and the people already known. Not a "
+             "list of what to work on: he picks companies on Jobs.", RankedInput, ranked_companies),
     ToolSpec("company",
              "One company (a merged id answers as its survivor): facts with their confidence, open postings (no "
              "bodies), people and their email status, an active no-go, open review items and its rank.",

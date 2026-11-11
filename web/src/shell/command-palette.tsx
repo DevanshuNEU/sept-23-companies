@@ -6,11 +6,9 @@ import {
   Award,
   Briefcase,
   Building2,
-  CalendarCheck,
   ChartColumn,
   CircleAlert,
   CircleCheck,
-  Copy,
   Keyboard,
   Moon,
   Pause,
@@ -22,7 +20,6 @@ import {
   User,
   type LucideIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import {
   queryKeys,
   useClient,
@@ -40,7 +37,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd } from '@/components/ui/kbd';
 import { useHotkeys } from '@/keyboard/hotkeys';
-import { formatDueDay } from '@/lib/format';
 import { usePendingWrite, useViewQuery, type Patch } from '@/pending/pending';
 import { useTheme } from '@/theme/theme';
 import { useRecentCompanies } from './recent';
@@ -133,7 +129,7 @@ const POSTING_DEBOUNCE_MS = 120;
 const POSTING_MIN_CHARS = 3;
 
 const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = [
-  { name: 'Today', path: '/today', icon: CalendarCheck, keys: 'g t' },
+  { name: 'Jobs', path: '/browse', icon: Telescope, keys: 'g b' },
   { name: 'Outbox', path: '/outbox', icon: Send, keys: 'g o' },
   { name: 'LinkedIn replies', path: '/linkedin', icon: Activity, keys: 'g l' },
   { name: 'Needs you', path: '/needs-you', icon: CircleAlert, keys: 'g n' },
@@ -141,7 +137,6 @@ const VIEWS: { name: string; path: string; icon: LucideIcon; keys: string }[] = 
   { name: 'Done companies', path: '/done', icon: CircleCheck, keys: 'g d' },
   { name: 'Progress', path: '/progress', icon: ChartColumn, keys: 'g p' },
   { name: 'Wins', path: '/wins', icon: Award, keys: 'g w' },
-  { name: 'Jobs', path: '/browse', icon: Telescope, keys: 'g b' },
   { name: 'Pipeline', path: '/pipeline', icon: Workflow, keys: 'g i' },
 ];
 
@@ -196,7 +191,6 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
 
   const index = useViewQuery(queryKeys.search, () => client.searchIndex());
   const shell = useViewQuery(queryKeys.shell, () => client.shell());
-  const today = useViewQuery(queryKeys.today, () => client.today());
   const postings = useViewQuery([...queryKeys.search, 'postings', debounced], () => findPostings(client, debounced));
 
   const ranked = useMemo(
@@ -261,35 +255,8 @@ function PaletteBody({ close, showKeys }: { close: () => void; showKeys: () => v
       run: () => theme.toggle(),
     },
     { id: 'keys', label: 'Keyboard shortcuts', sub: 'Every key in one sheet', icon: Keyboard, run: showKeys },
-    {
-      id: 'copy',
-      label: 'Copy picks for Claude',
-      sub: "Today's picks as text",
-      icon: Copy,
-      run: () => void copyPicks(),
-    },
   );
   const shownActions = actions.filter((a) => wanted(`${a.label} ${a.sub}`));
-
-  async function copyPicks() {
-    try {
-      const view = today.data ?? (await client.today());
-      const picked = [...view.proposed, ...view.backlog].filter((e) => e.state === 'picked');
-      if (picked.length === 0) {
-        toast('No picks yet. Nothing was copied.');
-        return;
-      }
-      const lines = picked.map((e) => {
-        const domain = e.company.domain ? ` (${e.company.domain})` : '';
-        const role = e.role ? `${e.role.title}, ${e.role.location}` : 'no role named yet';
-        return `- ${e.company.name}${domain}: ${role}`;
-      });
-      await navigator.clipboard.writeText(`Picks for ${formatDueDay(view.date)}, ${picked.length} of ${view.capacity}:\n${lines.join('\n')}`);
-      toast('Copied');
-    } catch {
-      toast.error('Could not copy the picks. Nothing was changed. Try again.');
-    }
-  }
 
   // Where Enter goes for each row. The company page is the default; mod+Enter opens the Outbox filtered to it.
   const rows = new Map<string, { open: string; companyId: Id | null }>();

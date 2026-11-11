@@ -1,8 +1,8 @@
 import { expect, test } from './fixtures';
 
-test('g then d from Today lands on Done', async ({ page, consoleErrors }) => {
-  await page.goto('/today');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today' })).toBeVisible();
+test('g then d from Jobs lands on Done', async ({ page, consoleErrors }) => {
+  await page.goto('/browse');
+  await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
   await page.keyboard.press('g');
   await page.keyboard.press('d');
   await expect(page).toHaveURL(/\/done$/);

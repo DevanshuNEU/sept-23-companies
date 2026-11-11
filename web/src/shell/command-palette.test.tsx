@@ -31,7 +31,7 @@ async function shell(opts: { route?: string; client?: FixtureClient; run?: () =>
       <Where />
       <View run={opts.run ?? (() => {})} />
     </>,
-    { route: opts.route ?? '/today', client: opts.client ?? new FixtureClient() },
+    { route: opts.route ?? '/browse', client: opts.client ?? new FixtureClient() },
   );
   await ready();
   return view;
@@ -377,20 +377,16 @@ describe('CommandPalette', () => {
     }
   });
 
-  it('copies the picks for Claude', async () => {
+  it('has no Today view and no Copy picks action, now that Today is gone', async () => {
     const user = userEvent.setup();
-    const client = new FixtureClient();
-    await shell({ client });
+    await shell();
     press('/');
     await palette();
+    await user.type(search(), 'today');
+    expect(screen.queryByRole('option', { name: /Go to Today/ })).toBeNull();
+    await user.clear(search());
     await user.type(search(), 'copy');
-    await user.click(await screen.findByRole('option', { name: /Copy picks for Claude/ }));
-    expect(await screen.findByText('Copied')).toBeInTheDocument();
-    const text = await navigator.clipboard.readText();
-    const today = await client.today();
-    const picked = today.proposed.filter((e) => e.state === 'picked');
-    expect(picked.length).toBeGreaterThan(0);
-    for (const entry of picked) expect(text).toContain(entry.company.name);
+    expect(screen.queryByRole('option', { name: /Copy picks/ })).toBeNull();
   });
 
   it('says so when nothing matches', async () => {
@@ -436,7 +432,8 @@ describe('ShortcutSheet', () => {
     expect(within(sheet).getByRole('heading', { name: 'Everywhere' })).toBeInTheDocument();
     expect(within(sheet).getByRole('heading', { name: 'Outbox' })).toBeInTheDocument();
     expect(within(sheet).getByText('Approve this email')).toBeInTheDocument();
-    expect(within(sheet).getByText('Go to Today')).toBeInTheDocument();
+    expect(within(sheet).getByText('Go to Jobs')).toBeInTheDocument();
+    expect(within(sheet).queryByText('Go to Today')).toBeNull();
     expect(within(sheet).getByText('Search and commands')).toBeInTheDocument();
   });
 

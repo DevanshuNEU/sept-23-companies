@@ -4,7 +4,7 @@ import type { Transport } from './transport';
 
 /**
  * The company writes: pause, resume, release a reply's hold, close and reopen (`POST /api/companies/{id}/...`, each with the company's
- * revision), and a person's role kind (`POST /api/people/{id}/role-kind`). Pause, close and reopen answer with the
+ * revision), the undo of Done on the job list (`/reached/clear`, no revision: his mark is an event), and a person's role kind (`POST /api/people/{id}/role-kind`). Pause, close and reopen answer with the
  * new revision, which the page reads back on its refetch; resume says how many emails were waiting.
  */
 export const companyWriteMethods = (t: Transport): LiveMethods => ({
@@ -25,6 +25,7 @@ export const companyWriteMethods = (t: Transport): LiveMethods => ({
   reopenCompany: async (companyId, revision, o) => {
     await sendJson(t, 'post', '/api/companies/{company_id}/reopen', { revision }, o, { params: { company_id: companyId } });
   },
+  clearReached: (companyId, o) => sendJson(t, 'post', '/api/companies/{company_id}/reached/clear', {}, o, { params: { company_id: companyId } }),
   setRoleKind: (personId, kind, revision, o) =>
     sendJson(t, 'post', '/api/people/{person_id}/role-kind', { kind, revision }, o, { params: { person_id: personId } }),
 });

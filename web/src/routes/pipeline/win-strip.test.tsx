@@ -7,8 +7,7 @@ import { buildFixture, type FixtureDb, type Scenario } from '@/api/fixture/data'
 import { useLocation } from 'react-router';
 import { AppShell } from '@/shell/app-shell';
 import { renderWithApp } from '@/test/render';
-import TodayPage from './index';
-import PipelinePage from '../pipeline/index';
+import PipelinePage from './index';
 
 const press = (key: string) => fireEvent.keyDown(document.body, { key });
 
@@ -18,7 +17,7 @@ const leavePage = () =>
     window.dispatchEvent(new Event('pagehide'));
   });
 
-type Open = { db?: FixtureDb; scenario?: Scenario; queryClient?: QueryClient; page?: 'today' | 'pipeline' };
+type Open = { db?: FixtureDb; scenario?: Scenario; queryClient?: QueryClient };
 
 async function open(o: Open = {}) {
   const db = o.db ?? buildFixture(o.scenario ?? 'win');
@@ -27,7 +26,7 @@ async function open(o: Open = {}) {
   const view = renderWithApp(
     <>
       <AppShell />
-      {o.page === 'pipeline' ? <PipelinePage /> : <TodayPage />}
+      <PipelinePage />
     </>,
     { client, queryClient },
   );
@@ -74,7 +73,7 @@ describe('WinStrip', () => {
     renderWithApp(
       <>
         <AppShell />
-        <TodayPage />
+        <PipelinePage />
         <Where />
       </>,
       { client },
@@ -89,21 +88,21 @@ describe('WinStrip', () => {
     expect(strip()).toBeInTheDocument();
   });
 
-  it('shows an unseen win on top of Today, as a status, with its line, its time and the way to the win log', async () => {
+  it('shows an unseen win on top of the Pipeline page, as a status, with its line, its time and the way to the win log', async () => {
     await open();
     const el = await screen.findByRole('status', { name: NAME });
     expect(within(el).getByText(DANA)).toBeInTheDocument();
     expect(within(el).getByText('9:41')).toBeInTheDocument();
     expect(within(el).getByRole('link', { name: 'Open the win log' })).toHaveAttribute('href', '/wins');
     expect(el).toHaveAttribute('aria-live', 'polite');
-    // Above everything: the date heading of the plan comes after it.
-    const heading = await screen.findByRole('heading', { level: 2, name: 'Tuesday, November 10' });
+    // Above everything: the page's heading comes after it.
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Pipeline' });
     expect(el.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('shows nothing when no win is unseen', async () => {
     await open({ scenario: 'default' });
-    await screen.findByRole('heading', { level: 2, name: 'Tuesday, November 10' });
+    await screen.findByRole('heading', { level: 1, name: 'Pipeline' });
     await act(() => new Promise((r) => setTimeout(r, 30)));
     expect(maybeStrip()).not.toBeInTheDocument();
   });
@@ -171,7 +170,7 @@ describe('WinStrip', () => {
   });
 
   it('undoing an accept inside the window removes its win with it', async () => {
-    const { client } = await open({ scenario: 'default', page: 'pipeline' });
+    const { client } = await open({ scenario: 'default' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     const log = vi.spyOn(client, 'logOutcome');
     press('1');
@@ -183,7 +182,7 @@ describe('WinStrip', () => {
   });
 
   it('an accept that is kept arrives as a win once it is committed, and plays the entrance once', async () => {
-    await open({ scenario: 'default', page: 'pipeline' });
+    await open({ scenario: 'default' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     expect(maybeStrip()).not.toBeInTheDocument();
     press('1');
@@ -210,7 +209,7 @@ describe('WinStrip', () => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(() => false),
     }));
-    await open({ scenario: 'default', page: 'pipeline' });
+    await open({ scenario: 'default' });
     await screen.findByRole('region', { name: /Last week, what happened/ });
     press('1');
     await leavePage();

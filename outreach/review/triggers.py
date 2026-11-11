@@ -22,7 +22,7 @@ from outreach.review import words
 from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import clear_item, decided_before, raise_item, unit
 from outreach.review.merge import follow_merge_questions
-from outreach.review.play import emailing, in_play, live_company_ids, ny_date, recent_list_date
+from outreach.review.play import emailing, in_play, live_company_ids, ny_date
 from outreach.review.scope import clear_out_of_scope, ranked_ids
 from outreach.rules import Decision, passes, ruleset_version
 from outreach.rules.rebuild import stored_decision
@@ -94,7 +94,7 @@ def sync_size_unknown(conn: sqlite3.Connection, *, now: str, company_ids: Collec
     clears. A `size` row of any confidence counts, so a guess means the size is known here (the ranker's
     `size_guess` covers guesses)."""
     cfg = cfg or load_review_config()
-    play = in_play(conn, today=ny_date(now), planned_days=cfg.planned_days)
+    play = in_play(conn, today=ny_date(now), planned_days=cfg.planned_days, reached_days=cfg.reached_days)
     return _sync(conn, now=now, scope=_scope(company_ids), kind="size_unknown", raised_by="daily_list",
                  key="no-size", want=play, have=_owners_with(conn, ("size", "headcount")),
                  reason=words.size_reason, cleared_note="A size is on file now.")
@@ -169,7 +169,7 @@ def sync_sponsorship(conn: sqlite3.Connection, *, now: str, company_ids: Collect
     if conn.execute("SELECT 1 FROM decision WHERE ruleset_version = ? LIMIT 1", (version,)).fetchone() is None:
         return SyncResult(0, 0, "no decisions under the current ruleset")
     scope = _scope(company_ids)
-    play = in_play(conn, today=ny_date(now), planned_days=cfg.planned_days)
+    play = in_play(conn, today=ny_date(now), planned_days=cfg.planned_days, reached_days=cfg.reached_days)
     top = _top_company_ids(conn, cfg.sponsorship_top_n)
     in_scope = live_company_ids(conn) & (set(play) | top)
     canon = canonical_ids(conn)
@@ -263,7 +263,7 @@ _GONE_QUERIES = (
 )
 # The producers this sweep answers for, and the kind each raises: only these go stale.
 _STALE_PRODUCERS = (("size_unknown", "daily_list"), ("domain_missing", "sender"), ("sponsorship_unclear", "rules"))
-_STALE_NOTE = "No longer in your plan."
+_STALE_NOTE = "Not a company you are working on now."
 
 
 # The reason #31's `raise_merge_candidate` writes for a pair joined only by a domain (basis `domain`, or
@@ -319,15 +319,14 @@ def clear_gone(conn: sqlite3.Connection, *, now: str, company_ids: Collection[in
 
 
 def _stale(conn: sqlite3.Connection, now: str, cfg: ReviewConfig,
-           scope: set[int] | None) -> tuple[Counter | None, list[str]]:
+           scope: set[int] | None) -> tuple[Counter, list[str]]:
     """Clear this plan's items that are old and out of play. Returns the counts by kind and the steps it held back.
 
-    The counts are None when it did not run for want of a recent list. Old sponsorship items are held (nothing
+    It runs with or without a recent daily list: since the first to see ruling (#9, 2026-11-10) no list is built,
+    and `in_play` reads his Done marks and his recent touches as well. Old sponsorship items are held (nothing
     cleared for them, one note in the second value) when the ranked list is empty: the top-N is then unknown, and
     "not in the top" read from missing input is not a reason to clear."""
     today = ny_date(now)
-    if recent_list_date(conn, today, cfg.planned_days) is None:
-        return None, []
     cutoff = (datetime.fromisoformat(now.replace("Z", "+00:00")) - timedelta(days=cfg.stale_days)
               ).astimezone(timezone.utc).strftime(ISO_FMT)
     pairs = " OR ".join("(kind = ? AND raised_by = ?)" for _ in _STALE_PRODUCERS)
@@ -339,7 +338,7 @@ def _stale(conn: sqlite3.Connection, now: str, cfg: ReviewConfig,
     notes: list[str] = []
     if not old:
         return by_kind, notes
-    play = in_play(conn, today=today, planned_days=cfg.planned_days)
+    play = in_play(conn, today=today, planned_days=cfg.planned_days, reached_days=cfg.reached_days)
     mailing = emailing(conn, today=today, planned_days=cfg.planned_days)
     top = _top_company_ids(conn, cfg.sponsorship_top_n) if any(
         r["kind"] == "sponsorship_unclear" for r in old) else set()
@@ -363,11 +362,11 @@ def clear_stale(conn: sqlite3.Connection, *, now: str, cfg: ReviewConfig | None 
                 company_ids: Collection[int] | None = None) -> int:
     """Clear this plan's open items (`rules`, `daily_list`, `sender`) older than `stale_days` whose company is out of
     play (a domain item: not being emailed; a sponsorship item: also not in the top-N, and never while the ranked
-    list is empty), with the note `No longer in your plan.` It runs only when a daily list exists within `planned_days`: with none, a failed plan job would clear
-    everything, so it clears nothing and returns 0 (`sweep_needs_you` says so in its report). Returns how many it
+    list is empty), with the note `Not a company you are working on now.` In play is a recent daily list, his Done marks or a
+    person reached in the last `reached_days` days (`play.in_play`), so it needs no list to run. Returns how many it
     cleared."""
     got, _ = _stale(conn, iso_utc(now), cfg or load_review_config(), _scope(company_ids))
-    return 0 if got is None else sum(got.values())
+    return sum(got.values())
 
 
 @dataclass(frozen=True)
@@ -413,10 +412,7 @@ def sweep_needs_you(conn: sqlite3.Connection, *, now: str | None = None, company
             skipped.append(f"{kind}: {result.skipped}")
     stale, held = _stale(conn, at, cfg, _scope(company_ids))
     skipped.extend(held)
-    if stale is None:
-        skipped.append("stale items: no recent daily list, so nothing was cleared for being out of the plan")
-    else:
-        cleared.update(stale)
+    cleared.update(stale)
     gaps = clear_out_of_scope(conn, now=at, cfg=cfg, company_ids=company_ids)
     if gaps is None:
         skipped.append(f"crawler domain items: no ranked list, so none was cleared for leaving the top "

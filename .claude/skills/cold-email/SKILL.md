@@ -28,10 +28,11 @@ get past.
    one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
    manager, tech lead, head of, VP), founder (founder, CEO, CTO at a small startup), recruiter (recruiter, talent,
    sourcer, people). An alum is still one of these; Northeastern goes in the hook. Find the company with
-   `ranked_companies` (its `company_id`). If it is not listed, tell him and stop. Then `add_people` (`company_id`,
-   up to 10 people: `name`, `title`, `role_kind`, `email`, `linkedin_url`, the paste as `profile_text`). Report each
-   person's `refused` code and `flags` as returned. Done when every person has a `person_id`, or you have asked him
-   for what is missing.
+   `company`: he picks it on Jobs, from any board, so any company in Knock will do. Its `company_id` is the one he
+   gives, or `contact_check` finds it by name (merges followed, a near name asked back). If it is not in Knock, tell
+   him and stop. Then `add_people` (`company_id`, up to 10 people: `name`, `title`, `role_kind`, `email`,
+   `linkedin_url`, the paste as `profile_text`). Report each person's `refused` code and `flags` as returned. Done
+   when every person has a `person_id`, or you have asked him for what is missing.
 2. **Role.** Call `person` for the `person_id`: `role_to_name` is the role to name, and `can_draft_email` with
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes

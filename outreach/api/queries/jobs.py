@@ -52,7 +52,7 @@ SCHEDULED: dict[str, Every | At] = {
     "plan": At(8, 0, weekdays_only=True),
     "prepare": At(5, 30, weekdays_only=True),
 }
-# Run by hand or inside another job (`rank` runs inside `plan`): no expected time, never late.
+# Run by hand or inside another job (`rank` runs inside the sources job's run-due): no expected time, never late.
 UNSCHEDULED = frozenset({
     "install", "rebuild", "crawl", "daily_list", "import", "discover", "resolve", "find_boards", "rank",
 })

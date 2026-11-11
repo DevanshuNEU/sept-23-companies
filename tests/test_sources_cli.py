@@ -450,26 +450,33 @@ class RunDueTest(CliCase):
         self.assertEqual(got, code, f"{out} {err}")
         return json.loads(out)
 
-    def test_run_due_runs_hn_freehire_formd_stapply_resolve_find_boards_and_the_scorecard_in_order(self):
+    def test_run_due_runs_hn_freehire_formd_stapply_resolve_find_boards_rank_and_the_scorecard_in_order(self):
         report = self.due()
         self.assertEqual(list(report["steps"]),
-                         ["hn", "freehire", "formd", "stapply", "resolve", "find_boards", "ats_seed", "scorecard"])
+                         ["hn", "freehire", "formd", "stapply", "resolve", "find_boards", "ats_seed", "rank",
+                          "scorecard"])
         self.assertEqual({k: v["status"] for k, v in report["steps"].items()},
                          {"hn": "ok", "freehire": "ok", "formd": "ok", "stapply": "skipped", "ats_seed": "skipped",
-                          "resolve": "ok", "find_boards": "ok", "scorecard": "ok"})
+                          "resolve": "ok", "find_boards": "ok", "rank": "ok", "scorecard": "ok"})
         self.assertEqual(count(self.conn(), "SELECT count(*) FROM event WHERE kind = 'pipeline_scorecard'"), 1)
         self.assertIn(FREEHIRE_PAGE, self.client.requests)
         self.assertEqual(report["status"], "ok")
         self.assertEqual(self.client.unrouted, [])
         conn = self.conn()
         jobs = [(r["job"], r["status"]) for r in conn.execute("SELECT job, status FROM job_run ORDER BY run_id")]
-        self.assertEqual(jobs[-4:], [("discover", "ok"), ("discover", "ok"), ("resolve", "ok"), ("find_boards", "ok")])
+        self.assertEqual(jobs[-5:], [("discover", "ok"), ("discover", "ok"), ("resolve", "ok"), ("find_boards", "ok"),
+                                     ("rank", "ok")])
+        self.assertEqual(report["steps"]["rank"]["scored"],
+                         count(conn, "SELECT count(*) FROM company_score"))
         self.assertEqual(count(conn, "SELECT count(*) FROM evidence WHERE fact = 'funding'"), 3)
         self.assertEqual(count(conn, "SELECT count(*) FROM board"), 6)  # careers boards included; Zephyr not added
         self.assertEqual((self.sources / "formd" / "last_read.txt").read_text(encoding="utf-8").strip(), "2026q3")
         self.assertTrue([u for u in self.client.requests if u.endswith("/careers")])  # careers checks were on
 
     def test_a_later_run_the_same_month_rereads_hn_and_writes_nothing_new(self):
+        self.due()
+        # The first run ranks after find-boards, so only the second sees the scores and raises the data-gap items of
+        # the top companies (review/triggers); after that a run writes nothing new.
         self.due()
         conn = self.conn()
         before = (count(conn, "SELECT count(*) FROM company"), count(conn, "SELECT count(*) FROM evidence"),
@@ -587,7 +594,18 @@ class RunDueTest(CliCase):
         self.assertEqual(self.marker.read_text(encoding="utf-8").strip(), "2026-10-01T06:30:00Z")  # asked again
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "stapply"},
                          {"hn": "ok", "freehire": "ok", "formd": "ok", "ats_seed": "skipped", "resolve": "ok",
-                          "find_boards": "ok", "scorecard": "ok"})
+                          "find_boards": "ok", "rank": "ok", "scorecard": "ok"})
+
+    def test_a_failed_rank_is_that_steps_error_and_the_scorecard_still_runs(self):
+        # Final review, important 2: with the 08:00 plan off, run-due is the ranker's one runner (#9 first to see).
+        with mock.patch("outreach.ranking.job.run_rank", side_effect=RuntimeError("ranker broke")):
+            report = self.due(code=1)
+        self.assertEqual(report["steps"]["rank"]["status"], "failed")
+        self.assertIn("ranker broke", report["steps"]["rank"]["error"])
+        self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "rank"},
+                         {"hn": "ok", "freehire": "ok", "formd": "ok", "stapply": "skipped", "ats_seed": "skipped",
+                          "resolve": "ok", "find_boards": "ok", "scorecard": "ok"})
+        self.assertEqual(report["status"], "failed")
 
     def test_formd_is_skipped_until_a_newer_set_is_out(self):
         folder = self.sources / "formd"
@@ -607,7 +625,7 @@ class RunDueTest(CliCase):
         self.assertEqual(report["steps"]["hn"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "hn"},
                          {"freehire": "ok", "formd": "ok", "stapply": "skipped", "ats_seed": "skipped",
-                          "resolve": "ok", "find_boards": "ok", "scorecard": "ok"})
+                          "resolve": "ok", "find_boards": "ok", "rank": "ok", "scorecard": "ok"})
         self.assertEqual(report["status"], "failed")
 
     def test_a_failed_freehire_step_exits_1_and_every_other_step_still_runs(self):
@@ -618,7 +636,7 @@ class RunDueTest(CliCase):
         self.assertEqual(report["steps"]["freehire"]["status"], "failed")
         self.assertEqual({k: v["status"] for k, v in report["steps"].items() if k != "freehire"},
                          {"hn": "ok", "formd": "ok", "stapply": "skipped", "ats_seed": "skipped", "resolve": "ok",
-                          "find_boards": "ok", "scorecard": "ok"})
+                          "find_boards": "ok", "rank": "ok", "scorecard": "ok"})
 
     def test_freehire_off_is_skipped_and_never_asked(self):
         off = dataclasses.replace(load_freehire_config(), enabled=False)

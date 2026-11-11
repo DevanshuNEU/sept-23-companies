@@ -23,6 +23,7 @@ from outreach.crawl.config import load_crawl_config
 from outreach.crawl.polite import PoliteClient
 from outreach.net import FetchError, HttpClient, SpacedClient, UrllibClient
 from outreach.pipeline.scorecard import compute as compute_scorecard, record as record_scorecard
+from outreach.plan.boards import rank_runner
 from outreach.crawl.tick import LOCK_NAME, AlreadyRunning
 from outreach.sources.ats_seed import SEED_ATS, SeedConfig, load_seed_config, run_seed, top_up_due
 from outreach.sources.base import describe_error
@@ -242,7 +243,8 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
     few days (#115; skipped when `enabled = false` in freehire.toml), Form D when SEC has a newer data set, the stapply
     lists weekly, then resolve and find-boards, the ATS seed's weekly top-up (#192: only once a full `seed-ats` has
     run, at most `weekly_limit` boards; skipped when `enabled = false` in ats_seed.toml or while the crawler holds
-    its lock), and last the pipeline scorecard (#153).
+    its lock), the ranker (`outreach.ranking.job.run_rank`, its one scheduled runner since the 08:00 plan is off,
+    first to see #9 2026-11-10), and last the pipeline scorecard (#153).
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -311,6 +313,18 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         status, payload = _find_boards(conn, factory, RUN_DUE_MAX_CAREERS)
         return {"status": status, "run_id": payload["run_id"]}
 
+    def rank() -> dict:
+        ranker = rank_runner()
+        if ranker is None:
+            return {"status": "skipped", "reason": "the ranker does not import"}
+        try:
+            run = ranker(conn)  # records its own `rank` job run
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        return {"status": "ok", "scored": len(run.scored)}
+
     def scorecard_step() -> dict:
         now = utcnow()
         card = compute_scorecard(conn, now)
@@ -319,8 +333,9 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
                 "simplify_coverage": card.simplify_coverage, "level_recall": card.level_recall}
 
     # The seed comes after find-boards, so a company found today has its board first and the seed sees it as known.
+    # The ranker comes after the seed, so a company the seed added today is scored the same day.
     for name, work in (("hn", hn), ("freehire", freehire), ("formd", formd), ("stapply", stapply),
-                       ("resolve", resolve), ("find_boards", find_boards), ("ats_seed", ats_seed),
+                       ("resolve", resolve), ("find_boards", find_boards), ("ats_seed", ats_seed), ("rank", rank),
                        ("scorecard", scorecard_step)):
         step(name, work)
     states = {s["status"] for s in steps.values()}
@@ -349,7 +364,7 @@ Commands:
   run-due                                    what launchd runs daily: this month's HN thread (once it is out),
                                              freehire, Form D (when SEC has a newer quarterly set), the stapply lists
                                              (weekly), resolve, find-boards --max-careers 100, the seed-ats top-up
-                                             (weekly, once a full seed-ats has run), then
+                                             (weekly, once a full seed-ats has run), the ranker, then
                                              the pipeline scorecard (read and stored once a New York day)
 
 LCA is by hand, once a quarter when DOL posts a file: `fetch lca`, then `discover lca`, then `resolve` and

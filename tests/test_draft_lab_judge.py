@@ -119,7 +119,7 @@ class BodyMode(unittest.TestCase):
         text = judge.report(res, seed=1234, mode="body")
         self.assertIn("1234", text)
         self.assertIn("PASS", text)
-        self.assertNotIn("—", text)
+        self.assertNotIn("\u2014", text)
 
 
 class InboxMode(unittest.TestCase):
@@ -157,6 +157,96 @@ class InboxMode(unittest.TestCase):
         self.assertEqual(res.archived_decoy, 1)
         self.assertEqual(res.missing, ["1"])
         self.assertEqual(res.why["0"], "because")
+
+
+class Robustness(unittest.TestCase):
+    def setUp(self):
+        a, b = make_sets()
+        self.pairs, _ = judge.pair_sets(a, b)
+        _, self.key = judge.body_prompt(self.pairs, seed=1)
+        self.ids = [str(i) for i in range(12)]
+        self.helper = BodyMode()
+
+    def full(self):
+        return self.helper._reply(self.key, self.ids)
+
+    def test_malformed_replies_do_not_crash(self):
+        for bad in ({"items": None}, {"items": "x"}, {"items": 5}, {"repeats": "abc"}, [], "x", None,
+                    {"items": [3, None, "s"]}):
+            res = judge.score_body(bad, self.key, self.pairs)
+            self.assertEqual(judge.verdict(res), "INCOMPLETE")
+            judge.report(res, seed=1, mode="body")
+        res = judge.score_body({"repeats": "abc"}, self.key, self.pairs)
+        self.assertEqual(res.repeats, [])
+        inbox_pairs, _ = judge.pair_sets([d(0)], [d(0, subject="Z")])
+        _, ikey = judge.inbox_prompt(inbox_pairs, seed=1, decoys=judge.load_decoys())
+        for bad in ({"items": [{"id": "0", "open": None}]}, {"items": [{"id": "0", "open": 3}]}, [], {"items": [5]},
+                    {"items": [{"id": "0", "open": [1], "never": 4}]}):
+            res = judge.score_inbox(bad, ikey)
+            self.assertEqual(res.items, 0)
+            judge.report(res, seed=1, mode="inbox")
+
+    def test_missing_items_make_the_verdict_incomplete(self):
+        reply = self.full()
+        reply["items"] = reply["items"][:6]
+        res = judge.score_body(reply, self.key, self.pairs)
+        self.assertEqual(judge.verdict(res), "INCOMPLETE")
+        self.assertIn("6 missing", judge.report(res, seed=1, mode="body"))
+
+    def test_partial_scores_are_malformed_not_averaged(self):
+        reply = self.full()
+        lab = "B" if self.key["0"]["B"] == "b" else "A"
+        reply["items"][0]["human"] = {lab: 7}
+        res = judge.score_body(reply, self.key, self.pairs)
+        self.assertEqual(res.malformed, ["0"])
+        self.assertEqual(res.compared, 11)
+        self.assertEqual(judge.verdict(res), "INCOMPLETE")
+        reply = self.full()
+        reply["items"][1]["best"] = "C"
+        self.assertEqual(judge.score_body(reply, self.key, self.pairs).malformed, ["1"])
+        reply = self.full()
+        reply["items"][2]["reply"] = {"A": "high", "B": 3}
+        self.assertEqual(judge.score_body(reply, self.key, self.pairs).malformed, ["2"])
+
+    def test_duplicate_open_rows_and_why_whitespace(self):
+        inbox_pairs, _ = judge.pair_sets([d(0)], [d(0, subject="Z")])
+        _, ikey = judge.inbox_prompt(inbox_pairs, seed=1, decoys=judge.load_decoys())
+        a_row = next(int(r) for r, w in ikey["0"].items() if w == "a")
+        res = judge.score_inbox({"items": [{"id": "0", "open": [a_row, a_row, a_row], "never": [],
+                                            "why": "x\n- y   z"}]}, ikey)
+        self.assertEqual(res.opened_a, 1)
+        self.assertEqual(res.why["0"], "x - y z")
+
+
+class KeyMatchesWhatIsShown(unittest.TestCase):
+    def test_body_key_maps_labels_to_the_right_set(self):
+        a = [d(i, subject="alpha %d" % i, body="Hi Sam,\n\nalpha body %d" % i) for i in range(12)]
+        b = [d(i, subject="beta %d" % i, body="Hi Sam,\n\nbeta body %d" % i) for i in range(12)]
+        pairs, _ = judge.pair_sets(a, b)
+        text, key = judge.body_prompt(pairs, seed=9)
+        payload = json.loads(text.split("ITEMS", 1)[1])
+        sets = {"a": {x.id: x for x in a}, "b": {x.id: x for x in b}}
+        for it in payload:
+            for label in ("A", "B"):
+                src = sets[key[it["id"]][label]][it["id"]]
+                self.assertEqual(it["versions"][label]["body"], src.body)
+                self.assertEqual(it["versions"][label]["subject"], src.subject)
+
+    def test_inbox_key_maps_rows_to_the_right_set(self):
+        a = [d(i, subject="alpha %d" % i) for i in range(6)]
+        b = [d(i, subject="beta %d" % i) for i in range(6)]
+        pairs, _ = judge.pair_sets(a, b)
+        decoys = judge.load_decoys()
+        text, key = judge.inbox_prompt(pairs, seed=9, decoys=decoys)
+        payload = json.loads(text.split("ITEMS", 1)[1])
+        decoy_subjects = {x["subject"] for x in decoys}
+        for it in payload:
+            for row in it["inbox"]:
+                src = key[it["id"]][row["row"]]
+                if src == "decoy":
+                    self.assertIn(row["subject"], decoy_subjects)
+                else:
+                    self.assertEqual(row["subject"], ("alpha " if src == "a" else "beta ") + it["id"])
 
 
 if __name__ == "__main__":

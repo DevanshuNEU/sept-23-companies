@@ -128,6 +128,21 @@ def _num(v):
         return None
 
 
+def _list(v) -> list:
+    return v if isinstance(v, list) else []
+
+
+def _items(reply) -> dict:
+    """Items of a reply keyed by id. A non-dict reply, a non-list "items" and non-dict items give nothing."""
+    if not isinstance(reply, dict):
+        return {}
+    return {str(it.get("id")): it for it in _list(reply.get("items")) if isinstance(it, dict)}
+
+
+def _clean(text) -> str:
+    return " ".join(str(text).split())
+
+
 @dataclass
 class BodyResult:
     compared: int = 0
@@ -138,14 +153,18 @@ class BodyResult:
     avg_a: dict = field(default_factory=dict)
     avg_b: dict = field(default_factory=dict)
     missing: list = field(default_factory=list)
+    malformed: list = field(default_factory=list)
     why: dict = field(default_factory=dict)
     repeats: list = field(default_factory=list)
 
 
-def score_body(reply: dict, key: dict, pairs) -> BodyResult:
+def score_body(reply, key: dict, pairs) -> BodyResult:
+    """Score a reply. An item missing from the reply goes in `missing`; an item with a non-numeric or absent score
+    or an invalid "best" goes in `malformed` and counts nowhere else. Averages use only items where A and B are
+    both numeric for that metric, so both sets are averaged over the same items."""
     res = BodyResult()
     ties = {x.id for x, y in pairs if _is_tie(x, y)}
-    got = {str(it.get("id")): it for it in reply.get("items", []) if isinstance(it, dict)}
+    got = _items(reply)
     sums = {"a": {m: [] for m in METRICS}, "b": {m: [] for m in METRICS}}
     for x, _ in pairs:
         i = x.id
@@ -157,32 +176,42 @@ def score_body(reply: dict, key: dict, pairs) -> BodyResult:
         if it is None or i not in key:
             res.missing.append(i)
             continue
-        res.compared += 1
         best = key[i].get(str(it.get("best", "")).strip().upper())
+        scored = {}
+        for m in METRICS:
+            sc = it.get(m)
+            va, vb = (_num(sc.get("A")), _num(sc.get("B"))) if isinstance(sc, dict) else (None, None)
+            if va is None or vb is None:
+                scored = None
+                break
+            scored[m] = (va, vb)
+        if best not in ("a", "b") or scored is None:
+            res.malformed.append(i)
+            continue
+        res.compared += 1
         if best == "a":
             res.wins_a += 1
-        elif best == "b":
+        else:
             res.wins_b += 1
-        for m in METRICS:
-            scores = it.get(m) or {}
-            for lab in ("A", "B"):
-                v = _num(scores.get(lab)) if isinstance(scores, dict) else None
-                if v is not None:
-                    sums[key[i][lab]][m].append(v)
-        res.why[i] = str(it.get("why", ""))
+        for m, (va, vb) in scored.items():
+            for lab, v in (("A", va), ("B", vb)):
+                sums[key[i][lab]][m].append(v)
+        res.why[i] = _clean(it.get("why", ""))
     for src, out in (("a", res.avg_a), ("b", res.avg_b)):
         for m in METRICS:
             vals = sums[src][m]
             out[m] = sum(vals) / len(vals) if vals else 0.0
-    res.repeats = [str(r) for r in reply.get("repeats", [])]
+    res.repeats = [_clean(r) for r in _list(reply.get("repeats"))] if isinstance(reply, dict) else []
     return res
 
 
 def verdict(result: BodyResult) -> str:
-    """PASS when b wins at least two thirds of the compared non-tie items (8 of 12) and b's average scores for
-    "human" and "reply" are not below a's. Otherwise FAIL. No compared items is a FAIL."""
-    if result.compared == 0:
-        return "FAIL"
+    """INCOMPLETE when any item is missing from the reply or malformed (the bar needs every item judged).
+    Otherwise PASS when b wins at least two thirds of the compared non-tie items (8 of 12) and b's average scores
+    for "human" and "reply" are not below a's, else FAIL. No compared items is INCOMPLETE if something was
+    missing or malformed, else FAIL."""
+    if result.missing or result.malformed or result.compared == 0:
+        return "INCOMPLETE" if (result.missing or result.malformed) else "FAIL"
     needed = math.ceil(2 * result.compared / 3)
     ok = (result.wins_b >= needed
           and result.avg_b["human"] >= result.avg_a["human"]
@@ -203,13 +232,15 @@ class InboxResult:
     archived_b: int = 0
     archived_decoy: int = 0
     missing: list = field(default_factory=list)
+    malformed: list = field(default_factory=list)
     why: dict = field(default_factory=dict)
 
 
-def score_inbox(reply: dict, key: dict) -> InboxResult:
-    """Counts per set. A shared "ab" row counts for both a and b."""
+def score_inbox(reply, key: dict) -> InboxResult:
+    """Counts per set. A shared "ab" row counts for both a and b. An item whose "open" or "never" is not a list
+    is `malformed`; repeated rows in "open" count once."""
     res = InboxResult()
-    got = {str(it.get("id")): it for it in reply.get("items", []) if isinstance(it, dict)}
+    got = _items(reply)
 
     def bump(prefix, src):
         for s in ("a", "b") if src == "ab" else (src,):
@@ -221,18 +252,30 @@ def score_inbox(reply: dict, key: dict) -> InboxResult:
         if it is None:
             res.missing.append(i)
             continue
+        if not isinstance(it.get("open"), list) or not isinstance(it.get("never", []), list):
+            res.malformed.append(i)
+            continue
         res.items += 1
-        opened = [str(r) for r in it.get("open", [])][:3]
+        opened = list(dict.fromkeys(str(r) for r in it["open"]))[:3]
         for n, r in enumerate(opened):
             if r in rows:
                 bump("opened", rows[r])
                 if n == 0:
                     bump("first", rows[r])
-        for r in (str(r) for r in it.get("never", [])):
+        for r in dict.fromkeys(str(r) for r in it.get("never", [])):
             if r in rows:
                 bump("archived", rows[r])
-        res.why[i] = str(it.get("why", ""))
+        res.why[i] = _clean(it.get("why", ""))
     return res
+
+
+def _problems(r) -> list:
+    out = []
+    if r.missing:
+        out += ["", f"Missing from the reply ({len(r.missing)}): " + ", ".join(r.missing)]
+    if r.malformed:
+        out += ["", f"Malformed items ({len(r.malformed)}): " + ", ".join(r.malformed)]
+    return out
 
 
 def report(result, *, seed: int, mode: str) -> str:
@@ -245,13 +288,15 @@ def report(result, *, seed: int, mode: str) -> str:
             lines += ["Identical in both sets (a tie, counted for neither): " + ", ".join(r.tie_ids), ""]
         lines += ["| score | a | b |", "|---|---|---|"]
         lines += [f"| {m} | {r.avg_a[m]:.2f} | {r.avg_b[m]:.2f} |" for m in METRICS]
-        if r.missing:
-            lines += ["", "Missing from the reply: " + ", ".join(r.missing)]
+        lines += _problems(r)
         if r.why:
             lines += ["", "Why, per item:"] + [f"- {i}: {w}" for i, w in r.why.items()]
         if r.repeats:
             lines += ["", "Repeats:"] + [f"- {x}" for x in r.repeats]
-        lines += ["", f"Verdict: {verdict(r)}"]
+        v = verdict(r)
+        if v == "INCOMPLETE":
+            v += f" ({len(r.missing)} missing, {len(r.malformed)} malformed)"
+        lines += ["", f"Verdict: {v}"]
     else:
         r = result
         lines += [
@@ -263,8 +308,7 @@ def report(result, *, seed: int, mode: str) -> str:
             f"| opened | {r.opened_a} | {r.opened_b} | {r.opened_decoy} |",
             f"| archived on sight | {r.archived_a} | {r.archived_b} | {r.archived_decoy} |",
         ]
-        if r.missing:
-            lines += ["", "Missing from the reply: " + ", ".join(r.missing)]
+        lines += _problems(r)
         if r.why:
             lines += ["", "Why, per item:"] + [f"- {i}: {w}" for i, w in r.why.items()]
     return "\n".join(lines) + "\n"

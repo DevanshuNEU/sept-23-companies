@@ -28,7 +28,7 @@ Live means real contacts and real sends.
 | API and web app (:3100) | live checkout, `python -m outreach.api` serves `web/dist` | `com.devanshu.outreach-api` |
 | Sender (every 2 min) | live checkout, `python -m outreach.sending run` | `com.devanshu.outreach-sender` |
 | Crawler (every 30 min) | live checkout, `python -m outreach.crawl tick` | `com.devanshu.outreach-crawl` |
-| Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` | `com.devanshu.outreach-sources` |
+| Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` (also runs the ranker, since the 08:00 plan is off) | `com.devanshu.outreach-sources` |
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 | Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
 | Follow-up drafter (daily 04:30) | live checkout, `python -m outreach.followup_drafter run` | `com.devanshu.outreach-followup-drafter` |

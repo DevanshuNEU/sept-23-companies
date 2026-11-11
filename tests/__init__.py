@@ -12,6 +12,8 @@ for _var, _prefix in (("OUTREACH_MAIL_HOME", "outreach-mail-test-"), ("OUTREACH_
 os.environ["OUTREACH_VOICE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "devvault")
 # His signature holds his phone number and lives outside the repo (#191); no test reads the real file.
 os.environ["OUTREACH_SIGNATURE"] = os.path.join(tempfile.mkdtemp(prefix="outreach-signature-test-"), "none.txt")
+# His stories live in DevVault; no test reads the real file (a missing one is what most tests want).
+os.environ["OUTREACH_STORIES"] = os.path.join(tempfile.mkdtemp(prefix="outreach-stories-test-"), "none.txt")
 os.environ["OUTREACH_DB"] = os.path.join(tempfile.mkdtemp(prefix="outreach-db-test-"), "outreach.db")
 # The bridge reads the frozen contacted.txt; no test reads DevVault's. A missing file is what most tests want.
 os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="outreach-contacted-test-"), "none.txt")

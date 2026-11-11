@@ -9,7 +9,7 @@ import sqlite3
 import unittest
 from unittest import mock
 
-from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.brief import brief_id, read_evidence, read_stories
 from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import server
 from outreach.mcp.guard import BRIDGE_TABLES, Grant, open_guarded
@@ -33,6 +33,7 @@ PINNED = {
                                                               "revision"})),
                            "review_item": INSERT, "event": INSERT},
     "record_research": {"evidence": INSERT, "event": INSERT},
+    "save_research": {"research_fact": INSERT, "person_source": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},
     "mark_no_go": {"review_item": INSERT, "event": INSERT},
     "save_draft": {"touch": INSERT, "event": INSERT,
@@ -233,7 +234,7 @@ class GrantsCase(McpCase):
     def test_save_draft_cannot_write_beyond_its_grants(self):
         lee = seed.person(self.db, self.acme, "Lee New", email="lee@acme.example")
         with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
-            brief = brief_id(load_voice_pack(), read_evidence(), lee)
+            brief = brief_id(load_voice_pack(), read_evidence() + "\n" + read_stories(), lee)
             self.save_draft_grants(lee, brief)
 
     def save_draft_grants(self, lee, brief):
@@ -256,7 +257,7 @@ class GrantsCase(McpCase):
 
     def test_save_followup_cannot_write_beyond_its_grants(self):
         with mock.patch.dict(os.environ, {"OUTREACH_MAIL_HOME": str(FIXTURE_BANNED.parent / "plan")}):
-            self.save_followup_grants(brief_id(load_voice_pack(), read_evidence(), self.sam))
+            self.save_followup_grants(brief_id(load_voice_pack(), read_evidence() + "\n" + read_stories(), self.sam))
 
     def save_followup_grants(self, brief):
         self.check_tool("save_followup", [

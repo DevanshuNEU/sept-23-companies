@@ -39,8 +39,21 @@ def imported_names(path: Path, package: str | None = None) -> list[str]:
     return names
 
 
-def forbidden(name: str) -> bool:
+# save_research (#205) fetches the pages it checks: research.py alone may import the page client.
+NET_ALLOWED = {"research.py"}
+NET_NAMES = ("outreach.net",)
+
+
+def forbidden(name: str, path: Path | None = None) -> bool:
+    if path is not None and path.name in NET_ALLOWED and name in NET_NAMES + ("outreach.net.HttpClient",
+                                                                             "outreach.net.UrllibClient"):
+        return False
     return any(name == f or name.startswith(f + ".") for f in FORBIDDEN_IMPORTS)
+
+
+def forbidden_loaded(names) -> list[str]:
+    """The forbidden modules a fresh server process loaded; `outreach.net` is there for save_research's fetch."""
+    return [m for m in names if forbidden(m) and m not in NET_NAMES]
 
 
 class McpBoundaryTest(unittest.TestCase):
@@ -50,7 +63,7 @@ class McpBoundaryTest(unittest.TestCase):
 
     def test_mcp_source_imports_nothing_that_sends_or_serves(self):
         for path in sources():
-            bad = [n for n in imported_names(path) if forbidden(n)]
+            bad = [n for n in imported_names(path) if forbidden(n, path)]
             self.assertEqual(bad, [], path)
 
     def test_the_scan_sees_a_planted_forbidden_import(self):

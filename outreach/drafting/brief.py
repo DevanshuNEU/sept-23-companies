@@ -13,10 +13,11 @@ from pathlib import Path
 
 from outreach.drafting.voice import VoicePack, VoiceUnreadable
 
-__all__ = ["me_path", "read_evidence", "brief_id", "check_brief"]
+__all__ = ["me_path", "read_evidence", "stories_path", "read_stories", "brief_id", "check_brief"]
 
 _REPO_MAIL = Path(__file__).resolve().parents[2] / "mail"
 OPEN_QUESTIONS = "## Needs Devanshu"
+DEFAULT_STORIES = Path.home() / "Desktop" / "DevVault" / "job-search" / "outreach" / "stories" / "stories.md"
 
 
 def me_path() -> Path:
@@ -41,6 +42,20 @@ def read_evidence(path: Path | str | None = None) -> str:
     if not evidence:
         raise VoiceUnreadable(p, "has no evidence above its open questions")
     return evidence
+
+
+def stories_path() -> Path:
+    """His stories bank: `OUTREACH_STORIES`, else DevVault's (it lives outside this public repo)."""
+    return Path(os.environ.get("OUTREACH_STORIES") or DEFAULT_STORIES)
+
+
+def read_stories(path: Path | str | None = None) -> str:
+    """The stories file's text, stripped; "" when it is missing or unreadable (the brief just has no stories)."""
+    p = Path(path) if path is not None else stories_path()
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return ""
 
 
 def brief_id(pack: VoicePack, evidence: str, person_id: int) -> str:

@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from outreach.drafting.brief import brief_id, check_brief, read_evidence
+from outreach.drafting.brief import brief_id, check_brief, read_evidence, read_stories
 from outreach.drafting.voice import VOICE_FILES, load_voice_pack
 
 ME = """# Evidence bank
@@ -92,3 +92,16 @@ class ShippedMeMdTest(unittest.TestCase):
     def test_evidence_holds_no_phone_number(self):
         import re
         self.assertIsNone(re.search(r"\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}", self.evidence))
+
+
+class StoriesCase(unittest.TestCase):
+    def test_read_stories_missing_file_is_empty(self):
+        self.assertEqual(read_stories(Path(tempfile.mkdtemp(prefix="stories-test-")) / "none.txt"), "")
+
+    def test_read_stories_gives_the_text(self):
+        path = Path(tempfile.mkdtemp(prefix="stories-test-")) / "stories.md"
+        path.write_text("# Stories\n\nThe night the queue stalled.\n", encoding="utf-8")
+        self.assertIn("The night the queue stalled.", read_stories(path))
+
+    def test_read_stories_unreadable_is_empty(self):
+        self.assertEqual(read_stories(Path(tempfile.mkdtemp(prefix="stories-test-"))), "")

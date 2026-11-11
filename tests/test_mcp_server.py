@@ -23,12 +23,12 @@ from outreach.store import DEFAULT_PATH
 from tests import apiseed as seed
 from tests.mcptest import McpCase, call, fingerprint, list_tools, store_path
 from tests.storetest import fresh_store
-from tests.test_mcp_boundary import forbidden
+from tests.test_mcp_boundary import forbidden, forbidden_loaded
 
 ROOT = Path(__file__).resolve().parent.parent
 READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare_targets", "knock_status",
               "contact_check", "connect_followups", "draft_brief", "check_draft"}
-WRITE_TOOLS = {"record_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
+WRITE_TOOLS = {"record_research", "save_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
                "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates", "intake", "log_sent", "log_miss",
                "update_person", "mark_email_bounced",
                "move_person"}
@@ -205,8 +205,8 @@ class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(set(names), PINNED_TOOLS)
-        self.assertEqual(len(names), 26)
-        self.assertEqual(len(set(names)), 26)
+        self.assertEqual(len(names), 27)
+        self.assertEqual(len(set(names)), 27)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)
@@ -284,7 +284,7 @@ class FreshProcessTest(unittest.TestCase):
         )
         out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual([m for m in json.loads(out.stdout) if forbidden(m)], [])
+        self.assertEqual(forbidden_loaded(json.loads(out.stdout)), [])
 
     def test_check_runs_on_a_scratch_store_and_prints_ok_path_and_tool_count(self):
         db = fresh_store()

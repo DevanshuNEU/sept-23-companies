@@ -270,6 +270,8 @@ class SchemaTest(unittest.TestCase):
             "inbound_seen": {"gmail_message_id": "g9", "why": "untracked", "seen_at": NOW},
             "board_candidate": {"ats": "greenhouse", "token": "acme", "source": "stapply", "found_at": NOW,
                                 "gated_at": NOW, "gate_result": "dead"},
+            "research_fact": {"company_id": self.company, "fact": "F", "quote": "Q", "url": "https://acme.example/a",
+                              "page_date": TODAY, "found_by": "gpt", "verified_at": NOW},
         }
         return dict(rows[table])
 
@@ -336,7 +338,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 94)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193
+        self.assertEqual(len(columns), 95)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193, 1 for #205
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")
@@ -369,12 +371,13 @@ class SchemaTest(unittest.TestCase):
 
     def test_every_date_column_rejects_timestamps(self):
         bad = ["2026-10-19T00:00:00Z", "2026-13-01"]
-        extra = {("daily_list", "list_date"), ("daily_list_entry", "list_date"), ("send_day", "day")}
+        extra = {("daily_list", "list_date"), ("daily_list_entry", "list_date"), ("send_day", "day"),
+                 ("research_fact", "page_date")}
         columns = {(t, c) for t in self.tables() for c in self.columns(t) if c.endswith("_on")} | extra
         # Every column the schema checks with date() is tested, and nothing is tested that is not named.
         self.assertLessEqual(self.checked_columns("date"), columns)
-        # posted_on, observed_on (evidence and person_source), due_on, applied_on and the three named ones
-        self.assertEqual(len(columns), 8)
+        # posted_on, observed_on (evidence and person_source), due_on, applied_on and the four named ones
+        self.assertEqual(len(columns), 9)
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             # daily_list_entry.list_date has no CHECK of its own: the foreign key to

@@ -145,6 +145,22 @@ no draft has a source. Change:
 - The skill: when research finds nothing, the email says so plainly (for example that they haven't met and why
   this person: their title is on the team that owns the role). Never fake a connection.
 
+**As built (#205).** Table `research_fact` (migration 0010): checked company facts with fact, quote, url, page date,
+`found_by` (gpt, claude or hand) and `verified_at`, fresh for 14 days, kept on the merge survivor.
+`outreach/research/verify.py` fetches each fact's https page (redirects followed hop by hop, each hop checked) and
+keeps a fact only when its quote is on the page; it refuses LinkedIn, contact-data sites, private or local addresses
+and non-https. MCP tool `save_research(company_id, person_id?, facts)` takes up to 8 facts, checks them first, writes
+company facts to `research_fact` and person facts to `person_source` (kind post), works only in the live checkout and
+returns what was saved and what was rejected, with reasons. `draft_brief` now returns `company_facts` (fresh, marked
+untrusted), `research_needed`, `posting` (title, url and text cut to 4,000 characters, marked untrusted, or null) and
+`stories`; the brief id covers the stories. The new warn `no_person_fact` fires on a first email to an engineer,
+manager or founder with no profile text and no source. The command `uv run python -m outreach.research company <id>
+[<id>...] [--force] [--dry-run]` has GPT with web search (Codex CLI) research a company once and keeps only checked
+facts (`found_by` gpt), one line per company; real runs only in the live checkout, and `--dry-run` prints the prompt
+and needs a scratch `OUTREACH_DB`. The stories live in a private DevVault file (`OUTREACH_STORIES`, else
+`~/Desktop/DevVault/job-search/outreach/stories/stories.md`), not in me.md, because many come from his private notes;
+a missing file means no stories.
+
 ### Part 4. The skill (`.claude/skills/cold-email/SKILL.md`, edited with the writing-for-agents skill)
 
 Keep every hard rule (#9's limits, truth, links, no visa mention at all, his voice files, the brief).

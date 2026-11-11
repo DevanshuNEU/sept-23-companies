@@ -239,8 +239,9 @@ per-recipient scores, the deciding quotes, and phrases repeated across each set.
 
 **As built (#211).** `outreach/draft_lab`. Set files are JSON lists of `{id, recipient, subject, body}`. The judge is GPT
 through the Codex CLI with no web search (read-only sandbox). Two modes. Body (default): per recipient it picks the most
-human, personal, warm, likely to get a reply, and best overall. Inbox: subject and first line against 4 template decoys
-(first picks, opened, archived). Versions are shuffled per recipient with a printed seed. Body verdict: PASS when the new
+human, personal, warm, likely to get a reply, and best overall. Inbox: the subject and the first 110 characters after the
+greeting line against 4 template decoys (first picks, opened, archived). Versions are shuffled per recipient with the
+seed printed in the report. Body verdict: PASS when the new
 set is picked in at least 8 of 12 (two thirds of the compared, non-tie items) and loses neither the human nor the reply
 average; INCOMPLETE when any item is missing or malformed; FAIL otherwise. `python -m outreach.draft_lab judge --a A.json
 --b B.json [--mode body|inbox] [--seed N] [--out FILE] [--dry-run]` prints one summary line and writes a markdown report

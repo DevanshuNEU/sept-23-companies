@@ -67,8 +67,8 @@ real requests), `python -m outreach.reader night` and `eval --run` (they call a 
 calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.sources seed-ats` (it sends real
 requests to every Greenhouse and Ashby board and writes the store; `--dry-run` sends nothing and writes nothing, so it
 runs anywhere on a scratch store), `python -m outreach.research company` (real runs: it calls a model and fetches pages;
-`--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too), `python -m outreach.draft_lab judge` (a real run sends draft text and names to OpenAI through
-the Codex CLI; `--dry-run` prints the prompt and runs anywhere), `python -m outreach.draft_lab export` (it reads the live
+`--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too), `python -m outreach.draft_lab judge` (a real run sends draft text and names to
+OpenAI through the Codex CLI; `--dry-run` prints the prompt and runs anywhere), `python -m outreach.draft_lab export` (it reads the live
 store, read only) and the judging half of
 `python -m outreach.judge
 eval` (elsewhere it scores only what is stored), `python -m outreach.mcp`

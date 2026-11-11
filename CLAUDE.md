@@ -35,8 +35,9 @@ Live means real contacts and real sends.
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
 The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by
-config (`[prepare] enabled = false`, company first in #9): it prints one line and exits; the 08:00 plan proposes
-company rows only (`[plan] propose_people = false`). The profile judge (06:10, Part of #6 and #15) is off by config too
+config (`[prepare] enabled = false`, company first in #9): it prints one line and exits. The 08:00 plan is off too
+(`[plan] enabled = false`, first to see in #9): it prints one line and exits, so there is no daily list, and Knock
+opens on the job list (Jobs), where Done marks a company as reached. The profile judge (06:10, Part of #6 and #15) is off by config too
 (`[judge] enabled = false` in `outreach/judge/config.toml`): it prints "judge is off" and exits 0; on, it makes at most
 15 model calls a night and only ever adds ranking points and a visible line. The MCP server has no job: Claude
 Code starts it from the registration (`python -m outreach.mcp --print-registration`).

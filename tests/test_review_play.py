@@ -115,6 +115,27 @@ class PlayTest(unittest.TestCase):
         self.reach(mailed, date(2026, 11, 9), channel="email")
         self.assertEqual(self.play(), {edge: "reached", mailed: "reached"})
 
+    def emailed(self, cid, sent_on):
+        """A first email sent on `sent_on` (with the sender's outreach_touch) and its follow-up still planned."""
+        person = plan_seed.seed_person(self.conn, cid, f"Mailed {sent_on}", email=f"m{cid}@example.com")
+        touch = plan_seed.seed_email_touch(self.conn, person, sent_on, company_id=cid, outreach=True)
+        plan_seed.seed_message(self.conn, touch, 0, "sent", sent_on=sent_on)
+        plan_seed.seed_message(self.conn, touch, 1, "planned")
+
+    def test_a_sent_email_with_a_follow_up_queued_is_reached(self):
+        # Final review, critical 1: a sent email is reached whatever its follow-ups are doing.
+        mailed, old = self.company(), self.company()
+        self.emailed(mailed, date(2026, 11, 3))
+        self.emailed(old, date(2026, 10, 20))  # past reached_days: the follow-up queue does not keep it in play
+        self.assertEqual(self.play(), {mailed: "reached"})
+
+    def test_a_first_email_still_in_the_outbox_is_not_reached(self):
+        waiting = self.company()
+        person = plan_seed.seed_person(self.conn, waiting, "Waiting", email="w@example.com")
+        plan_seed.seed_message(self.conn, plan_seed.seed_email_touch(self.conn, person, None), 0, "approved")
+        self.assertEqual(self.play(), {})
+        self.assertIn(waiting, self.email())  # emailing covers it
+
     def test_a_list_row_wins_over_a_mark_and_a_mark_over_a_touch(self):
         picked, marked = self.company(), self.company()
         seed_plan_row(self.conn, picked, TODAY, "picked")

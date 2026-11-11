@@ -42,6 +42,13 @@ class Outbound:
     source: Literal["touch", "email_touch", "linkedin_log", "queued_email"]
     queued: bool = False  # an email still to go out (a follow-up or a first email): waiting whatever its age
 
+    @property
+    def reached(self) -> bool:
+        """He reached the person: every row but a first email still in the Outbox. A sent email whose follow-ups are
+        queued is reached for its whole cycle (first to see, #9 2026-11-10). The one rule for the job list's
+        Reached tag and for Needs you's in play."""
+        return self.source != "queued_email"
+
 
 def _context(text: str) -> dict:
     try:

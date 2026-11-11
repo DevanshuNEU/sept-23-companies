@@ -10,7 +10,7 @@ from outreach.pipeline import joblist
 from outreach.pipeline.joblist import JobFilters, JobRow, passed_posting_ids, query
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
-from tests.plan_seed import seed_outbound, seed_person
+from tests.plan_seed import seed_email_touch, seed_message, seed_outbound, seed_person
 from tests.ranking_store import BACKFILL, board, decision, evidence, merge, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
@@ -484,6 +484,32 @@ class FilterTests(JobListCase):
         self.assertEqual(sorted(self.ids()), sorted([a, b, c]))
         self.assertEqual(sorted(self.ids(not_contacted=True)), sorted([b, c]))
         self.assertIsNone(next(r for r in self.run_query().rows if r.posting_id == b).contacted_on)
+
+    def emailed(self, company, name, sent_on, *, followup="planned"):
+        """A first email sent on `sent_on` (the sender's outreach_touch with it) and a follow-up in `followup`."""
+        person = seed_person(self.conn, company, name, email=f"{name.lower()}@example.com")
+        touch = seed_email_touch(self.conn, person, sent_on, company_id=company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=sent_on)
+        if followup is not None:
+            seed_message(self.conn, touch, 1, followup)
+        return person
+
+    def test_a_sent_email_with_a_follow_up_queued_is_reached(self):
+        # Final review, critical 1: the sender writes the planned follow-ups at the first send, so a sent email is
+        # reached for its whole follow-up cycle (#9 first to see, design 4.5).
+        mailed, fresh = self.company("Mailed"), self.company("Fresh")
+        a, b = self.job(mailed), self.job(fresh)
+        self.emailed(mailed, "Ada", date(2026, 10, 28))
+        self.assertEqual(next(r for r in self.run_query().rows if r.posting_id == a).contacted_on, "2026-10-28")
+        self.assertEqual(self.ids(not_contacted=True), [b])
+
+    def test_a_first_email_still_in_the_outbox_is_not_reached(self):
+        waiting = self.company("Waiting")
+        a = self.job(waiting)
+        person = seed_person(self.conn, waiting, "Bo", email="bo@example.com")
+        seed_message(self.conn, seed_email_touch(self.conn, person, None), 0, "approved")
+        self.assertIsNone(self.run_query().rows[0].contacted_on)
+        self.assertEqual(self.ids(not_contacted=True), [a])
 
     def test_an_application_is_not_contact(self):
         co = self.company()

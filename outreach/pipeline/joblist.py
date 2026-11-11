@@ -288,11 +288,12 @@ def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[in
 
 
 def _contacted(conn: sqlite3.Connection, canon: dict[int, int]) -> dict[int, date]:
-    """Each survivor's newest day he reached it: a person contacted (every channel, once; a first email still in the
-    Outbox is not contact yet) or his own Done mark (`reached.marks`), whichever is later."""
+    """Each survivor's newest day he reached it: a person reached (every channel, once; `Outbound.reached`, so a sent
+    email counts while its follow-ups wait and a first email still in the Outbox does not) or his own mark
+    (`reached.marks`), whichever is later."""
     out: dict[int, date] = {}
     for o in load_outbound(conn, canon, tz=_TZ):
-        if not o.queued and (o.company_id not in out or o.sent_on > out[o.company_id]):
+        if o.reached and (o.company_id not in out or o.sent_on > out[o.company_id]):
             out[o.company_id] = o.sent_on
     for company, day in reached.marks(conn, canon).items():
         on = date.fromisoformat(day)

@@ -72,7 +72,8 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
     person (company first, #9 2026-10-26: a company row with nobody on it is what the plan proposes). The latest list
     counts only when its date is within `planned_days` of `today`. Marked: he marked it Done (first to see, #9
     2026-11-10) and has not cleared the mark. Reached: a person there was reached, on any channel, within
-    `reached_days` days before `today` (an email still in the Outbox is not reached yet; `emailing` covers it).
+    `reached_days` days before `today` (`Outbound.reached`: a sent email counts while its follow-ups wait; a first
+    email still in the Outbox is not reached yet, and `emailing` covers it).
     Status plays no part here beyond `live_company_ids`: a `working` company on no plan, with no mark and no recent
     touch, is not in play. `canon` as in `live_company_ids`.
     """
@@ -94,7 +95,7 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
             out.setdefault(cid, "marked")
     since = date.fromisoformat(today) - timedelta(days=reached_days)
     for o in load_outbound(conn, canon, tz="America/New_York"):
-        if not o.queued and o.sent_on >= since and o.company_id in live:
+        if o.reached and o.sent_on >= since and o.company_id in live:
             out.setdefault(o.company_id, "reached")
     return out
 

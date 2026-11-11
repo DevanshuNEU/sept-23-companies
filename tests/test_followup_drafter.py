@@ -117,9 +117,10 @@ class DraftTest(DrafterCase):
         self.assertEqual(sent["followup"], {"seq": 1, "of": 4, "last": False})
         thread = sent["brief"]["person"]["email"]["messages"]
         self.assertEqual(thread[0]["body"], "Hi Sam Sent, the first email body.")
-        self.assertIn("voice", sent["brief"])
-        self.assertIn("evidence", sent["brief"])
-        self.assertNotIn("brief_id", sent["brief"])
+        for key in ("voice", "stories", "evidence", "posting"):  # both parts of the brief
+            self.assertIn(key, sent["brief"])
+        for key in ("brief_id", "part", "parts", "next"):
+            self.assertNotIn(key, sent["brief"])
         self.assertEqual(sent["brief"]["limits"], {"words": [25, 80], "max_links": 2})  # a follow-up's, not a first's
 
     def test_the_fourth_is_marked_last(self):

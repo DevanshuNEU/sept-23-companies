@@ -222,7 +222,7 @@ email's role, uses no markdown, and never repeats a sentence from the thread.
 **As built (#211).** The skill is at version 5: research first, projects first, a plain company fact or a true tie to
 open, a personal subject from his side, his stories when they fit, and the five-openings and three-drafts steps kept
 from #9's 2026-10-27 ruling. The MCP server instructions now match #9 (at most 120 words, 2 links with the portfolio in
-his signature, no visa mention). A skill change ships only after the judge in Part 5 passes.
+his signature, no visa mention). His review before sending is the test of a skill change; the judge in Part 5 is a tool for comparing versions (2026-11-11).
 
 ### Part 5. The blind judge (tool, on demand)
 
@@ -266,9 +266,10 @@ checkout only.
 - **A dry-run check tool.** New read-only MCP tool `check_draft` (person, subject, body, `seq`): runs every save
   check, stores nothing, and leaves the message's own stored text out of the sameness counts. The skill uses it to
   test a set of drafts for a judge run without touching the store; those drafts live in a JSON file.
-- **When a skill change ships.** The new skill replaces the old when, on a fresh sample of 12, the blind judge picks
-  it in at least 8 and it does not lose on either average score. If it falls short, tune and run again, at most twice,
-  then bring the results to him.
+- **When a skill change ships.** First rule: the new skill replaced the old when, on a sample of 12, the judge picked
+  it in at least 8 and it lost neither average. The version 5 gate (2026-11-11, PR #214's thread) came out 8 and 7 of
+  12 with averages about even, and two tuned rounds did worse on bodies. Devanshu ruled the same day: his review of
+  every email before sending is the test, and the judge stays a tool, not a gate.
 
 ## Left to the builder
 

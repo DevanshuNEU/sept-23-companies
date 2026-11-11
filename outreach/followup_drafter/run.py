@@ -180,14 +180,19 @@ class _Run:
         """Draft one follow-up. A stop reason for the whole run, or None to go on."""
         person, seq = item["person"]["id"], item["seq"]
         label = f"{item['person']['name']} at {item['company']['name']}, follow-up {seq}"
-        is_error, brief = self.tool("draft_brief", {"person_id": person})
-        if is_error:
-            if brief.get("code") == "voice_unreadable":
-                return f"his voice files cannot be read: {_short(brief.get('message'))}"
-            self.summary.refused += 1
-            self.summary.lines.append(f"{label}: brief refused ({brief.get('code')})")
-            return None
+        brief = {}
+        for part in (1, 2):  # the brief comes in two parts, each under the tool result size
+            is_error, got = self.tool("draft_brief", {"person_id": person, "part": part})
+            if is_error:
+                if got.get("code") == "voice_unreadable":
+                    return f"his voice files cannot be read: {_short(got.get('message'))}"
+                self.summary.refused += 1
+                self.summary.lines.append(f"{label}: brief refused ({got.get('code')})")
+                return None
+            brief.update(got)
         brief_id = brief.pop("brief_id")
+        for key in ("part", "parts", "next"):
+            brief.pop(key, None)
         brief["limits"] = FOLLOWUP_LIMITS
         said = _said(brief, seq)
         message = {"followup": {"seq": seq, "of": self.of, "last": seq >= self.of}, "said": said, "brief": brief}

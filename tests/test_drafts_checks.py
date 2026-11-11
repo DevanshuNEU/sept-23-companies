@@ -169,6 +169,13 @@ class Blocks(ChecksCase):
         self.assertEqual(body[check["spans"][0]["start"]:check["spans"][0]["end"]], f"[here]({PROJECT})")
         self.assert_blocks(self.run_on(subject=f"see [this]({PROJECT})"), "markdown_link")
 
+    def test_markdown_anchor_is_not_a_second_link(self):
+        body = BODY.replace(f"The runner is at {PROJECT}.", f"The runner is [opencodeintel.com]({PROJECT}).")
+        found = self.run_on(body=body)
+        self.assert_blocks(found, "markdown_link")
+        self.assert_passes(found, "too_many_links")
+        self.assertEqual(len(checks.find_links("[a.example.com](https://a.example.com/x)")), 1)
+
     def test_bare_link_passes_markdown(self):
         self.assert_passes(self.run_on(), "markdown_link")
         self.assert_passes(self.run_on(body=BODY.replace("I build", "I build [real] things and")), "markdown_link")

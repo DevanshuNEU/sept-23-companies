@@ -64,6 +64,7 @@ BARE = re.compile(r"(?<![\w@./-])(?:[a-z0-9-]+\.)+(?:com|ai|io|dev|app|co|org|ne
                   r"\b(?:/[^\s<>()\"']*)?", re.I)
 RE_PREFIX = re.compile(r"re\s*:", re.I)
 MARKDOWN_LINK = re.compile(r"\[[^\]\n]+\]\(\s*https?://[^)\s]+\s*\)", re.I)
+MARKDOWN_ANCHOR = re.compile(r"\[[^\]\n]+\](?=\(\s*https?://[^)\s]+\s*\))", re.I)
 # No visa, OPT or sponsorship in any email, to anyone (#9, 2026-11-09). A block also pulls an approved email back, so
 # ordinary words pass: OPT only in upper case and not "OPT-in", "visa" only in lower case (Visa the company passes),
 # F-1 not as a score, sponsorship but not "sponsored by", immigration only as a status.
@@ -194,6 +195,9 @@ def _links(text: str) -> list[tuple[int, int, str]]:
     """Every link as (start, end, text) in reading order: full URLs, then bare domains Gmail would link. Email
     addresses are not links. Positions are in `text` (masks keep the length)."""
     masked = EMAIL.sub(lambda m: " " * len(m.group()), text)
+    # The anchor of a markdown link is not a second link: `[a.com](https://a.com)` is one link, and the markdown_link
+    # check is the one that blocks it. Counting the anchor too stacked a false "More than 2 links" on top of it.
+    masked = MARKDOWN_ANCHOR.sub(lambda m: " " * len(m.group()), masked)
     found = []
     for m in URL.finditer(masked):
         u = _trim(m.group())

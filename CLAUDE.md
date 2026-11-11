@@ -63,7 +63,8 @@ person at once, log the old value in `event` and raise a flagged Needs-you item;
 Gmail) and `python -m outreach.sending auth` (writes the real token), `python -m outreach.crawl` (every command sends
 real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
 (it reads company pages and calls a model; `--dry-run` runs anywhere), `python -m outreach.followup_drafter run` (it
-calls a model and writes drafts; `--dry-run` runs anywhere) and the judging half of `python -m outreach.judge
+calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.research company` (real runs: it calls
+a model and fetches pages; `--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too) and the judging half of `python -m outreach.judge
 eval` (elsewhere it scores only what is stored), `python -m outreach.mcp`
 (the server's tools work only here), `python -m outreach.deploy install`, `retire-old` and `rollback` (they change
 launchd), and `python -m outreach.importer run`, `reconcile` and `rehearse` on real data.

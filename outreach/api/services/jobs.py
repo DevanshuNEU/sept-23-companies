@@ -1,8 +1,14 @@
-"""Pass and Done on the job list (#156, #195), each inside the caller's `run_write` transaction.
+"""Pass, Applied and Done on the job list (#156, #218, #195), each inside the caller's `run_write` transaction.
 
 Pass hides one posting: a `posting_passed` event (entity posting, actor devanshu, detail `posting_id` and
 `company_id`), which `joblist.passed_posting_ids` and `fresh.load_passed_postings` read. It is never a Not now: the
 company is untouched and `fresh.load_passes` (the cooldown) does not read it. Passing a posting twice writes once.
+
+Applied (#218) records that he applied online to the posting: one `application` row (the posting's company after any
+merge, the New York day, the posting's url) and one `application` touch with an `own` context, the shape the plan's
+`log_applied` writes, so Progress counts it. The job list hides a posting with a live application touch
+(`joblist.applied_posting_ids`). It is not Done: the company is untouched. A posting already applied to writes nothing
+and says when. A closed posting is recorded all the same: he applied.
 
 Done (the first to see ruling in #9) is his mark that the posting's company has been reached, even when the outreach
 happened outside Knock: a `company_reached` event (`outreach.pipeline.reached`), which the job list reads into
@@ -16,12 +22,14 @@ from datetime import date
 
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
-from outreach.api.models.jobs import ClearDoneResult, DoneResult, PassJobResult
+from outreach.api.models.jobs import AppliedResult, ClearDoneResult, DoneResult, PassJobResult
 from outreach.api.queries.company import merge_parents, survivor_of
+from outreach.outcomes.requests import own_context
 from outreach.outcomes.windows import ny_day
 from outreach.pipeline import reached
 from outreach.pipeline.joblist import passed_posting_ids
 from outreach.store import append_event
+from outreach.store.writes import log_touch
 
 PASSED = "posting_passed"  # event kind: Pass on the job list
 
@@ -43,6 +51,27 @@ def pass_job(ctx: WriteCtx, posting_id: int) -> PassJobResult:
                      actor="devanshu", at=ctx.now, detail={"posting_id": posting_id, "company_id": company_id},
                      idempotency_key=ctx.event_key(0))
     return PassJobResult(posting_id=posting_id, company_id=company_id, passed=True)
+
+
+def applied(ctx: WriteCtx, posting_id: int) -> AppliedResult:
+    conn = ctx.conn
+    company_id, _ = _posting(conn, posting_id)
+    standing = conn.execute("SELECT min(sent_at) FROM outreach_touch WHERE channel = 'application' "
+                            "AND posting_id = ? AND undone_at IS NULL", (posting_id,)).fetchone()[0]
+    if standing is not None:
+        on = date.fromisoformat(ny_day(standing))
+        return AppliedResult(posting_id=posting_id, company_id=company_id, applied_on=on.isoformat(),
+                             text=f"Already applied on {on:%b} {on.day}.")
+    posting = conn.execute("SELECT url, first_seen_at FROM posting WHERE posting_id = ?", (posting_id,)).fetchone()
+    # One application row per posting: a touch taken back and applied again keeps the row it already has.
+    if conn.execute("SELECT 1 FROM application WHERE posting_id = ? LIMIT 1", (posting_id,)).fetchone() is None:
+        conn.execute("INSERT INTO application(company_id, posting_id, applied_on, url) VALUES (?, ?, ?, ?)",
+                     (company_id, posting_id, ny_day(ctx.now), posting["url"]))
+    log_touch(conn, person_id=None, company_id=company_id, channel="application", sent_at=ctx.now,
+              context=own_context(conn, company_id, None, posting["first_seen_at"], ctx.now), posting_id=posting_id,
+              idempotency_key=ctx.event_key(0))
+    return AppliedResult(posting_id=posting_id, company_id=company_id, applied_on=ny_day(ctx.now),
+                         text="Saved to Applied.")
 
 
 def done(ctx: WriteCtx, posting_id: int) -> DoneResult:

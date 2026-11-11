@@ -8,7 +8,8 @@ page costs one pass over the open postings and one count, never a query per row.
 The list reads the decision's columns:
 
 - Listed at all: open, lane `engineering`, `us <> 'no'`, no citizenship rule, eligibility `ok`, tier not `senior`, the
-  company not an active no-go, and the posting not passed (`passed_posting_ids`).
+  company not an active no-go, and the posting neither passed (`passed_posting_ids`) nor applied to
+  (`applied_posting_ids`, #218).
 - Big (#172): a company is big when its size is over 300, or its size is unknown and either it has more than 50 open
   postings read as US (counted over the company and every company merged into it) or it has an active Workday or
   Oracle board (`ENTERPRISE_ATS`). The guess is made once per company, in `co`; the row's `size` stays null for it.
@@ -52,8 +53,8 @@ from outreach.plan.outbound import load_outbound
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "explain", "WINDOWS", "BIG_OVER",
-           "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL", "LISTED_SQL", "listed_params"]
+__all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "applied_posting_ids", "explain",
+           "WINDOWS", "BIG_OVER", "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL", "LISTED_SQL", "listed_params"]
 
 WINDOWS = (7, 30, 60, 90, 0)  # days back from today, 0 for any
 BIG_OVER = 300  # a company is big above this many people
@@ -138,6 +139,14 @@ def passed_posting_ids(conn: sqlite3.Connection) -> frozenset[int]:
             "AND json_extract(detail, '$.posting_id') IS NOT NULL", (_PASS_REASON,)):
         out.add(int(pid))
     return frozenset(out)
+
+
+def applied_posting_ids(conn: sqlite3.Connection) -> frozenset[int]:
+    """The postings he applied to (#218): a live `application` touch that names its posting. An undone touch hides
+    nothing."""
+    return frozenset(r[0] for r in conn.execute(
+        "SELECT DISTINCT posting_id FROM outreach_touch WHERE channel = 'application' AND undone_at IS NULL "
+        "AND posting_id IS NOT NULL"))
 
 
 # The facts are read once per company (not per posting): `company_fact` is the one view that picks a company's value.
@@ -271,7 +280,9 @@ def listed_params(conn: sqlite3.Connection, canon: dict[int, int] | None = None)
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
     # A company merged into a no-go company is a no-go company too, and so is a merged-away one with its own row.
     nogo = sorted(held | {src for src, dst in canon.items() if dst in held})
-    return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(passed_posting_ids(conn)))}
+    # `:passed` is every posting he took off the list: passed or applied to.
+    hidden = passed_posting_ids(conn) | applied_posting_ids(conn)
+    return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(hidden))}
 
 
 def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[int, int],

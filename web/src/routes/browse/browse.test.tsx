@@ -52,7 +52,7 @@ async function open(o: { shell?: boolean } = {}) {
   return { ...view, client, queryClient };
 }
 
-/** The row's reached tag ("Reached Nov 10"), not the Reached button beside it. */
+/** The row's reached tag ("Reached Nov 10"), not the Mark reached button beside it. */
 const REACHED_TAG = /Reached [A-Z][a-z]{2} \d/;
 
 describe('the Jobs page', () => {
@@ -80,10 +80,10 @@ describe('the Jobs page', () => {
     expect(first).toHaveTextContent('E-Verify');
     expect(first).toHaveTextContent('YC');
     expect(within(first).getByRole('button', { name: /^Pass/ })).toBeInTheDocument();
-    expect(within(first).getByRole('button', { name: /^Reached/ })).toBeInTheDocument();
+    expect(within(first).getByRole('button', { name: /^Mark reached/ })).toBeInTheDocument();
     // One word per meaning: the key legend names A as the button does, and Done stays the closed companies' page.
     const legend = screen.getByText('pass').closest('p') as HTMLElement;
-    expect(legend).toHaveTextContent(/A\s*reached/);
+    expect(legend).toHaveTextContent(/A\s*mark reached/);
     expect(legend).not.toHaveTextContent(/done/i);
   });
 
@@ -368,7 +368,7 @@ describe('the Jobs page', () => {
   });
 
   describe('Reached', () => {
-    const reachedButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Reached/ });
+    const reachedButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Mark reached/ });
     const retell = () => rows().filter((r) => r.getAttribute('data-company') === 'Retell AI');
 
     it('Reached marks the company and every row of it shows reached', async () => {
@@ -517,7 +517,7 @@ describe('the Jobs page', () => {
       press('a');
       expect(await screen.findByText('Marked Pylon reached.')).toBeInTheDocument();
       press('z');
-      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Reached/ })).toBeEnabled());
+      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Mark reached/ })).toBeEnabled());
       expect(rows()[1]).not.toHaveTextContent(REACHED_TAG);
       press('a');
       await screen.findByText('Marked Pylon reached.');

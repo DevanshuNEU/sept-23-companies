@@ -180,7 +180,7 @@ function JobItem({
             Pass
           </Button>
           <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onReached}>
-            Reached
+            Mark reached
           </Button>
         </div>
       )}
@@ -414,7 +414,7 @@ export default function BrowsePage() {
     { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
-    { keys: 'a', label: 'Reached: mark the company reached', group: GROUP, enabled: open, run: () => current && markCompanyReached(current) },
+    { keys: 'a', label: 'Mark the company reached', group: GROUP, enabled: open, run: () => current && markCompanyReached(current) },
     { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
   useHotkeys(bindings);
@@ -461,7 +461,7 @@ export default function BrowsePage() {
             <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
             <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
-            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> reached</span>
+            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> mark reached</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

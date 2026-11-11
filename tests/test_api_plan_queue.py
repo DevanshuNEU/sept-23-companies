@@ -223,7 +223,14 @@ class InFlightTest(QueueCase):
         self.assertEqual(flight[1]["reason"], "Request sent 6 days ago, no answer yet")
 
     def test_tomorrow_counts_companies(self):
-        text = self.view()["tomorrow"]["text"]
+        # While the 08:00 plan runs: the shipped config has it off (first to see, #9), and then the line says so.
+        import dataclasses
+        from unittest import mock
+        from outreach.plan.config import default_plan_config
+        cfg = default_plan_config()
+        on = dataclasses.replace(cfg, plan=cfg.plan | {"enabled": True})
+        with mock.patch("outreach.api.routers.plan.default_plan_config", return_value=on):
+            text = self.view()["tomorrow"]["text"]
         self.assertRegex(text, r"Room for \d+ compan(y|ies)\.")
 
 

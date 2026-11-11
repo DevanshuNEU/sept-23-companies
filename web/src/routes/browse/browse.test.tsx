@@ -12,7 +12,7 @@ import BrowsePage from './index';
 /*
  * The job list (#156, the /browse page), on the sample: 82 postings from 11 companies, newest first by when each was
  * posted. At your level: 62 (22 in the last 30 days, 8 in the last 7, each counting the 2 with no date); at higher
- * levels: 20 (6 in the last 30 days). He reads every posting himself: Pass hides one, Done marks its company as
+ * levels: 20 (6 in the last 30 days). He reads every posting himself: Pass hides one, Reached marks its company as
  * reached.
  */
 
@@ -52,6 +52,9 @@ async function open(o: { shell?: boolean } = {}) {
   return { ...view, client, queryClient };
 }
 
+/** The row's reached tag ("Reached Nov 10"), not the Reached button beside it. */
+const REACHED_TAG = /Reached [A-Z][a-z]{2} \d/;
+
 describe('the Jobs page', () => {
   // Toasts live in a global store: one test's toast must not be another's Undo.
   beforeEach(() => {
@@ -77,7 +80,11 @@ describe('the Jobs page', () => {
     expect(first).toHaveTextContent('E-Verify');
     expect(first).toHaveTextContent('YC');
     expect(within(first).getByRole('button', { name: /^Pass/ })).toBeInTheDocument();
-    expect(within(first).getByRole('button', { name: /^Done/ })).toBeInTheDocument();
+    expect(within(first).getByRole('button', { name: /^Reached/ })).toBeInTheDocument();
+    // One word per meaning: the key legend names A as the button does, and Done stays the closed companies' page.
+    const legend = screen.getByText('pass').closest('p') as HTMLElement;
+    expect(legend).toHaveTextContent(/A\s*reached/);
+    expect(legend).not.toHaveTextContent(/done/i);
   });
 
   it('lists newest first by when each job was posted, and has no score or ranking text', async () => {
@@ -360,40 +367,40 @@ describe('the Jobs page', () => {
     });
   });
 
-  describe('Done', () => {
-    const doneButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Done/ });
+  describe('Reached', () => {
+    const reachedButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Reached/ });
     const retell = () => rows().filter((r) => r.getAttribute('data-company') === 'Retell AI');
 
-    it('Done marks the company and every row of it shows reached', async () => {
+    it('Reached marks the company and every row of it shows reached', async () => {
       const user = userEvent.setup();
       const { client } = await open();
       const sent = vi.spyOn(client, 'markReached');
       expect(retell().length).toBeGreaterThan(1);
-      for (const r of retell()) expect(r).not.toHaveTextContent(/Reached/);
-      await user.click(doneButton(rows()[0] as HTMLElement));
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
+      await user.click(reachedButton(rows()[0] as HTMLElement));
       expect(await screen.findByText('Marked Retell AI reached.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
       // At once, on every row of the company, before anything is sent.
       for (const r of retell()) expect(r).toHaveTextContent('Reached Nov 10');
-      expect(rows().find((r) => r.getAttribute('data-company') === 'Pylon')).not.toHaveTextContent(/Reached/);
+      expect(rows().find((r) => r.getAttribute('data-company') === 'Pylon')).not.toHaveTextContent(REACHED_TAG);
       expect(sent).not.toHaveBeenCalled();
       await leavePage();
       await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
       expect(sent.mock.calls[0]?.[0]).toBe(9000);
-      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI as reached.')).toBeInTheDocument();
+      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI reached.')).toBeInTheDocument();
       // The list read again says the same: the mark is the company's reached day now.
       await waitFor(() => expect(retell().every((r) => /Reached Nov 10/.test(r.textContent ?? ''))).toBe(true));
       expect(rows()).toHaveLength(20); // the postings stay where they were
     });
 
-    it('Done can be undone in the undo window', async () => {
+    it('Reached can be undone in the undo window', async () => {
       const user = userEvent.setup();
       const { client } = await open();
       const sent = vi.spyOn(client, 'markReached');
-      await user.click(doneButton(rows()[0] as HTMLElement));
+      await user.click(reachedButton(rows()[0] as HTMLElement));
       await user.click(await screen.findByRole('button', { name: 'Undo' }));
-      await waitFor(() => expect(doneButton(rows()[0] as HTMLElement)).toBeEnabled());
-      for (const r of retell()) expect(r).not.toHaveTextContent(/Reached/);
+      await waitFor(() => expect(reachedButton(rows()[0] as HTMLElement)).toBeEnabled());
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
       await leavePage();
       await settle(0);
       expect(sent).not.toHaveBeenCalled();
@@ -409,29 +416,29 @@ describe('the Jobs page', () => {
       } finally {
         vi.useRealTimers();
       }
-      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI as reached.')).toBeInTheDocument();
+      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI reached.')).toBeInTheDocument();
       expect(sent).toHaveBeenCalledTimes(1);
     });
 
-    it('a company he already contacted says Reached on its day, and Done still works there', async () => {
+    it('a company he already contacted says Reached on its day, and Reached still works there', async () => {
       const user = userEvent.setup();
       await open();
       const row = rows().find((r) => r.getAttribute('data-company') === 'Cerebrium') as HTMLElement;
       expect(row).toHaveTextContent('Reached Nov 3');
       expect(row).not.toHaveTextContent('You contacted them');
-      await user.click(doneButton(row));
+      await user.click(reachedButton(row));
       await leavePage();
-      expect(await within(row).findByText('Marked Cerebrium as reached.')).toBeInTheDocument();
+      expect(await within(row).findByText('Marked Cerebrium reached.')).toBeInTheDocument();
     });
 
-    it('a failed Done says so and the row keeps its buttons', async () => {
+    it('a failed Reached says so and the row keeps its buttons', async () => {
       const user = userEvent.setup();
       const { client } = await open();
       vi.spyOn(client, 'markReached').mockRejectedValue(new ApiError('network', 'Cannot reach the Knock server'));
-      await user.click(doneButton(rows()[0] as HTMLElement));
+      await user.click(reachedButton(rows()[0] as HTMLElement));
       await leavePage();
-      await waitFor(() => expect(doneButton(rows()[0] as HTMLElement)).toBeEnabled());
-      for (const r of retell()) expect(r).not.toHaveTextContent(/Reached/);
+      await waitFor(() => expect(reachedButton(rows()[0] as HTMLElement)).toBeEnabled());
+      for (const r of retell()) expect(r).not.toHaveTextContent(REACHED_TAG);
     });
   });
 
@@ -503,21 +510,21 @@ describe('the Jobs page', () => {
       expect(sent.mock.calls[0]?.[0]).toBe(9001);
     });
 
-    it('A marks the row he is on done, and Z takes it back', async () => {
+    it('A marks the row he is on reached, and Z takes it back', async () => {
       const { client } = await open({ shell: true });
       const sent = vi.spyOn(client, 'markReached');
       press('ArrowDown');
       press('a');
       expect(await screen.findByText('Marked Pylon reached.')).toBeInTheDocument();
       press('z');
-      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Done/ })).toBeEnabled());
-      expect(rows()[1]).not.toHaveTextContent(/Reached/);
+      await waitFor(() => expect(within(rows()[1] as HTMLElement).getByRole('button', { name: /^Reached/ })).toBeEnabled());
+      expect(rows()[1]).not.toHaveTextContent(REACHED_TAG);
       press('a');
       await screen.findByText('Marked Pylon reached.');
       await leavePage();
       await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
       expect(sent.mock.calls[0]?.[0]).toBe(9001);
-      expect(await within(rows()[1] as HTMLElement).findByText('Marked Pylon as reached.')).toBeInTheDocument();
+      expect(await within(rows()[1] as HTMLElement).findByText('Marked Pylon reached.')).toBeInTheDocument();
     });
 
     it('typing in the search box never passes or marks done, and the arrows leave it for the list', async () => {

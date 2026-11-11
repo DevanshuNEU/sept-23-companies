@@ -262,7 +262,7 @@ describe('Needs you', () => {
     const user = userEvent.setup();
     const { client } = await open();
     const gaps = screen.getByRole('region', { name: /^Data gaps/ });
-    expect(within(gaps).getByText('Things the crawler could not read, and questions about companies outside your plan. Nothing here holds up an email.')).toBeInTheDocument();
+    expect(within(gaps).getByText('Things the crawler could not read, and questions about companies you are not working on now. Nothing here holds up an email.')).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Tinybird' })).not.toBeInTheDocument();
     const shell = await client.shell();
     expect(shell.openReviewItems).toBe((await client.needsYou()).open.length);

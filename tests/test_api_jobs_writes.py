@@ -110,7 +110,7 @@ class DoneTest(WritesCase):
         res = self.done(pid)
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json(), {"postingId": pid, "companyId": self.ids["Ember"], "reachedOn": DAY,
-                                      "text": "Marked Ember as reached."})
+                                      "text": "Marked Ember reached."})
         [row] = self.marks()
         self.assertEqual((row["entity"], row["entity_id"], row["company_id"], row["actor"], row["at"]),
                          ("company", self.ids["Ember"], self.ids["Ember"], "devanshu", self.now))
@@ -212,7 +212,7 @@ class ClearDoneTest(WritesCase):
         self.clear(self.ids["Ember"])
         self.set_now("2026-11-11T15:14:00Z")
         res = self.done(pid)
-        self.assertEqual((res.json()["reachedOn"], res.json()["text"]), ("2026-11-11", "Marked Ember as reached."))
+        self.assertEqual((res.json()["reachedOn"], res.json()["text"]), ("2026-11-11", "Marked Ember reached."))
         self.assertEqual(reached.marks(self.conn), {self.ids["Ember"]: "2026-11-11"})
 
     def test_clear_with_no_mark_writes_nothing(self):

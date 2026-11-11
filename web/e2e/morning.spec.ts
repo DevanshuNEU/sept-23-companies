@@ -27,7 +27,7 @@ async function expectCleanPage(page: Page, consoleErrors: string[], foreign: str
 
 const outboxLink = (page: Page) => page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: /^Outbox/ });
 
-test('the morning flow: Jobs, reply, mark done, fix, approve, LinkedIn, Done', async ({ page, consoleErrors }) => {
+test('the morning flow: Jobs, reply, mark reached, fix, approve, LinkedIn, Done', async ({ page, consoleErrors }) => {
   const foreign = watchRequests(page);
   // The clock must run before the first load so runFor can drive the 8 second undo window.
   await page.clock.install({ time: new Date('2026-11-10T15:14:00Z') });
@@ -55,7 +55,7 @@ test('the morning flow: Jobs, reply, mark done, fix, approve, LinkedIn, Done', a
   await expect(interested).toHaveAttribute('aria-pressed', 'true');
   await expectCleanPage(page, consoleErrors, foreign);
 
-  // 3. Jobs: he reached the second row's company outside Knock, so A marks it done; every row of it says reached.
+  // 3. Jobs: he reached the second row's company outside Knock, so A marks it reached; every row of it says reached.
   await page.keyboard.press('g');
   await page.keyboard.press('b');
   await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();

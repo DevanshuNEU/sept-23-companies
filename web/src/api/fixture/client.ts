@@ -1204,7 +1204,7 @@ export class FixtureClient implements OutreachClient {
       const on = this.db.plan.date;
       this.reachedMarks.set(row.companyId, on);
       this.db.companies[row.companyId]?.events.unshift({ id: this.nextId++, at: this.now, kind: REACHED, text: 'Company reached', actor: 'devanshu', importSource: null });
-      return { postingId, companyId: row.companyId, reachedOn: on, text: `Marked ${row.companyName} as reached.` };
+      return { postingId, companyId: row.companyId, reachedOn: on, text: `Marked ${row.companyName} reached.` };
     });
   }
 

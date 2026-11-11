@@ -128,7 +128,6 @@ export function formatAge(at: IsoTime, asOf: IsoTime): string {
   return n === 1 ? '1 day ago' : `${n} days ago`;
 }
 
-
 /** Noon UTC on a calendar date, read in UTC, so no zone moves the day. */
 const noonOf = (on: IsoDate) => {
   const { y, m, d } = parseIsoDate(on);

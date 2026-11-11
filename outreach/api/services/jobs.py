@@ -57,7 +57,7 @@ def done(ctx: WriteCtx, posting_id: int) -> DoneResult:
                  actor="devanshu", at=ctx.now, detail={"posting_id": posting_id, "company_id": company_id},
                  idempotency_key=ctx.event_key(0))
     return DoneResult(posting_id=posting_id, company_id=company_id, reached_on=ny_day(ctx.now),
-                      text=f"Marked {name} as reached.")
+                      text=f"Marked {name} reached.")
 
 
 def clear_done(ctx: WriteCtx, company_id: int) -> ClearDoneResult:

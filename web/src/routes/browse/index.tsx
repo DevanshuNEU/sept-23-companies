@@ -67,7 +67,7 @@ const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} day
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
 
 /**
- * What he has asked for and the server has not heard yet: postings passed, and Done (#195): the postings he pressed it
+ * What he has asked for and the server has not heard yet: postings passed, and Reached (#195): the postings he pressed it
  * on and their companies, whose rows all show reached at once. It is a query only so the pending-write overlay can lay
  * these over it (Undo drops them, a commit settles them).
  */
@@ -90,7 +90,7 @@ function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContac
 
 /**
  * The row's tags: first what qualifies its time (a repost, a late find), then the company's flags, then the day he
- * reached the company (a person contacted there, or his own Done mark). `reachedOn` is that day as words.
+ * reached the company (a person contacted there, or his own mark). `reachedOn` is that day as words.
  */
 function Flags({ job, asOf, reachedOn }: { job: JobRow; asOf: IsoTime; reachedOn: string | null }) {
   const repost = repostTag(job.repostedFrom, asOf);
@@ -118,7 +118,7 @@ function JobItem({
   marking,
   onSelect,
   onPass,
-  onDone,
+  onReached,
 }: {
   job: JobRow;
   asOf: IsoTime;
@@ -128,11 +128,11 @@ function JobItem({
   /** The day his company was reached, as words ("Nov 9"), or null. */
   reachedOn: string | null;
   answer: string | undefined;
-  /** Done on this row waits in its undo window. */
+  /** Reached on this row waits in its undo window. */
   marking: boolean;
   onSelect: () => void;
   onPass: () => void;
-  onDone: () => void;
+  onReached: () => void;
 }) {
   const href = safeHref(job.url);
   return (
@@ -179,8 +179,8 @@ function JobItem({
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
           </Button>
-          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onDone}>
-            Done
+          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onReached}>
+            Reached
           </Button>
         </div>
       )}
@@ -232,10 +232,10 @@ function Skeletons() {
  * (#193), in two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date,
  * or when Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the
  * end. He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its
- * company) and Done marks its company as reached, even when he reached it outside Knock. There is no score and no
- * ranking text. Every row of a reached company says "Reached Nov 9" (a person contacted there, or his Done mark).
+ * company) and Reached marks its company as reached, even when he reached it outside Knock. There is no score and no
+ * ranking text. Every row of a reached company says "Reached Nov 9" (a person contacted there, or his own mark).
  *
- * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Done keeps the row,
+ * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Reached keeps the row,
  * tags every row of the company at once with Undo for the window, and then writes the API's own sentence in the row.
  * His mark is taken back later from the company page. The line under the header is today's outreach from the sidebar's
  * send count and Progress, and opens Progress.
@@ -358,11 +358,11 @@ export default function BrowsePage() {
   };
 
   /**
-   * Done: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
+   * Reached: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
    * closes. The API's own sentence then replaces the row's buttons, and the list is read again before the mark is dropped,
-   * so the tag does not flash off. Nothing else stops it: Done on a company already reached just says when.
+   * so the tag does not flash off. Nothing else stops it: Reached on a company already reached just says when.
    */
-  const markDone = (job: JobRow) => {
+  const markCompanyReached = (job: JobRow) => {
     const id = job.postingId;
     const company = job.companyId;
     if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
@@ -404,7 +404,7 @@ export default function BrowsePage() {
       marking={marking.has(j.postingId)}
       onSelect={() => setActive(j.postingId)}
       onPass={() => pass(j)}
-      onDone={() => markDone(j)}
+      onReached={() => markCompanyReached(j)}
     />
   );
 
@@ -414,7 +414,7 @@ export default function BrowsePage() {
     { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
-    { keys: 'a', label: 'Done: mark the company reached', group: GROUP, enabled: open, run: () => current && markDone(current) },
+    { keys: 'a', label: 'Reached: mark the company reached', group: GROUP, enabled: open, run: () => current && markCompanyReached(current) },
     { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
   useHotkeys(bindings);
@@ -461,7 +461,7 @@ export default function BrowsePage() {
             <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
             <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
-            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> done</span>
+            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> reached</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

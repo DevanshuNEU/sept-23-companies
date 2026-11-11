@@ -65,11 +65,11 @@ test('Jobs: Knock opens on it; the list, the tabs and filters, then pass and don
   for (const r of await ofCompany.all()) await expect(r).toContainText('Reached Nov 10');
   // Z takes it back inside the window.
   await page.keyboard.press('z');
-  await expect(jobs.nth(2).getByRole('button', { name: /^Done/ })).toBeVisible();
-  await expect(jobs.nth(2)).not.toContainText('Reached');
+  await expect(jobs.nth(2).getByRole('button', { name: /^Reached/ })).toBeVisible();
+  await expect(jobs.nth(2)).not.toContainText(/Reached [A-Z][a-z]{2} \d/); // the tag, not the button
   await page.keyboard.press('a');
   await page.clock.runFor(9000); // the undo window closes and the write goes out
-  await expect(jobs.nth(2)).toContainText(`Marked ${company} as reached.`);
+  await expect(jobs.nth(2)).toContainText(`Marked ${company} reached.`);
   for (const r of await ofCompany.all()) await expect(r).toContainText('Reached Nov 10');
   await expect(jobs).toHaveCount(19);
 

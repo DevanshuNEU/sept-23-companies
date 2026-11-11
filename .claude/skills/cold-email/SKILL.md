@@ -34,11 +34,15 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
-3. **Brief.** Call `draft_brief` for the person and write from what it returns, nothing else: `voice` (his DevVault
-   voice files, the Posture section above all), `evidence` (me.md), `stories`, `posting`, `company_facts`, `avoid`,
-   `signature` and `limits`, assembled by code. Do not read those files yourself. The voice files govern the sound
-   only: where they disagree with #9 or this file on a limit or a format (one draft, not versions; no authorship
-   gate; at most 120 words; 2 links; no visa line; no `lint_draft.sh`), #9 and this file win. If `draft_brief`
+3. **Brief.** Call `draft_brief` for the person and write from what it returns, nothing else: `person` (with the
+   facts `save_research` stored for them, under `sources`), `voice` (his DevVault voice files, the Posture section
+   above all), `evidence` (me.md), `stories`, `posting`, `company_facts`, `avoid`, `signature` and `limits`,
+   assembled by code. Do not read those files yourself. The voice files govern how he sounds, nothing else. Where
+   they prescribe anything about the email itself, this file and #9 win: its shape (an Echo, Anchor, Bridge
+   pattern or any other), the hook list, subject rules (word counts, wink, object or clear subjects), links in the
+   sign-off, any visa line, a line that acknowledges the cold email, versions for him to rework or an authorship
+   gate (you save one draft), the word count (at most 120), the links (exactly 2) and `lint_draft.sh` (not run).
+   If `draft_brief`
    refuses (`voice_unreadable`), say so and stop; nothing is drafted without it. Done when you hold a current
    `brief_id`. After any `save_research` or research run, call `draft_brief` again to read the new facts.
 4. **Posting.** Read `posting`: what the job is, in the posting's own words. Done when you can name the work the
@@ -46,14 +50,16 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
 5. **Company.** `company_facts` are checked, quoted facts: what the company launched or is building, what the team
    owning the role works on. When `research_needed` is true there are none. In the live checkout run
    `uv run python -m outreach.research company <company_id>` (GPT researches it once and code keeps only facts whose
-   quote is on the page), or research the web yourself and call `save_research` with the `company_id`. Done when
+   quote is on the page), or research the web yourself and call `save_research` with the `company_id`. A fact
+   `save_research` returns under `rejected` was not stored and is never used. Done when
    `company_facts` holds at least one fact, or research found none and you go on without.
 6. **Person** (engineers, managers, founders; skip recruiters). Run one or two web searches on the name with the
    company, then open the pages. Look for their own footprint: a blog post, talk or podcast, a GitHub repo, a
    company or launch post, press that quotes them. Confirm it is the same person (same company and role) or drop it.
    Keep a fact only if you can quote it from a page you opened, with its URL and date. Never use LinkedIn pages,
    contact-data sites (RocketReach and the like), or a search engine's AI summary, and never use a location, age,
-   family or any private detail. Save each kept fact with `save_research` (`company_id` and `person_id`). The
+   family or any private detail. Save each kept fact with `save_research` (`company_id` and `person_id`); drop
+   every fact it returns under `rejected`. The
    `sources` entry on `add_people` (kind, URL, label, quote, `observed_on`) is only for a fact already in hand when
    you add the person. Done when the facts are saved, or none was found and you go on with his paste.
 7. **Fit.** Pick the one project of his that does the kind of work their team does: the posting's work and the
@@ -62,8 +68,17 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    only when the role is plainly backend or the email argues experience. Among projects that fit, prefer one light
    in `avoid.evidence_used`. Then look at `stories`: use one only when it fits this reader. Done when you can say in
    one sentence why this project, and not the next one, fits this team.
-8. **Write.** Follow "The email" below. Write one email and decide alone: never show him angles, versions or
-   a ranking, and never ask him to pick. Done when every rule in "The email" holds.
+8. **Write** (#9, 2026-10-27), silently, inside "The email" below:
+   - List at least five candidate openings, each a true fact with its source: company facts, the posting, the
+     person's own work, a shared past (Northeastern, the Dhirubhai Ambani Institute of ICT, a past employer), his
+     stories. Drop any that is forced, speculative or flattery.
+   - Draft three emails on substantially different strategies (for example their team's work in the posting's
+     words, a story that fits, a plain role question), not rewordings. Each follows every rule below.
+   - Judge them as the reader among dozens of other emails: why did this person write, is there a reason to keep
+     reading, is anything generic, inflated or made up? A fact no source backs disqualifies a draft.
+   - Keep one, refine it once (its weakest line only), and keep the revision only if it is clearly better.
+   - Never show him the openings, the other drafts or a ranking, and never ask him to pick; only the kept one goes
+     on. Done when it meets every rule in "The email".
 9. **Subject.** Written last, from the email you just wrote (see "The subject" below). Done when it fits the patterns
    there and appears nowhere in `avoid.recent_subjects`.
 10. **Check, then save.** Run `check_draft` (`person_id`, `subject`, `body`, `hook`): it runs every save check and
@@ -88,19 +103,24 @@ company or stops email on its own.
 
 ## The email
 
-**The first line** is the Gmail preview, so it pays off the subject at once. It states one true thing plainly: the
+**The first line** is the Gmail preview. It comes from their side and states one true thing plainly: the
 company's fact in the source's own words (the posting's words for the job, a named launch from last week, the
 team's stated work), or the true tie to this person (a shared school or employer, something they wrote or shipped).
 For a recruiter it names the exact role title (and req ID). A pattern that won: the posting's own phrase for the
-work, such as "keeping intraday trade data and the overnight reports right". Two kinds of line lost in the lab, so
-the first line is neither: a bridge from their news to himself ("that's the problem I keep coming back to", "I spent
-September on the other side of that problem"), or a line about the email, their inbox or their time.
-When there is nothing about the person, say plainly why you picked them (their title is on the team that owns the
-role). Northeastern is a fact to use when it connects, never the default opener. Open differently from
-`avoid.recent_openings`.
+work, such as "keeping intraday trade data and the overnight reports right". When there is nothing about the
+person, say plainly why you picked them (their title is on the team that owns the role). Northeastern is a fact to
+use when it connects, never the default opener. Open differently from `avoid.recent_openings`.
 
 **The body**, in sentences written fresh for this person:
-- Why this person, inside the first two lines.
+- Why this person, inside the first two lines. What the subject promises is delivered within the first two or
+  three lines.
+- No line anywhere is a bridge from their news or work to himself ("that's the problem I keep coming back to", "I
+  spent September on the other side of that problem"); say the fact, then say his work plainly. The lab flagged
+  every one as forced.
+- No line anywhere talks about the email, their inbox or their time ("short one", "you must get a lot of these",
+  "thank you for opening this"). The lab flagged every one as performed.
+- One plain sentence that he wants this role, in his words and said fresh each time (#9: real "I want in"
+  energy).
 - The project, with one number from me.md when it has one, said in terms of their work. Say how he would help
   humbly, in their own words for their work, never "you have a problem I can fix".
 - A story from `stories` only when it fits the reader, told plainly in one or two sentences. A feeling about his
@@ -120,7 +140,8 @@ A founder wants one line on why their product, then the proof. A recruiter wants
 the person over this default when his paste shows otherwise (an engineer who owns hiring, a founder who still writes
 code).
 
-**Form.** "Hi <first name>," then short plain-text paragraphs, no bullets, no markdown. The one body link sits on
+**Form.** "Hi <first name>," then short plain-text paragraphs, no bullets, no markdown, proper capitalization and
+spelling. The one body link sits on
 its own line. Then an optional sign-off word, varied between emails ("Thanks,", "Thank you,", "Best," or none), and
 the brief's `signature` exactly, line for line. Two people at one company get different emails; the save checks
 block near-copies.
@@ -158,8 +179,10 @@ Northeastern". Commas, colons and full stops carry the rhythm; every dash is a p
 
 ## The subject
 
-Written last, personal to the pair, from the most concrete true thing in the email, so it promises what the first
-line delivers. At most about 40 characters, lowercase is fine. What got opened first in the lab's inbox tests:
+Written last, from his side or the pair's, while the first line comes from theirs: the subject carries his story,
+lesson, result or honest gap, a plain question about the role, or a shared past, and the first line carries their
+company fact or the true tie. Take it from the most concrete true thing in the email. At most about 40 characters,
+lowercase is fine. What got opened first in the lab's inbox tests:
 
 - a shared past: "your <student group> days at northeastern"
 - his small true story: "$500 in claude credits led me here"
@@ -229,6 +252,11 @@ by code ("Re: " plus the first subject), so never give one. Fix `blocks` and sav
 
 ## Changing this skill
 
-A change to how this skill writes ships only after the blind judge picks it: in the live checkout,
-`python -m outreach.draft_lab judge --a <current set> --b <new set>` on a sample of 12 must pick the new set in at
-least 8 and the new set must not lose on either average score (`human`, `reply`). The report says PASS or FAIL.
+A change to how this skill writes ships only after the blind judge picks it, all in the live checkout. Build set a
+with `python -m outreach.draft_lab export --sample 12 --out .context/draft-lab/a.json` (stored first emails, read
+only). Build set b by writing the same 12 people's emails with the changed skill, running each through
+`check_draft` (never `save_draft`), and writing them to `.context/draft-lab/b.json` in the same format (a JSON list
+of `{"id", "recipient", "subject", "body"}`, the same `id` per person as in a: the message id export wrote). Then
+`python -m outreach.draft_lab judge --a .context/draft-lab/a.json --b .context/draft-lab/b.json`: it must pick b in
+at least 8 of 12, and b must not lose on either average score (`human`, `reply`). The report says PASS or FAIL. Set
+files hold real names, so they stay under `.context/`.

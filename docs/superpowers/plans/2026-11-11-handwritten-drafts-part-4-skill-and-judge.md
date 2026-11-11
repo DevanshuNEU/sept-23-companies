@@ -147,7 +147,12 @@ ships"), `docs/research/2026-11-09-drafting-lab.md` (the lab the judge repeats),
 
 ## Ship gate (after #210 is merged and this branch is rebased, before this PR is opened)
 
-In the live checkout, with the outreach MCP tools: `python -m outreach.draft_lab export --sample 12 --state approved
---out <a>`; draft the same 12 people with the new skill through `draft_brief` and `check_draft` (nothing saved) into
-`<b>`; `python -m outreach.draft_lab judge --a <a> --b <b>`; then the inbox mode. Put both summary lines in the PR. If the
-body verdict is FAIL, tune the skill and run again, at most twice, then bring the results to Devanshu.
+In the live checkout, with the outreach MCP tools: `uv run python -m outreach.draft_lab export --sample 12 --state
+approved --out <people>` (each item carries `person_id` for `draft_brief` and `check_draft`). The baseline is the
+current skill's own output for those people, not the stored Outbox emails (older output plus his edits): draft the 12
+with the skill as it stands into `<a>` and with the changed skill into `<b>`, through `draft_brief` and `check_draft`
+(nothing saved, already-emailed and approved states ignored), keeping `id` and `person_id` the same in both. Run
+`uv run python -m outreach.draft_lab judge --a <a> --b <b>`, then the inbox mode. For the version 5 skill, also judge
+`<b>` against the lab's version 5 set (kept privately in DevVault; it needs a `recipient` field): expect parity, not
+a PASS. Put the summary lines in the PR. If the body verdict is FAIL, tune the skill and run again, at most twice,
+then bring the results to Devanshu.

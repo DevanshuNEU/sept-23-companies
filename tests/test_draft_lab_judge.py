@@ -30,6 +30,14 @@ class LoadAndPair(unittest.TestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual(only, [])
 
+    def test_load_set_refuses_a_duplicate_id(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "a.json"
+            p.write_text(json.dumps([{"id": 1, "recipient": "R", "subject": "S", "body": "B"},
+                                     {"id": "1", "recipient": "R2", "subject": "S", "body": "B"}]))
+            with self.assertRaisesRegex(ValueError, "duplicate id"):
+                judge.load_set(p)
+
     def test_sets_with_different_ids(self):
         pairs, only = judge.pair_sets([d(1), d(2)], [d(2), d(3)])
         self.assertEqual([p[0].id for p in pairs], ["2"])
@@ -185,6 +193,27 @@ class Robustness(unittest.TestCase):
             res = judge.score_inbox(bad, ikey)
             self.assertEqual(res.items, 0)
             judge.report(res, seed=1, mode="inbox")
+
+    def test_scores_must_be_finite_real_numbers_from_1_to_10(self):
+        for bad in (float("inf"), float("nan"), True, 11, 0, "7", None):
+            reply = self.full()
+            lab = "B" if self.key["0"]["B"] == "b" else "A"
+            reply["items"][0]["human"][lab] = bad
+            res = judge.score_body(reply, self.key, self.pairs)
+            self.assertEqual(res.malformed, ["0"], bad)
+            self.assertEqual(judge.verdict(res), "INCOMPLETE")
+
+    def test_pass_needs_at_least_8_compared_items(self):
+        a, b = make_sets()
+        ties = [d(i) for i in range(1, 12)]
+        a = [d(0)] + ties
+        b = [d(0, body="Hi Sam,\n\nA different note about your compiler talk that I really liked a lot.\n\nDev")] + ties
+        pairs, _ = judge.pair_sets(a, b)
+        _, key = judge.body_prompt(pairs, seed=2)
+        reply = BodyMode()._reply(key, ["0"])
+        res = judge.score_body(reply, key, pairs)
+        self.assertEqual((res.compared, res.wins_b, res.ties), (1, 1, 11))
+        self.assertEqual(judge.verdict(res), "INCOMPLETE")
 
     def test_missing_items_make_the_verdict_incomplete(self):
         reply = self.full()

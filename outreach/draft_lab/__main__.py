@@ -81,8 +81,8 @@ def _out_refused(out: str | None) -> str | None:
     """A plain message when `out` is inside the repo but not under .context/ (the repo is public)."""
     if not out:
         return None
-    root = Path(live_checkout.REPO_ROOT).resolve()
-    target = Path(out).resolve()
+    root = Path(str(Path(live_checkout.REPO_ROOT).resolve()).casefold())
+    target = Path(str(Path(out).resolve()).casefold())  # macOS keeps letter case but ignores it
     if target.is_relative_to(root) and not target.is_relative_to(root / ".context"):
         return f"refusing --out {out}: it is inside the repo, which is public. Use a path under .context/ or outside the repo."
     return None
@@ -94,7 +94,11 @@ def _judge(args, stdout, runner) -> int:
         return 1
     if not args.dry_run:
         _require_live("the draft judge")
-    pairs, only = judge.pair_sets(judge.load_set(args.a), judge.load_set(args.b))
+    try:
+        pairs, only = judge.pair_sets(judge.load_set(args.a), judge.load_set(args.b))
+    except (ValueError, KeyError, OSError) as err:
+        print(f"judge failed: cannot read the sets: {err}", file=stdout)
+        return 1
     if only:
         print(f"ids in only one set, skipped: {', '.join(only)}", file=stdout)
     if not pairs:
@@ -134,14 +138,18 @@ def _export(args, stdout) -> int:
     try:
         conn.execute("PRAGMA query_only = ON")  # the export only reads
         rows = conn.execute(
-            "SELECT m.message_id, m.subject, m.body, p.title, c.name FROM message m "
+            "SELECT m.message_id, t.person_id, m.subject, m.body, p.title, c.name FROM message m "
             "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
             "JOIN company c ON c.company_id = p.company_id WHERE m.seq = 0 AND m.state = ? ORDER BY m.message_id",
             (args.state,)).fetchall()
     finally:
         conn.close()
-    picked = random.Random(args.seed).sample(rows, min(args.sample, len(rows)))
-    out = [{"id": str(r["message_id"]), "recipient": f"{r['title'] or 'Engineer'} at {r['name']}",
+    if len(rows) < args.sample:
+        print(f"found only {len(rows)} {args.state} first emails, fewer than the {args.sample} asked for; "
+              f"nothing written", file=stdout)
+        return 1
+    picked = random.Random(args.seed).sample(rows, args.sample)
+    out = [{"id": str(r["message_id"]), "person_id": r["person_id"], "recipient": f"{r['title'] or 'Engineer'} at {r['name']}",
             "subject": r["subject"], "body": r["body"]} for r in picked]
     path = Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)

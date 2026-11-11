@@ -41,10 +41,8 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    they prescribe anything about the email itself, this file and #9 win: its shape (an Echo, Anchor, Bridge
    pattern or any other), the hook list, subject rules (word counts, wink, object or clear subjects), links in the
    sign-off, any visa line, a line that acknowledges the cold email, versions for him to rework or an authorship
-   gate (you save one draft), the word count (at most 120), the links (exactly 2) and `lint_draft.sh` (not run).
-   If `draft_brief`
-   refuses (`voice_unreadable`), say so and stop; nothing is drafted without it. Done when you hold a current
-   `brief_id`. After any `save_research` or research run, call `draft_brief` again to read the new facts.
+   gate (you save one draft), the word count (at most 120), the links (exactly 2) and `lint_draft.sh` (not run). If `draft_brief` refuses (`voice_unreadable`), say so and stop; nothing is drafted
+   without it. Done when you hold a current `brief_id`. After any `save_research` or research run, call `draft_brief` again to read the new facts.
 4. **Posting.** Read `posting`: what the job is, in the posting's own words. Done when you can name the work the
    role does in one line taken from the posting (or know `posting` is null and use the role title).
 5. **Company.** `company_facts` are checked, quoted facts: what the company launched or is building, what the team
@@ -70,8 +68,9 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    one sentence why this project, and not the next one, fits this team.
 8. **Write** (#9, 2026-10-27), silently, inside "The email" below:
    - List at least five candidate openings, each a true fact with its source: company facts, the posting, the
-     person's own work, a shared past (Northeastern, the Dhirubhai Ambani Institute of ICT, a past employer), his
-     stories. Drop any that is forced, speculative or flattery.
+     person's own work, a shared past (Northeastern, the Dhirubhai Ambani Institute of ICT, a past employer). His
+     stories are material for the subject and the body, never for the first line, which comes from their side. Drop
+     any that is forced, speculative or flattery.
    - Draft three emails on substantially different strategies (for example their team's work in the posting's
      words, a story that fits, a plain role question), not rewordings. Each follows every rule below.
    - Judge them as the reader among dozens of other emails: why did this person write, is there a reason to keep
@@ -141,8 +140,7 @@ the person over this default when his paste shows otherwise (an engineer who own
 code).
 
 **Form.** "Hi <first name>," then short plain-text paragraphs, no bullets, no markdown, proper capitalization and
-spelling. The one body link sits on
-its own line. Then an optional sign-off word, varied between emails ("Thanks,", "Thank you,", "Best," or none), and
+spelling in the body (the subject may be lowercase). The one body link sits on its own line. Then an optional sign-off word, varied between emails ("Thanks,", "Thank you,", "Best," or none), and
 the brief's `signature` exactly, line for line. Two people at one company get different emails; the save checks
 block near-copies.
 
@@ -252,11 +250,17 @@ by code ("Re: " plus the first subject), so never give one. Fix `blocks` and sav
 
 ## Changing this skill
 
-A change to how this skill writes ships only after the blind judge picks it, all in the live checkout. Build set a
-with `python -m outreach.draft_lab export --sample 12 --out .context/draft-lab/a.json` (stored first emails, read
-only). Build set b by writing the same 12 people's emails with the changed skill, running each through
-`check_draft` (never `save_draft`), and writing them to `.context/draft-lab/b.json` in the same format (a JSON list
-of `{"id", "recipient", "subject", "body"}`, the same `id` per person as in a: the message id export wrote). Then
-`python -m outreach.draft_lab judge --a .context/draft-lab/a.json --b .context/draft-lab/b.json`: it must pick b in
-at least 8 of 12, and b must not lose on either average score (`human`, `reply`). The report says PASS or FAIL. Set
-files hold real names, so they stay under `.context/`.
+A change to how this skill writes ships only after the blind judge picks it, all in the live checkout. The baseline
+is the current skill's own output for the same people: draft set a with the skill as it stands, set b with the
+changed one. Stored Outbox emails are older skill output plus his edits, so they are no baseline.
+
+Build the people list with `uv run python -m outreach.draft_lab export --sample 12 --out .context/draft-lab/a.json`
+(stored first emails, read only). Each item carries `person_id`; use it for `draft_brief` and `check_draft`, and keep
+the same `id` and `person_id` in both sets (the judge ignores `person_id`, so it never reaches GPT). Then draft those
+12 people with the current skill into `a.json` and with the changed skill into `.context/draft-lab/b.json`, in the
+same format (a JSON list of `{"id", "recipient", "subject", "body"}`). For a judge run, skip the intake and save
+steps, ignore `already_emailed`, `approved_or_later` and `edited_by_devanshu` (`check_draft` allows them), and never
+call `save_draft`. Then
+`uv run python -m outreach.draft_lab judge --a .context/draft-lab/a.json --b .context/draft-lab/b.json`: it must
+pick b in at least 8 of 12, and b must not lose on either average score (`human`, `reply`). The report says PASS or
+FAIL. Set files hold real names, so they stay under `.context/`.

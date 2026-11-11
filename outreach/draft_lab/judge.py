@@ -17,6 +17,7 @@ _HERE = Path(__file__).parent
 METRICS = ("human", "personal", "warm", "reply")
 PREVIEW_CHARS = 110
 DECOYS_PER_ITEM = 4
+MIN_COMPARED = 8
 # Neutral made-up senders shown for the a and b rows in inbox mode.
 SENDER_NAMES = [
     "Alex Morgan", "Jordan Blake", "Taylor Quinn", "Casey Reed", "Riley Hart", "Morgan Ellis",
@@ -34,7 +35,13 @@ class Draft:
 
 def load_set(path) -> list[Draft]:
     rows = json.loads(Path(path).read_text())
-    return [Draft(str(r["id"]), r["recipient"], r["subject"], r["body"]) for r in rows]
+    drafts = [Draft(str(r["id"]), r["recipient"], r["subject"], r["body"]) for r in rows]
+    seen = set()
+    for x in drafts:
+        if x.id in seen:
+            raise ValueError(f"{path}: duplicate id {x.id}")
+        seen.add(x.id)
+    return drafts
 
 
 def load_decoys() -> list[dict]:
@@ -122,10 +129,10 @@ def parse_reply(text: str) -> dict:
 
 
 def _num(v):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
+    """A score: an int or float (not a bool), finite, from 1 to 10. Anything else is None."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 1 <= v <= 10:
         return None
+    return float(v)
 
 
 def _list(v) -> list:
@@ -206,12 +213,16 @@ def score_body(reply, key: dict, pairs) -> BodyResult:
 
 
 def verdict(result: BodyResult) -> str:
-    """INCOMPLETE when any item is missing from the reply or malformed (the bar needs every item judged).
-    Otherwise PASS when b wins at least two thirds of the compared non-tie items (8 of 12) and b's average scores
+    """INCOMPLETE when any item is missing from the reply or malformed (the bar needs every item judged), or when
+    fewer than MIN_COMPARED non-tie items were compared (too few to pass on). Otherwise PASS when b wins at least two thirds of the compared non-tie items (8 of 12) and b's average scores
     for "human" and "reply" are not below a's, else FAIL. No compared items is INCOMPLETE if something was
     missing or malformed, else FAIL."""
-    if result.missing or result.malformed or result.compared == 0:
-        return "INCOMPLETE" if (result.missing or result.malformed) else "FAIL"
+    if result.missing or result.malformed:
+        return "INCOMPLETE"
+    if result.compared == 0:
+        return "FAIL"
+    if result.compared < MIN_COMPARED:
+        return "INCOMPLETE"
     needed = math.ceil(2 * result.compared / 3)
     ok = (result.wins_b >= needed
           and result.avg_b["human"] >= result.avg_a["human"]

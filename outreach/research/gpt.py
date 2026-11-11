@@ -31,7 +31,7 @@ class Runner(Protocol):
 
 
 class CodexRunner:
-    """`codex --search exec` in a fresh scratch directory; returns the text of its output file."""
+    """`codex exec` (with `--search` only when search is on) in a fresh scratch directory; returns the text of its output file."""
 
     def __init__(self, timeout: int = TIMEOUT_SECONDS, search: bool = True):
         self.timeout = timeout

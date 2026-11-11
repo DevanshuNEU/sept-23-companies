@@ -55,14 +55,17 @@ class JudgeCliTest(unittest.TestCase):
 
     def test_judge_dry_run_prints_the_prompt_and_calls_nothing(self):
         runner, out = FakeRunner("{}"), io.StringIO()
-        with mock.patch("live_checkout.is_live", return_value=False):
+        default = Path(self.tmp.name) / "default-reports"
+        with mock.patch("live_checkout.is_live", return_value=False), \
+                mock.patch.object(cli, "_default_report_path", lambda: default / "r.md"):
             code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b), "--seed", "1", "--dry-run"],
                             stdout=out, runner=runner)
         self.assertEqual(code, 0)
         self.assertEqual(runner.calls, [])
         self.assertIn("old note", out.getvalue())
         self.assertIn("new note", out.getvalue())
-        self.assertEqual(list(Path(self.tmp.name).glob("*.md")), [])
+        self.assertEqual(list(Path(self.tmp.name).rglob("*.md")), [])
+        self.assertFalse(default.exists())
 
     def test_judge_outside_the_live_checkout_is_refused(self):
         runner = FakeRunner("{}")
@@ -71,6 +74,7 @@ class JudgeCliTest(unittest.TestCase):
         self.assertEqual(runner.calls, [])
 
     def test_judge_writes_the_report_and_summary_line(self):
+        self.a, self.b = write_sets(self.tmp.name, n=8)
         pairs, _ = judge.pair_sets(judge.load_set(self.a), judge.load_set(self.b))
         _, key = judge.body_prompt(pairs, seed=4)
         runner, out = FakeRunner(winning_reply(pairs, key)), io.StringIO()
@@ -79,9 +83,19 @@ class JudgeCliTest(unittest.TestCase):
             code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b), "--seed", "4", "--out", str(report)],
                             stdout=out, runner=runner)
         self.assertEqual(code, 0)
-        self.assertEqual(out.getvalue().strip(), "b wins 3 of 3, human 8.0 vs 5.0, reply 8.0 vs 5.0: PASS")
+        self.assertEqual(out.getvalue().strip(), "b wins 8 of 8, human 8.0 vs 5.0, reply 8.0 vs 5.0: PASS")
         self.assertIn("Seed: 4", report.read_text())
         self.assertEqual(len(runner.calls), 1)
+
+    def test_duplicate_ids_in_a_set_are_a_plain_error(self):
+        rows = json.loads(self.a.read_text())
+        rows.append(dict(rows[0]))
+        self.a.write_text(json.dumps(rows))
+        out = io.StringIO()
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b)], stdout=out, runner=FakeRunner("{}"))
+        self.assertEqual(code, 1)
+        self.assertIn("duplicate id", out.getvalue())
 
     def test_judge_inbox_mode_summary(self):
         pairs, _ = judge.pair_sets(judge.load_set(self.a), judge.load_set(self.b))
@@ -134,6 +148,14 @@ class JudgeCliTest(unittest.TestCase):
         self.assertIsNone(cli._out_refused(str(Path(self.tmp.name) / "r.md")))
         self.assertIsNone(cli._out_refused(None))
 
+    def test_out_guard_ignores_letter_case_and_dot_dot(self):
+        root = Path(live_checkout.REPO_ROOT)
+        swapped = str(root).swapcase() + "/report.md"
+        self.assertIn("inside the repo", cli._out_refused(swapped))
+        self.assertIn("inside the repo", cli._out_refused(str(root / ".context" / ".." / "x.json")))
+        self.assertIn("inside the repo", cli._out_refused(str(root / ".CONTEXT-not" / "x.json")))
+        self.assertIsNone(cli._out_refused(str(root / ".Context" / "x.json")))
+
     def test_unparseable_reply_is_a_plain_failure(self):
         out = io.StringIO()
         report = Path(self.tmp.name) / "r.md"
@@ -184,10 +206,19 @@ class ExportCliTest(unittest.TestCase):
         rows = json.loads(out_file.read_text())
         self.assertEqual(len(rows), 2)
         for r in rows:
-            self.assertEqual(set(r), {"id", "recipient", "subject", "body"})
+            self.assertEqual(set(r), {"id", "person_id", "recipient", "subject", "body"})
+            self.assertIsInstance(r["person_id"], int)
             self.assertEqual(r["recipient"], "Staff Engineer at Acme")
             self.assertIn(r["body"], ("Body 0.0", "Body 1.0", "Body 2.0"))  # approved first emails only
         self.assertEqual(len(judge.load_set(out_file)), 2)
+        self.assertNotIn("person_id", judge.body_prompt([(d, d) for d in judge.load_set(out_file)], seed=1)[0])
+
+    def test_export_with_fewer_rows_than_asked_exits_1(self):
+        out_file, out = Path(self.tmp.name) / "set.json", io.StringIO()
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["export", "--sample", "5", "--out", str(out_file)], stdout=out)
+        self.assertEqual(code, 1)
+        self.assertIn("found only 3", out.getvalue())
 
     def test_export_connection_is_query_only_and_closed(self):
         seen = []
@@ -227,9 +258,9 @@ class ExportCliTest(unittest.TestCase):
     def test_export_state_and_seed(self):
         a, b = (Path(self.tmp.name) / n for n in ("a.json", "b.json"))
         with mock.patch("live_checkout.is_live", return_value=True):
-            cli.main(["export", "--sample", "9", "--state", "drafted", "--out", str(a)], stdout=io.StringIO())
+            cli.main(["export", "--sample", "1", "--state", "drafted", "--out", str(a)], stdout=io.StringIO())
             for f in (b,):
-                cli.main(["export", "--sample", "9", "--seed", "1", "--out", str(f)], stdout=io.StringIO())
+                cli.main(["export", "--sample", "3", "--seed", "1", "--out", str(f)], stdout=io.StringIO())
         self.assertEqual([r["body"] for r in json.loads(a.read_text())], ["Body 3.0"])
         self.assertEqual(len(json.loads(b.read_text())), 3)
 

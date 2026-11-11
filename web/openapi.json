@@ -17,6 +17,98 @@
         "title": "AddFromBenchBody",
         "type": "object"
       },
+      "AppliedResult": {
+        "properties": {
+          "appliedOn": {
+            "title": "Appliedon",
+            "type": "string"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "appliedOn",
+          "text"
+        ],
+        "title": "AppliedResult",
+        "type": "object"
+      },
+      "AppliedRow": {
+        "properties": {
+          "appliedOn": {
+            "title": "Appliedon",
+            "type": "string"
+          },
+          "companyId": {
+            "title": "Companyid",
+            "type": "integer"
+          },
+          "companyName": {
+            "title": "Companyname",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          },
+          "postingId": {
+            "title": "Postingid",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "postingId",
+          "companyId",
+          "companyName",
+          "title",
+          "url",
+          "appliedOn",
+          "open"
+        ],
+        "title": "AppliedRow",
+        "type": "object"
+      },
+      "AppliedView": {
+        "properties": {
+          "asOf": {
+            "title": "Asof",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "rows"
+        ],
+        "title": "AppliedView",
+        "type": "object"
+      },
       "BaseRates": {
         "properties": {
           "accepts": {
@@ -3092,7 +3184,7 @@
       },
       "JobWriteBody": {
         "additionalProperties": false,
-        "description": "The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's\nkey.",
+        "description": "The body of Pass, Applied, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the\nwrite's key.",
         "properties": {},
         "title": "JobWriteBody",
         "type": "object"
@@ -8172,6 +8264,10 @@
       },
       "ShellSummary": {
         "properties": {
+          "appliedCount": {
+            "title": "Appliedcount",
+            "type": "integer"
+          },
           "asOf": {
             "title": "Asof",
             "type": "string"
@@ -8250,6 +8346,7 @@
           "openReviewItems",
           "noGoCount",
           "doneCount",
+          "appliedCount",
           "sending",
           "repliesThisMonth",
           "jobs",
@@ -9214,6 +9311,77 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/applied": {
+      "get": {
+        "operationId": "applied_view",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppliedView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Applied View",
+        "tags": [
+          "applied"
+        ]
+      }
+    },
     "/api/companies/{company_id}": {
       "get": {
         "operationId": "company",
@@ -11390,6 +11558,121 @@
           }
         },
         "summary": "Check Now",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{posting_id}/applied": {
+      "post": {
+        "description": "Applied: he applied online to this posting. It leaves the job list for good and lists on Applied.",
+        "operationId": "applied",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "posting_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Posting Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWriteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppliedResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Applied",
         "tags": [
           "jobs"
         ]

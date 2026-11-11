@@ -50,8 +50,8 @@ class JobsView(Wire):
 
 
 class JobWriteBody(WireRequest):
-    """The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's
-    key."""
+    """The body of Pass, Applied, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the
+    write's key."""
 
 
 class PassJobResult(Wire):
@@ -64,6 +64,13 @@ class DoneResult(Wire):
     posting_id: int
     company_id: int  # the company marked: the survivor of any merge
     reached_on: str  # YYYY-MM-DD in New York, the day of the standing mark (the first one when it was already marked)
+    text: str
+
+
+class AppliedResult(Wire):
+    posting_id: int
+    company_id: int  # the survivor of any merge
+    applied_on: str  # YYYY-MM-DD in New York: today, or the day of the standing application
     text: str
 
 

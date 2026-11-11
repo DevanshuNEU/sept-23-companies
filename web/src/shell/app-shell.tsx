@@ -32,6 +32,7 @@ const VIEW_TITLE: Record<string, string> = {
   wins: 'Wins',
   pipeline: 'Pipeline',
   done: 'Done',
+  applied: 'Applied',
 };
 
 const GO: [key: string, path: string, name: string][] = [
@@ -41,6 +42,7 @@ const GO: [key: string, path: string, name: string][] = [
   ['n', '/needs-you', 'Needs you'],
   ['x', '/no-go', 'No-go'],
   ['d', '/done', 'Done'],
+  ['a', '/applied', 'Applied'],
   ['p', '/progress', 'Progress'],
   ['w', '/wins', 'Wins'],
   ['i', '/pipeline', 'Pipeline'],

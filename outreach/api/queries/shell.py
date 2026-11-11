@@ -1,8 +1,8 @@
 """The shell summary: the sidebar's counts and the sender line, in one read.
 
 A dozen counts and no per-row query: every number reads the same rows the view it summarizes reads, through that
-view's own count (`done_count`, `no_go_count`, `open_count`, `replied_count`, `plan_counts`, `wins_unseen`), so the
-sidebar never disagrees with the page it links to. The ones with no view of their own are counted here:
+view's own count (`done_count`, `applied_count`, `no_go_count`, `open_count`, `replied_count`, `plan_counts`,
+`wins_unseen`), so the sidebar never disagrees with the page it links to. The ones with no view of their own are counted here:
 
 - `draftsToReview`: the Outbox's `review` group: an open email thread whose current message (the newest that is not
   planned or skipped) is a draft, at a company that is neither closed, removed nor paused;
@@ -13,7 +13,7 @@ import sqlite3
 from outreach.api.config import ApiConfig
 from outreach.api.models.pipeline import PipelineLine
 from outreach.api.models.shell import PlanProgress, ShellSummary
-from outreach.api.queries import done, jobs, linkedin, needs_you, no_go, progress, today
+from outreach.api.queries import applied, done, jobs, linkedin, needs_you, no_go, progress, today
 from outreach.api.queries.company import merge_parents, survivor_of
 from outreach.api.queries.outcomes import by_ids
 from outreach.api.queries.sending import read_sender, summary_of
@@ -73,7 +73,8 @@ def shell_summary(conn: sqlite3.Connection, now: str, cfg: ApiConfig, *, old_sen
                                        "AND reply_kind = 'unsorted'").fetchone()[0],
         drafts_to_review=drafts_to_review(conn), linkedin_replied=linkedin.replied_count(conn),
         open_review_items=needs_you.open_count(conn, now), no_go_count=no_go.no_go_count(conn),
-        done_count=done.done_count(conn), sending=summary_of(sender),
+        done_count=done.done_count(conn), applied_count=applied.applied_count(conn),
+        sending=summary_of(sender),
         replies_this_month=done.replies_this_month(conn, now), jobs=jobs.last_runs(conn, now),
         plan=PlanProgress(done=finished, total=planned), wins_unseen=progress.wins_unseen(conn),
         pipeline=pipeline_line(conn, now))

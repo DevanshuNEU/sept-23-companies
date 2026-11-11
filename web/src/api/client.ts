@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -93,6 +93,10 @@ export interface OutreachClient {
   jobs(params: JobsParams): Promise<JobsView>;
   /** Pass hides one posting, never its company; the same request id answers the same. */
   passJob(postingId: Id, o: WriteOptions): Promise<PassJobResult>;
+  /** Applied (#218): records that he applied online to the posting and takes it off the job list for good. Applied again writes nothing and says when. */
+  markApplied(postingId: Id, o: WriteOptions): Promise<AppliedResult>;
+  /** Every posting he applied to (#218), newest first. */
+  applied(): Promise<AppliedView>;
   /** Done (#195): marks the posting's company as reached, even when he reached it outside Knock. Nothing else stops it; Done again on a marked company writes nothing. */
   markReached(postingId: Id, o: WriteOptions): Promise<DoneResult>;
   /** Takes his Done mark back (the company page's Undo). A company with no mark answers `cleared: false`. */

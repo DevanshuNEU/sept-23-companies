@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/applied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Applied View */
+        get: operations["applied_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}": {
         parameters: {
             query?: never;
@@ -368,6 +385,26 @@ export interface paths {
          *     the job is started again; a check that is running is only reported. A replayed key starts nothing.
          */
         post: operations["check_now"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{posting_id}/applied": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Applied
+         * @description Applied: he applied online to this posting. It leaves the job list for good and lists on Applied.
+         */
+        post: operations["applied"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1310,6 +1347,41 @@ export interface components {
         AddFromBenchBody: {
             /** Idempotencykey */
             idempotencyKey: string;
+        };
+        /** AppliedResult */
+        AppliedResult: {
+            /** Appliedon */
+            appliedOn: string;
+            /** Companyid */
+            companyId: number;
+            /** Postingid */
+            postingId: number;
+            /** Text */
+            text: string;
+        };
+        /** AppliedRow */
+        AppliedRow: {
+            /** Appliedon */
+            appliedOn: string;
+            /** Companyid */
+            companyId: number;
+            /** Companyname */
+            companyName: string;
+            /** Open */
+            open: boolean;
+            /** Postingid */
+            postingId: number;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
+        /** AppliedView */
+        AppliedView: {
+            /** Asof */
+            asOf: string;
+            /** Rows */
+            rows: components["schemas"]["AppliedRow"][];
         };
         /** BaseRates */
         BaseRates: {
@@ -2332,8 +2404,8 @@ export interface components {
         };
         /**
          * JobWriteBody
-         * @description The body of Pass, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the write's
-         *     key.
+         * @description The body of Pass, Applied, Done, Done's undo and Check now: nothing. The page's `Idempotency-Key` header is the
+         *     write's key.
          */
         JobWriteBody: Record<string, never>;
         /** JobsView */
@@ -4042,6 +4114,8 @@ export interface components {
         };
         /** ShellSummary */
         ShellSummary: {
+            /** Appliedcount */
+            appliedCount: number;
             /** Asof */
             asOf: string;
             /** Capacitytoday */
@@ -4384,6 +4458,71 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    applied_view: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppliedView"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     company: {
         parameters: {
             query?: never;
@@ -6006,6 +6145,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckNowResult"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    applied: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                posting_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppliedResult"];
                 };
             };
             /** @description bad_request: the request was not valid */

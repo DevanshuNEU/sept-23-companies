@@ -367,6 +367,68 @@ describe('the Jobs page', () => {
     });
   });
 
+  describe('Applied', () => {
+    const appliedButton = (i = 0) => within(rows()[i] as HTMLElement).getByRole('button', { name: 'Mark applied' });
+
+    it('takes the row off at once, says so with an Undo, and sends nothing until the window closes', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      const sent = vi.spyOn(client, 'markApplied');
+      const passed = vi.spyOn(client, 'passJob');
+      const second = titles()[1];
+      await user.click(appliedButton());
+      expect(rows()).toHaveLength(19);
+      expect(titles()[0]).toBe(second);
+      expect(screen.getByText('21 at your level in the last 30 days')).toBeInTheDocument();
+      expect(await screen.findByText('Saved to Applied.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+      expect(sent).not.toHaveBeenCalled();
+      expect(passed).not.toHaveBeenCalled();
+    });
+
+    it('Undo inside the window puts the row back and sends nothing', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      const sent = vi.spyOn(client, 'markApplied');
+      await user.click(appliedButton());
+      await user.click(await screen.findByRole('button', { name: 'Undo' }));
+      await waitFor(() => expect(rows()).toHaveLength(20));
+      expect(rows()[0]?.getAttribute('data-job')).toBe('9000');
+      await leavePage();
+      await settle(0);
+      expect(sent).not.toHaveBeenCalled();
+    });
+
+    it('I marks the row he is on applied, and leaving the page sends exactly one request, never a pass', async () => {
+      const { client } = await open();
+      const sent = vi.spyOn(client, 'markApplied');
+      const passed = vi.spyOn(client, 'passJob');
+      press('ArrowDown');
+      press('i');
+      expect(rows()).toHaveLength(19);
+      expect(rows()[1]).toHaveAttribute('aria-current', 'true');
+      await leavePage();
+      await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
+      expect(sent.mock.calls[0]?.[0]).toBe(9001);
+      expect(passed).not.toHaveBeenCalled();
+      await waitFor(() => expect(rows().some((r) => r.getAttribute('data-job') === '9001')).toBe(false));
+    });
+
+    it('puts the row back and says what happened when it did not go through', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      vi.spyOn(client, 'markApplied').mockRejectedValue(new ApiError('not_found', 'There is no posting 9000.'));
+      await user.click(appliedButton());
+      await leavePage();
+      await waitFor(() => expect(rows()[0]?.getAttribute('data-job')).toBe('9000'));
+    });
+
+    it('the key hint names I for applied', async () => {
+      await open();
+      expect(screen.getByText('applied', { exact: false, selector: 'span' })).toHaveTextContent('I applied');
+    });
+  });
+
   describe('Reached', () => {
     const reachedButton = (row: HTMLElement) => within(row).getByRole('button', { name: /^Mark reached/ });
     const retell = () => rows().filter((r) => r.getAttribute('data-company') === 'Retell AI');

@@ -34,6 +34,8 @@ export const planMethods = (t: Transport): LiveMethods => ({
   jobs: (p) =>
     getJson(t, '/api/jobs', { query: { view: p.view, window: p.window, size: p.size, notContacted: p.notContacted ? 'true' : undefined, q: p.q || undefined, after: p.after || undefined, limit: p.limit } }),
   passJob: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/pass', {}, o, { params: { posting_id: postingId } }),
+  markApplied: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/applied', {}, o, { params: { posting_id: postingId } }),
+  applied: () => getJson(t, '/api/applied'),
   markReached: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/done', {}, o, { params: { posting_id: postingId } }),
   checkNow: (o) => sendJson(t, 'post', '/api/jobs/check-now', {}, o),
   checkStatus: () => getJson(t, '/api/jobs/check'),

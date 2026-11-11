@@ -17,7 +17,8 @@ TODAY = "2026-11-10"
 CONTEXT = json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "roleAgeDays": 0, "rankerVersion": "r1",
                       "signals": {}, "roleNamed": False})
 FIELDS = {"asOf", "pickedToday", "capacityToday", "unhandledReplies", "draftsToReview", "linkedinReplied",
-          "openReviewItems", "noGoCount", "doneCount", "sending", "repliesThisMonth", "jobs", "plan", "winsUnseen", "pipeline"}
+          "openReviewItems", "noGoCount", "doneCount", "appliedCount", "sending", "repliesThisMonth", "jobs", "plan",
+          "winsUnseen", "pipeline"}
 
 
 def outreach_touch(conn, company, person, channel="linkedin_request", sent_at="2026-11-10T13:00:00Z", **cols) -> int:
@@ -127,7 +128,7 @@ class Shell(ApiCase):
         self.assertEqual(set(body), FIELDS)
         self.assertEqual(body["asOf"], NOW)
         for key in ("pickedToday", "unhandledReplies", "draftsToReview", "linkedinReplied",
-                    "openReviewItems", "noGoCount", "doneCount", "repliesThisMonth", "winsUnseen"):
+                    "openReviewItems", "noGoCount", "doneCount", "appliedCount", "repliesThisMonth", "winsUnseen"):
             self.assertEqual(body[key], 0, key)
         self.assertEqual([j["job"] for j in body["jobs"]], ["rebuild"])  # the store's own install run
         self.assertEqual(body["plan"], {"done": 0, "total": 0})

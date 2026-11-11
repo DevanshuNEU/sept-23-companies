@@ -7,9 +7,11 @@ import unittest
 from unittest import mock
 
 from outreach.crawl import tick
+from outreach.outcomes.context import build_context
 from outreach.pipeline import alerts
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
+from outreach.store.writes import log_touch
 from tests.ranking_store import BACKFILL, board, decision, evidence, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
@@ -111,6 +113,15 @@ class OncePerPostingTests(AlertCase):
         banned = seed_company(self.conn, "Banned")
         self.job("Banned Job", company=banned)
         no_go(self.conn, banned)
+        self.assertEqual(self.alert(), 0)
+
+    def test_a_posting_he_applied_to_does_not_alert(self):
+        cid = seed_company(self.conn, "Applied Co")
+        pid = self.job("Applied Job", company=cid)
+        ctx = build_context(source="own", lane="own", role_kind=None, role_age_days=0, ranker_version=None,
+                            signals={}, role_named=True)
+        log_touch(self.conn, person_id=None, company_id=cid, channel="application", sent_at="2026-11-03T14:30:00Z",
+                  context=ctx, posting_id=pid, idempotency_key="applied-alert-0001")
         self.assertEqual(self.alert(), 0)
 
 

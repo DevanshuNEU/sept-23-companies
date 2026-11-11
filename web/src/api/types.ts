@@ -80,7 +80,7 @@ export interface Pulse { revision: number }
 export interface PipelineLine { text: string; alarms: string[]; tone: 'bad' | 'idle' }
 export interface ShellSummary {
   asOf: IsoTime; pickedToday: number; capacityToday: number; unhandledReplies: number; draftsToReview: number;
-  linkedinReplied: number; openReviewItems: number; noGoCount: number; doneCount: number;
+  linkedinReplied: number; openReviewItems: number; noGoCount: number; doneCount: number; appliedCount: number;
   sending: { state: SenderState; sentToday: number; limitToday: number };
   repliesThisMonth: number; jobs: JobRunSummary[];
   plan: { done: number; total: number }; winsUnseen: number; // today's plan rows done of planned, and wins not yet seen (#33)
@@ -425,6 +425,15 @@ export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
  * the New York day of the standing mark (the first one when it was already marked), `text` the API's sentence.
  */
 export interface DoneResult { postingId: Id; companyId: Id; reachedOn: IsoDate; text: string }
+/**
+ * Applied (#218): he applied online to the posting. `companyId` is the survivor of any merge, `appliedOn` the New York
+ * day (the first one when he had already applied), `text` the API's sentence. The posting leaves the job list for good.
+ */
+export interface AppliedResult { postingId: Id; companyId: Id; appliedOn: IsoDate; text: string }
+/** One posting he applied to: its role and link (may be empty), the company after any merge, the day, and whether it is still open. */
+export interface AppliedRow { postingId: Id; companyId: Id; companyName: string; title: string; url: string; appliedOn: IsoDate; open: boolean }
+/** `GET /api/applied`: every posting he applied to, newest first. */
+export interface AppliedView { asOf: IsoTime; rows: AppliedRow[] }
 /** Done taken back: `cleared` is false when there was no mark, and nothing was written. */
 export interface ClearDoneResult { companyId: Id; cleared: boolean }
 /**

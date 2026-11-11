@@ -103,6 +103,24 @@ describe('AppShell sidebar', () => {
     expect(within(nav(/^Done/)).getByText('4')).toBeInTheDocument();
   });
 
+  it('lists Applied under Lists with how many jobs he applied to, and no count at zero', async () => {
+    class Applied extends FixtureClient {
+      override async shell() {
+        return { ...(await super.shell()), appliedCount: 12 };
+      }
+    }
+    await shell('/browse', new Applied());
+    const lists = within(sidebar()).getByRole('navigation', { name: 'Lists' });
+    const applied = within(lists).getByRole('link', { name: /^Applied/ });
+    expect(applied).toHaveAttribute('href', '/applied');
+    expect(await within(applied).findByText('12')).toBeInTheDocument();
+  });
+
+  it('shows no Applied count when he has applied to nothing', async () => {
+    await shell();
+    expect(nav(/^Applied/)).toHaveTextContent(/^Applied$/);
+  });
+
   it('sidebar has no Today and lists Jobs first', async () => {
     await shell('/browse');
     expect(within(sidebar()).queryByRole('link', { name: /^Today/ })).toBeNull();

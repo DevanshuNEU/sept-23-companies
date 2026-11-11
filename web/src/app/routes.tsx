@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router';
 import { RootError, RouteError } from '@/app/route-error';
 import { AppShell } from '@/shell/app-shell';
 import {
+  AppliedPage,
   BrowsePage,
   CompanyPage,
   DonePage,
@@ -30,6 +31,7 @@ export const viewRoutes: RouteObject[] = [
   { path: 'no-go', element: <NoGoPage />, children: [{ path: 'people', element: <ParentReads /> }] },
   { path: 'companies/:companyId', element: <CompanyPage /> },
   { path: 'done', element: <DonePage /> },
+  { path: 'applied', element: <AppliedPage /> },
   { path: 'progress', element: <ProgressPage /> },
   { path: 'wins', element: <WinsPage /> },
 ];

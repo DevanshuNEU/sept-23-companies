@@ -2,6 +2,7 @@
 
 `GET /api/jobs` is open engineering postings, newest first, one page at a time (`outreach.pipeline.joblist` decides
 which and in which order). `POST /api/jobs/{postingId}/pass` hides one posting and never its company;
+`POST /api/jobs/{postingId}/applied` records that he applied online and takes the posting off the list (#218);
 `POST /api/jobs/{postingId}/done` marks its company as reached (#195; its undo is in `company_writes`). Each write is
 one `run_write`.
 
@@ -17,8 +18,8 @@ from outreach.api.clock import get_clock
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import run_write
-from outreach.api.models.jobs import (CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView, JobView, JobWindow,
-                                      JobWriteBody, PassJobResult)
+from outreach.api.models.jobs import (AppliedResult, CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView,
+                                      JobView, JobWindow, JobWriteBody, PassJobResult)
 from outreach.api.queries import jobs_list as queries
 from outreach.api.routers import row_id
 from outreach.api.services import check_now as check_service
@@ -52,6 +53,12 @@ async def jobs(request: Request, view: JobView = "your_level", window: JobWindow
 @router.post("/jobs/{posting_id}/pass", response_model=PassJobResult)
 def pass_job(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
     return run_write(request, lambda ctx: service.pass_job(ctx, posting_id))
+
+
+@router.post("/jobs/{posting_id}/applied", response_model=AppliedResult)
+def applied(body: JobWriteBody, request: Request, posting_id: int = row_id()) -> Response:
+    """Applied: he applied online to this posting. It leaves the job list for good and lists on Applied."""
+    return run_write(request, lambda ctx: service.applied(ctx, posting_id))
 
 
 @router.post("/jobs/{posting_id}/done", response_model=DoneResult)

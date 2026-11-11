@@ -293,6 +293,26 @@ def _apply_auto_reply(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta
                      detail={"gmail_message_id": meta.gmail_message_id})
 
 
+def _no_go_the_bounced(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, stamp: str) -> None:
+    """A bounce puts the person on the no-go list for good (#224): the address does not take mail, so it is never
+    emailed or drafted again. The address stays on the person row, so the same address pasted again merges into
+    this person and meets the no-go instead of becoming a new one. Someone who already has a no-go row, lifted or
+    not, gets none: a lifted row is his choice, and automation never re-adds it."""
+    touch = conn.execute("SELECT t.person_id, p.company_id, p.email FROM touch t JOIN person p USING (person_id) "
+                         "WHERE t.touch_id = ?", (touch_id,)).fetchone()
+    if touch is None or conn.execute("SELECT 1 FROM no_go WHERE person_id = ?", (touch["person_id"],)).fetchone():
+        return
+    note = f"Email bounced: {touch['email'] or 'no address on record'}."
+    no_go_id = conn.execute(
+        "INSERT INTO no_go(person_id, reason, source, source_ref, note, created_at) "
+        "VALUES (?, 'other', 'rules', ?, ?, ?)",
+        (touch["person_id"], meta.gmail_message_id, note, stamp)).lastrowid
+    append_event(conn, entity="no_go", entity_id=no_go_id, company_id=_company_of(conn, touch_id), kind="added",
+                 actor="sender", at=stamp, idempotency_key=f"no_go_bounced:{touch['person_id']}",
+                 detail={"reason": "other", "source": "rules", "personId": touch["person_id"], "touchId": touch_id,
+                         "text": f"No-go: {note.lower().rstrip('.')}."})
+
+
 def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, found: Inbound, received: str,
                   stamp: str, *, now: datetime, cfg: SendConfig, notify: Notifier) -> None:
     detail = {"touch_id": touch_id, "gmail_message_id": meta.gmail_message_id, "dsn_class": found.dsn_class}
@@ -302,6 +322,7 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
                      actor="sender", at=received, idempotency_key=f"bounced:{touch_id}:{meta.gmail_message_id}",
                      detail=detail)
     stop_touch_messages(conn, touch_id, reason="bounced", now=stamp)
+    _no_go_the_bounced(conn, touch_id, meta, stamp)
     signal = {"at": received, "cfg": cfg, "notify": notify, "now": now}
     if found.dsn_class == "policy":
         note_signal(conn, "policy_rejection", detail=detail, key=f"policy_rejection:{meta.gmail_message_id}",

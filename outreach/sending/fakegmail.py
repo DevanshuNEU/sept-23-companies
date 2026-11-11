@@ -34,6 +34,9 @@ _SNIPPETS = {
              "that you tried to reach does not exist."),
     "policy": ("Message blocked Your message to {to} has been blocked. The response from the remote server was: "
                "550 5.7.1 Message rejected as unsolicited mail by the recipient's policy."),
+    # Gmail's snippet is short: for an Exchange rejection it ends before the 550 5.4.1 line, so the code is not in it.
+    "blocked": ("Message blocked Your message to {to} has been blocked. See technical details below for more "
+                "information. LEARN MORE This link will take you to a third-party site"),
     "delay": ("Message not delivered yet There was a temporary problem delivering your message to {to}. Gmail "
               "will retry for 47 more hours. You'll be notified if the delivery fails permanently."),
     "limit": ("You have reached a limit for sending mail. Your message was not sent. Learn more about sending "
@@ -163,7 +166,7 @@ class FakeGmail(MailClient):
         return self._inbound(self._new_thread() if new_thread else to.thread_id, from_addr, subject,
                              self._reply_headers(to, from_addr, {"auto-submitted": "auto-replied"}), "")
 
-    def deliver_bounce(self, to: Sent, *, dsn: Literal["hard", "policy", "delay", "limit"] = "hard",
+    def deliver_bounce(self, to: Sent, *, dsn: Literal["hard", "policy", "blocked", "delay", "limit"] = "hard",
                        threaded: bool = True) -> MessageMeta:
         recipient = parseaddr(self._messages[to.gmail_message_id].to_addr)[1]
         headers = {"message-id": self._new_rfc("googlemail.com"), "content-type": DSN_TYPE}

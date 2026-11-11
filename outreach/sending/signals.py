@@ -12,7 +12,7 @@ from outreach.sending.config import SendConfig
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
-__all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_on", "bounce_rate_3d",
+__all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_on", "counted_sends_on", "bounce_rate_3d",
            "bounce_rate_warns", "stop_tags_in", "as_datetime"]
 
 # A warning: the day is not clean, today's limit drops one level at once, the next day starts from there.
@@ -53,6 +53,18 @@ def sends_on(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     """Messages sent on the New York date `d`, first emails and follow-ups."""
     start, end = cal.ny_day_bounds(d, cfg)
     return conn.execute("SELECT COUNT(*) FROM message WHERE sent_at >= ? AND sent_at < ?", (start, end)).fetchone()[0]
+
+
+def counted_sends_on(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
+    """`sends_on` less the emails that bounced (#224): a bounce notice comes within minutes and a bounced email
+    must not use up a slot of the daily limit. A bounced touch's last sent message is the one that bounced (a
+    bounce stops everything after it). The bounce rate still counts them: it uses `sends_on`."""
+    start, end = cal.ny_day_bounds(d, cfg)
+    return conn.execute(
+        "SELECT COUNT(*) FROM message m WHERE m.sent_at >= ? AND m.sent_at < ? AND NOT EXISTS ("
+        "SELECT 1 FROM touch t WHERE t.touch_id = m.touch_id AND t.bounced_at IS NOT NULL "
+        "AND t.state = 'bounced' AND m.sent_at = (SELECT MAX(l.sent_at) FROM message l "
+        "WHERE l.touch_id = m.touch_id AND l.sent_at IS NOT NULL))", (start, end)).fetchone()[0]
 
 
 def bounce_rate_3d(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> float:

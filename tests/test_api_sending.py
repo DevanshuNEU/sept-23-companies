@@ -108,7 +108,7 @@ class StatusTest(SendingBase):
         cid = seed.company(self.conn, "Acme", status="working")
         self.sent_today(cid, 4, bounced=1)
         self.assertEqual(self.status()["signals"]["bounceRate3d"], 0.25)
-        self.assertEqual(self.status()["sentToday"], 4)
+        self.assertEqual(self.status()["sentToday"], 3)  # the bounced email gave its slot back (#224)
 
     def test_gmail_error_and_stop_reply_counts_come_from_sender_events(self):
         for n, kind in enumerate(("gmail_limit", "gmail_policy")):

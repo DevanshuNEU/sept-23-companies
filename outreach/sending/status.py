@@ -204,7 +204,7 @@ def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     next_send, none_reason = _next_send(schedule, queued, now, proof.phase(conn))
     return SendingSnapshot(
         state=state, paused_reason=reason, paused_at=sender["paused_at"] if sender["paused"] else None,
-        gmail_message=gmail_message, sent_today=signals.sends_on(conn, today, cfg),
+        gmail_message=gmail_message, sent_today=signals.counted_sends_on(conn, today, cfg),
         limit_today=ramp.effective_limit(conn, today, cfg) if cal.is_business_day(today, cfg) else 0,
         start_limit=start, ramp_level=level, ramp_levels=levels,
         next_limit_if_clean=min(start + cfg.ramp_step, cfg.ramp_ceiling), last_step_down=_last_step_down(conn),

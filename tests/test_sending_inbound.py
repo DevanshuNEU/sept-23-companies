@@ -440,6 +440,84 @@ class BounceTest(Base):
         self.assertEqual(self.sender()["pause_kind"], "hard_block")
 
 
+class BounceNoGoTest(Base):
+    """#224: a bounced person goes on the no-go list at once, and the bounced email frees its send slot."""
+
+    def no_go(self, person_id):
+        return self.db.execute("SELECT * FROM no_go WHERE person_id = ? ORDER BY no_go_id", (person_id,)).fetchall()
+
+    def test_a_hard_bounce_puts_the_person_on_the_no_go_list(self):
+        person, touch_id, sent = self.send_first()
+        address = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0]
+        self.gmail.deliver_bounce(sent, dsn="hard")
+        self.sync()
+        (row,) = self.no_go(person)
+        self.assertEqual((row["reason"], row["source"], row["lifted_at"]), ("other", "rules", None))
+        self.assertIn(address, row["note"])
+        self.assertTrue(row["source_ref"])
+        # The address stays on the person, so the same address pasted again merges into this no-go person.
+        self.assertEqual(self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0],
+                         address)
+        self.assertEqual(len(self.events("no_go", "added", row["no_go_id"])), 1)
+
+    def test_a_blocked_notice_whose_snippet_has_no_code_is_a_bounce_and_a_no_go(self):
+        person, touch_id, sent = self.send_first()
+        self.gmail.deliver_bounce(sent, dsn="blocked")
+        self.sync()
+        self.assertEqual(self.touch(touch_id)["state"], "bounced")
+        self.assertEqual(len(self.no_go(person)), 1)
+
+    def test_a_policy_bounce_is_a_no_go_too(self):
+        person, _, sent = self.send_first()
+        self.gmail.deliver_bounce(sent, dsn="policy")
+        self.sync()
+        self.assertEqual(len(self.no_go(person)), 1)
+
+    def test_an_unthreaded_bounce_is_a_no_go_too(self):
+        person, _, sent = self.send_first()
+        self.sync()
+        self.gmail.deliver_bounce(sent, dsn="hard", threaded=False)
+        self.sync()
+        self.assertEqual(len(self.no_go(person)), 1)
+
+    def test_a_limit_notice_and_a_delay_notice_are_no_go_for_nobody(self):
+        person, _, sent = self.send_first()
+        self.gmail.deliver_bounce(sent, dsn="delay")
+        self.sync()
+        self.assertEqual(self.no_go(person), [])
+        self.gmail.deliver_bounce(sent, dsn="limit")
+        self.sync()
+        self.assertEqual(self.no_go(person), [])
+
+    def test_a_person_with_a_lifted_no_go_is_not_added_again(self):
+        person, _, sent = self.send_first()
+        self.db.execute("INSERT INTO no_go(person_id, reason, source, created_at, lifted_at, lift_reason) "
+                        "VALUES (?, 'said_no', 'devanshu', ?, ?, 'he changed his mind')",
+                        (person, iso(self.clock()), iso(self.clock())))
+        self.gmail.deliver_bounce(sent, dsn="hard")
+        self.sync()
+        self.assertEqual(len(self.no_go(person)), 1)
+
+    def test_the_same_notice_read_twice_adds_one_row(self):
+        person, _, sent = self.send_first()
+        self.gmail.deliver_bounce(sent, dsn="hard")
+        self.sync()
+        self.sync()
+        self.assertEqual(len(self.no_go(person)), 1)
+
+    def test_a_bounced_email_does_not_count_toward_the_day(self):
+        from outreach.sending import signals
+        _, _, sent = self.send_first()
+        _, _, other = self.send_first()
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 2)
+        self.gmail.deliver_bounce(sent, dsn="blocked")
+        self.sync()
+        today = self.clock().date()
+        self.assertEqual(signals.sends_on(self.db, today, CFG), 2)  # the bounce rate still sees both
+        self.assertEqual(signals.counted_sends_on(self.db, today, CFG), 1)
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 1)
+
+
 class StopTagTest(Base):
     def tag(self, touch_id, at, *, on="touch"):
         if on == "touch":

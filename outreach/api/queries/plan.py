@@ -64,6 +64,7 @@ WEEKEND_TEXT = "No plan on weekends."
 NOT_BUILT_TEXT = "Today's plan is not built yet. It builds at 8:00 on weekdays."
 LEAN_TEXT = "Today's list came from the old Today page, so there is no people plan today. It builds again tomorrow."
 DRAFT_TEXT = "A draft of who it would propose is below."
+PLAN_OFF_TEXT = "The daily plan is off."
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 ENTRY_SQL = "SELECT rowid, * FROM daily_list_entry"
@@ -377,6 +378,10 @@ def _not_ready(day: str, last: sqlite3.Row | None) -> NotReady:
 
 
 def _tomorrow(conn: sqlite3.Connection, day: str, canon: dict[int, int], cfg: PlanConfig) -> Tomorrow:
+    """The next plan's room and draft. With `[plan] enabled` false (first to see, #9 2026-11-10) there is no next plan,
+    so nothing is counted or built: the page polls this read."""
+    if cfg.get("plan", "enabled") is not True:
+        return Tomorrow(total=0, text=PLAN_OFF_TEXT, preview=[])
     when = date.fromisoformat(next_weekday(day))
     label = "Tomorrow" if when == date.fromisoformat(day) + timedelta(days=1) else WEEKDAYS[when.weekday()]
     drafted = _draft(conn, when, canon, cfg)
@@ -401,7 +406,7 @@ def tomorrow_text(label: str, total: int, drafted: int, *, companies: bool = Fal
 def _draft(conn: sqlite3.Connection, when: date, canon: dict[int, int], cfg: PlanConfig
            ) -> tuple[int, list[TomorrowRow]] | None:
     """The room and the rows of #15's plan for `when`, chosen but not written: `dry_run` writes nothing (not even a
-    job run) and never calls the crawler or the ranker, so it reads the stored scores the 08:00 job refreshes first.
+    job run) and never calls the crawler or the ranker, so it reads the stored scores the sources run-due refreshes.
     None when that date already has a plan, or when anything here fails: the page then shows the count alone. A
     failure is logged once per distinct error, so a page that polls does not fill the log."""
     try:

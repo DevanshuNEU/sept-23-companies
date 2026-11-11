@@ -19,8 +19,13 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from outreach.crawl.config import load_crawl_config
+from outreach.crawl.polite import PoliteClient
 from outreach.net import FetchError, HttpClient, SpacedClient, UrllibClient
 from outreach.pipeline.scorecard import compute as compute_scorecard, record as record_scorecard
+from outreach.plan.boards import rank_runner
+from outreach.crawl.tick import LOCK_NAME, AlreadyRunning
+from outreach.sources.ats_seed import SEED_ATS, SeedConfig, load_seed_config, run_seed, top_up_due
 from outreach.sources.base import describe_error
 from outreach.sources.byhand import add_by_hand
 from outreach.sources.careers import CareersChecker
@@ -53,9 +58,11 @@ ClientFactory = Callable[..., HttpClient]
 _EXPECTED = (ValueError, OSError, FetchError, StoreError, TabularError, sqlite3.Error)
 
 
-def default_client(profile: str = "declared", **kw) -> HttpClient:
-    """The real client, spaced per host (the SEC and careers limits live in `SpacedClient` and the callers)."""
-    return SpacedClient(UrllibClient(profile, **kw))
+def default_client(profile: str = "declared", *, spaced: bool = True, **kw) -> HttpClient:
+    """The real client, spaced per host (the SEC and careers limits live in `SpacedClient` and the callers).
+    `spaced=False` is for a caller that wraps it in the crawler's `PoliteClient`, which spaces it instead (the seed)."""
+    client = UrllibClient(profile, **kw)
+    return SpacedClient(client) if spaced else client
 
 
 def lca_download_urls(path: Path | None = None) -> list[str]:
@@ -140,6 +147,22 @@ def _find_boards(conn: sqlite3.Connection, factory: ClientFactory, max_careers: 
     return status, {"job": "find_boards", "run_id": run_id, "status": status, "report": asdict(report)}
 
 
+def _seed(conn: sqlite3.Connection, factory: ClientFactory, *, ats: Sequence[str] = SEED_ATS,
+          limit: int | None = None, dry_run: bool = False, config: SeedConfig | None = None) -> tuple[str, dict]:
+    """The ATS seed (#192) over the stapply lists, through the crawler's PoliteClient (the crawl config's spacing,
+    breaker and `[workers]`). `partial` when a bucket tripped: its rows are left for the next run. `AlreadyRunning`
+    when the crawler holds its lock."""
+    cfg = load_crawl_config()
+    polite = PoliteClient(factory("declared", timeout_s=cfg.timeout_s, max_bytes=cfg.max_bytes,
+                                  max_redirects=cfg.max_redirects, spaced=False), cfg)
+    report = run_seed(conn, polite, folder=sources_dir() / "stapply", now=utcnow(), ats=ats, limit=limit,
+                      dry_run=dry_run, workers=cfg.workers, config=config, say=lambda t: _say(f"seed-ats: {t}"))
+    status = "partial" if report.tripped else "ok"
+    if report.tripped:
+        _say(f"seed-ats: {', '.join(report.tripped)} tripped; {report.left} rows left for the next run")
+    return status, {"job": "seed-ats", "status": status, "dry_run": dry_run, "limit": limit, "report": asdict(report)}
+
+
 # --- fetch ------------------------------------------------------------------------------------------------------
 
 def _fetch_lca(dest: Path, factory: ClientFactory) -> tuple[int, dict]:
@@ -218,7 +241,10 @@ def _fetch_formd(root: Path, factory: ClientFactory, *, only_if_newer: bool = Fa
 def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict]:
     """Everything that is due: HN's thread for this month (read again on each run, once it is out), freehire's last
     few days (#115; skipped when `enabled = false` in freehire.toml), Form D when SEC has a newer data set, the stapply
-    lists weekly, then resolve and find-boards, and last the pipeline scorecard (#153).
+    lists weekly, then resolve and find-boards, the ATS seed's weekly top-up (#192: only once a full `seed-ats` has
+    run, at most `weekly_limit` boards; skipped when `enabled = false` in ats_seed.toml or while the crawler holds
+    its lock), the ranker (`outreach.ranking.job.run_rank`, its one scheduled runner since the 08:00 plan is off,
+    first to see #9 2026-11-10), and last the pipeline scorecard (#153).
 
     Every step runs even when an earlier one failed. The exit code is 1 when any step is `partial` or `failed`. LCA is
     not here: it is a by-hand quarterly `fetch lca` and `discover lca`.
@@ -267,6 +293,18 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         return {"status": "ok", **{k: payload[k] for k in ("updated", "skipped_entries", "excluded_lists",
                                                              "excluded_rows")}}
 
+    def ats_seed() -> dict:
+        cfg = load_seed_config()
+        reason = top_up_due(conn, utcnow(), cfg)
+        if reason:
+            return {"status": "skipped", "reason": reason}
+        try:
+            status, payload = _seed(conn, factory, limit=cfg.weekly_limit, config=cfg)
+        except AlreadyRunning:
+            return {"status": "skipped", "reason": f"the crawler is running ({LOCK_NAME} is held); the top-up runs "
+                                                   "on the next run-due"}
+        return {"status": status, "report": payload["report"]}
+
     def resolve() -> dict:
         status, payload = _resolve(conn)
         return {"status": status, "run_id": payload["run_id"]}
@@ -275,6 +313,18 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         status, payload = _find_boards(conn, factory, RUN_DUE_MAX_CAREERS)
         return {"status": status, "run_id": payload["run_id"]}
 
+    def rank() -> dict:
+        ranker = rank_runner()
+        if ranker is None:
+            return {"status": "skipped", "reason": "the ranker does not import"}
+        try:
+            run = ranker(conn)  # records its own `rank` job run
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        return {"status": "ok", "scored": len(run.scored)}
+
     def scorecard_step() -> dict:
         now = utcnow()
         card = compute_scorecard(conn, now)
@@ -282,8 +332,11 @@ def run_due(conn: sqlite3.Connection, factory: ClientFactory) -> tuple[int, dict
         return {"status": "ok", "simplify_listings": card.simplify_listings,
                 "simplify_coverage": card.simplify_coverage, "level_recall": card.level_recall}
 
+    # The seed comes after find-boards, so a company found today has its board first and the seed sees it as known.
+    # The ranker comes after the seed, so a company the seed added today is scored the same day.
     for name, work in (("hn", hn), ("freehire", freehire), ("formd", formd), ("stapply", stapply),
-                       ("resolve", resolve), ("find_boards", find_boards), ("scorecard", scorecard_step)):
+                       ("resolve", resolve), ("find_boards", find_boards), ("ats_seed", ats_seed), ("rank", rank),
+                       ("scorecard", scorecard_step)):
         step(name, work)
     states = {s["status"] for s in steps.values()}
     status = "failed" if "failed" in states else "partial" if "partial" in states else "ok"
@@ -303,13 +356,20 @@ Commands:
   resolve                                    the identity pass: merge candidates and size checks
   find-boards [--max-careers N]              give companies their ATS boards (N careers pages at most)
   add --name N --reason R [--domain D] [--state ST] [--ats A:T]
+  seed-ats [--ats greenhouse|ashby] [--limit N] [--dry-run]
+                                             gate every board the stapply Greenhouse and Ashby lists name with one
+                                             list request; a board with an open US engineering role becomes a
+                                             company and a board. --dry-run counts the rows and sends nothing.
+                                             Only a run of both lists with no --limit counts as the full seed
   run-due                                    what launchd runs daily: this month's HN thread (once it is out),
                                              freehire, Form D (when SEC has a newer quarterly set), the stapply lists
-                                             (weekly), resolve, find-boards --max-careers 100, then
+                                             (weekly), resolve, find-boards --max-careers 100, the seed-ats top-up
+                                             (weekly, once a full seed-ats has run), the ranker, then
                                              the pipeline scorecard (read and stored once a New York day)
 
 LCA is by hand, once a quarter when DOL posts a file: `fetch lca`, then `discover lca`, then `resolve` and
 `find-boards`. run-due never runs it. `fetch stapply` refreshes the stapply lists by hand; run-due does it when the last refresh is 7 days old.
+The first full `seed-ats` is by hand; run-due never runs it, only the weekly top-up after it.
 
 Exit code 0 when the job is ok, 1 when it is partial or failed (run-due: when any step is). Every command opens
 the store through `outreach.store.connect()`: the live store opens only from the live checkout.
@@ -345,6 +405,12 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument("--domain")
     add.add_argument("--state")
     add.add_argument("--ats", help="a board as ats:token, such as lever:acme")
+    seed = sub.add_parser("seed-ats", help="gate the stapply Greenhouse and Ashby boards")
+    seed.add_argument("--ats", choices=SEED_ATS, help="one list only (default: both; a one-list run is never the full "
+                                                      "seed run-due waits for)")
+    seed.add_argument("--limit", type=int, help="gate at most N boards this run (default: every due one; a limited run "
+                                                "is never the full seed run-due waits for)")
+    seed.add_argument("--dry-run", action="store_true", help="count the rows; send nothing, write nothing")
     sub.add_parser("run-due", help="what launchd runs daily")
     return parser
 
@@ -384,6 +450,13 @@ def _run(args: argparse.Namespace, factory: ClientFactory) -> int:
             status, payload = _resolve(conn)
         elif args.command == "find-boards":
             status, payload = _find_boards(conn, factory, args.max_careers)
+        elif args.command == "seed-ats":
+            try:
+                status, payload = _seed(conn, factory, ats=(args.ats,) if args.ats else SEED_ATS, limit=args.limit,
+                                        dry_run=args.dry_run)
+            except AlreadyRunning:
+                _say(f"seed-ats: the crawler is running ({LOCK_NAME} is held); run it again when the tick is done")
+                return 1
         elif args.command == "add":
             added = add_by_hand(conn, name=args.name, reason=args.reason, domain=args.domain, state=args.state,
                                 ats=args.ats)

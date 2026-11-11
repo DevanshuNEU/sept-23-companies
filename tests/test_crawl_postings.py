@@ -14,8 +14,9 @@ T3 = "2026-10-22T08:00:00Z"
 
 
 def job(native_id: str, title: str = "Software Engineer", *, location: str = "Boston, MA", country: str | None = "US",
-        url: str | None = None, posted_on: str | None = None) -> JobRef:
-    return JobRef(native_id, title, url or f"https://example.com/{native_id}", location, country, posted_on, None)
+        url: str | None = None, posted_on: str | None = None, posted_at: str | None = None) -> JobRef:
+    return JobRef(native_id, title, url or f"https://example.com/{native_id}", location, country, posted_on, None,
+                  posted_at)
 
 
 class PostingTests(unittest.TestCase):
@@ -234,6 +235,58 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(([j.native_id for j in plan.new], plan.changed, plan.present, plan.reopen, plan.gone),
                          (["3"], (), (6,), (6,), (5,)))
 
+
+class ListTimeWriteTests(unittest.TestCase):
+    """#193: a new posting keeps its board time, its seen gap, its list time and its repost link; a change never
+    moves them."""
+
+    def setUp(self):
+        self.conn = fresh_store()
+        self.company = seed_company(self.conn)
+        self.board_id = seed_board(self.conn, self.company)
+        self.board = load_board(self.conn, self.board_id)
+
+    def write(self, jobs, now, seen_gap_s=None):
+        plan = plan_diff(load_existing(self.conn, self.board_id), jobs, "greenhouse", "acme")
+        write_postings(self.conn, self.board, plan, now, batch_rows=2000, seen_gap_s=seen_gap_s)
+        close_postings(self.conn, plan.gone, "gone_from_board", now, batch_rows=2000)
+
+    def row(self, native_id):
+        return self.conn.execute("SELECT * FROM posting WHERE source_key = ?",
+                                 (source_key("greenhouse", "acme", native_id),)).fetchone()
+
+    def test_a_new_posting_keeps_its_board_time_and_gap(self):
+        self.write([job("1", posted_at="2026-10-19T14:00:00Z"), job("2")], T1, seen_gap_s=600)
+        one, two = self.row("1"), self.row("2")
+        self.assertEqual((one["posted_at"], one["seen_gap_s"], one["list_at"], one["repost_of"]),
+                         ("2026-10-19T14:00:00Z", 600, "2026-10-19T14:00:00Z", None))
+        self.assertEqual((two["posted_at"], two["seen_gap_s"], two["list_at"]), (None, 600, T1))
+
+    def test_a_first_read_row_has_no_gap(self):
+        self.write([job("1", posted_at="2026-03-02T14:00:00Z"), job("2")], T1)
+        self.assertEqual((self.row("1")["seen_gap_s"], self.row("1")["list_at"]), (None, "2026-03-02T14:00:00Z"))
+        self.assertEqual((self.row("2")["seen_gap_s"], self.row("2")["list_at"]), (None, None))
+
+    def test_a_change_never_moves_the_list_time(self):
+        self.write([job("1", posted_at="2026-10-19T14:00:00Z")], T1, seen_gap_s=600)
+        self.write([job("1", "Renamed", posted_at="2026-10-21T14:00:00Z")], T2, seen_gap_s=86400)
+        r = self.row("1")
+        self.assertEqual((r["title"], r["posted_at"], r["seen_gap_s"], r["list_at"]),
+                         ("Renamed", "2026-10-19T14:00:00Z", 600, "2026-10-19T14:00:00Z"))
+
+    def test_a_repost_is_linked_only_after_a_good_read(self):
+        self.write([job("1", "Software Engineer, New Grad"), job("2", "Data Engineer")], T1)
+        self.write([job("2", "Data Engineer")], T2, seen_gap_s=86400)  # 1 is gone
+        self.write([job("2", "Data Engineer"), job("3", "software engineer new grad")], T3, seen_gap_s=86400)
+        self.assertEqual(self.row("3")["repost_of"], self.row("1")["posting_id"])
+        # On a first read nothing is looked up, so nothing is linked.
+        other = seed_board(self.conn, self.company, token="other")
+        board = load_board(self.conn, other)
+        plan = plan_diff(load_existing(self.conn, other), [job("9", "Software Engineer, New Grad")], "greenhouse",
+                         "other")
+        write_postings(self.conn, board, plan, T3, batch_rows=2000)
+        self.assertIsNone(self.conn.execute("SELECT repost_of FROM posting WHERE source_key = ?",
+                                            (source_key("greenhouse", "other", "9"),)).fetchone()[0])
 
 if __name__ == "__main__":
     unittest.main()

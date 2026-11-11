@@ -63,7 +63,7 @@ function OutboxOnly() {
   return pathname.startsWith('/outbox') ? <OutboxPage /> : <p>Elsewhere</p>;
 }
 
-/** The sidebar and the Outbox, where g t leaves the Outbox (and flushes what waits in its window). */
+/** The sidebar and the Outbox, where g b leaves the Outbox for Jobs (and flushes what waits in its window). */
 async function openWithShell(touchId: number, name: string) {
   const client = new FixtureClient(buildFixture());
   const view = renderWithApp(
@@ -480,7 +480,7 @@ describe('unsaved edits outlive the Outbox', () => {
     return event.defaultPrevented;
   };
 
-  it('an edit is still there after g t and g o', async () => {
+  it('an edit is still there after g b and g o', async () => {
     const client = new FixtureClient(buildFixture());
     renderWithApp(
       <>
@@ -494,7 +494,7 @@ describe('unsaved edits outlive the Outbox', () => {
     fireEvent.change(bodyBox(), { target: { value: edited } });
 
     press('g');
-    press('t');
+    press('b');
     await screen.findByText('Elsewhere');
     press('g');
     press('o');
@@ -549,7 +549,7 @@ describe('unsaved edits outlive the Outbox', () => {
     fireEvent.change(bodyBox(), { target: { value: `${(bodyBox() as HTMLTextAreaElement).value}\nP.S. Stale.` } });
     (bodyBox() as HTMLTextAreaElement).blur();
     press('g');
-    press('t');
+    press('b');
     await screen.findByText('Elsewhere');
     const { item } = await client.outboxDetail(T.kenji);
     await client.skip(item.messageId, item.revision, { requestId: 'elsewhere-skip' });
@@ -642,7 +642,7 @@ describe('skip', () => {
     expect(skip.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);
   });
 
-  it('a, then s, then g t inside the window: the email is skipped and the approve never reaches the API', async () => {
+  it('a, then s, then g b inside the window: the email is skipped and the approve never reaches the API', async () => {
     const { client } = await openWithShell(T.omar, 'Omar Haddad');
     const approve = vi.spyOn(client, 'approve');
     const skip = vi.spyOn(client, 'skip');
@@ -652,7 +652,7 @@ describe('skip', () => {
     press('s');
     await waitFor(() => expect(toastText()).toContain('Skipped Omar Haddad.'));
     press('g');
-    press('t');
+    press('b');
     await screen.findByText('Elsewhere');
     await waitFor(() => expect(skip).toHaveBeenCalledTimes(1));
     expect(skip.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);

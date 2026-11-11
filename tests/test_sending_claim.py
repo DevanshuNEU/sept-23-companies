@@ -289,6 +289,18 @@ class ContextTest(Base):
         self.assertEqual((ctx["source"], ctx["lane"]), ("plan", "intern_junior"))
 
 
+    def test_claim_context_is_own_without_a_plan(self):
+        # First to see (#9, 2026-11-10): no daily list is built any more. An email he approved still sends, and its
+        # touch carries his own context with the company's ranked lane.
+        self.score(self.company, ["level_role"], {"live_role": {"value": 2}})
+        person, mid = self.approve()
+        self.assertEqual(self.db.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)
+        self.assertEqual(self.send(mid), "sent")
+        ctx = json.loads(self.db.execute("SELECT context FROM outreach_touch").fetchone()[0])
+        self.assertEqual(ctx, {"source": "own", "lane": "level_role", "roleKind": "engineer", "roleAgeDays": None,
+                               "rankerVersion": "v3", "signals": {"live_role": 2.0}, "roleNamed": False})
+        self.assertEqual(self.message(mid)["state"], "sent")
+
 class FollowUpTest(Base):
     def test_follow_up_goes_in_the_thread_with_reply_headers(self):
         person, first = self.approve(subject="Quick question")

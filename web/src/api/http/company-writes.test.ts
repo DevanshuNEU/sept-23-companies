@@ -32,6 +32,12 @@ describe('companyWriteMethods', () => {
     expect(send).toHaveBeenCalledWith('POST', '/api/companies/7/release-hold', { revision: 5 }, o);
   });
 
+  it("Done's undo posts an empty body to the company's reached mark and answers with what the API said", async () => {
+    const { t, send } = sender({ companyId: 7, cleared: true });
+    expect(await companyWriteMethods(t).clearReached!(7, o)).toEqual({ companyId: 7, cleared: true });
+    expect(send).toHaveBeenCalledWith('POST', '/api/companies/7/reached/clear', {}, o);
+  });
+
   it('the role kind posts to the person and answers with the person', async () => {
     const person: PersonRef = { id: 12, name: 'Dana Whitcomb', title: 'Recruiter', roleKind: 'engineer', email: null, linkedinUrl: null, revision: 2 };
     const { t, send } = sender(person);

@@ -1551,3 +1551,63 @@ describe('Browse companies', () => {
     expect((await c.plan()).rows.map((r) => r.company.name)).toContain('Pylon'); // nothing changed
   });
 });
+
+describe('Check now on the sample (#194)', () => {
+  const params = { view: 'your_level', window: '7', size: 'any', notContacted: false, q: '' } as const;
+
+  it('is idle until asked, then walks queued, running and done, and the postings it finds join the list', async () => {
+    const c = client('queue');
+    expect((await c.checkStatus()).state).toBe('idle');
+    const before = (await c.jobs(params)).total;
+    const pulse = (await c.pulse()).revision;
+    expect(await c.checkNow(opt())).toEqual({ requestedAt: '2026-11-10T15:14:00Z', state: 'started' });
+    const walk = [await c.checkStatus()];
+    for (let i = 0; i < 5; i++) {
+      c.advanceCheck();
+      walk.push(await c.checkStatus());
+    }
+    expect(walk.map((s) => s.state)).toEqual(['queued', 'running', 'running', 'running', 'done', 'done']);
+    expect(walk[1]).toMatchObject({ checked: 1240, total: 4013, new: 3, startedAt: '2026-11-10T15:14:00Z', finishedAt: null, pausedHosts: [] });
+    expect(walk[4]).toMatchObject({ checked: 4013, total: 4013, new: 6, finishedAt: '2026-11-10T15:17:10Z' });
+    expect((await c.pulse()).revision).toBeGreaterThan(pulse);
+    const after = await c.jobs(params);
+    expect(after.total).toBe(before + 6);
+    expect(after.rows.slice(0, 6).map((r) => r.postingId)).toEqual([9100, 9101, 9102, 9103, 9104, 9105]);
+    expect(after.rows[0]).toMatchObject({ firstSeenAt: '2026-11-10T15:14:00Z', firstRead: false, repostedFrom: null });
+  });
+
+  it('a click while a check waits or runs only reports it; one after it ends starts a new check that finds nothing new', async () => {
+    const c = client('queue');
+    await c.checkNow(opt());
+    expect((await c.checkNow(opt())).state).toBe('running');
+    for (let i = 0; i < 3; i++) c.advanceCheck();
+    expect((await c.checkNow(opt())).state).toBe('running');
+    c.advanceCheck();
+    expect((await c.checkNow(opt())).state).toBe('started');
+    const walk = [await c.checkStatus()];
+    for (let i = 0; i < 4; i++) {
+      c.advanceCheck();
+      walk.push(await c.checkStatus());
+    }
+    expect(walk.map((s) => s.new)).toEqual([0, 0, 0, 0, 0]);
+    expect((await c.jobs(params)).rows.filter((r) => r.postingId >= 9100)).toHaveLength(6);
+  });
+
+  it('reads never move the walk: an extra refetch sees the same step; one step a second moves it on its own', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const c = client('queue');
+      await c.checkNow(opt());
+      expect((await c.checkStatus()).state).toBe('queued');
+      expect((await c.checkStatus()).state).toBe('queued');
+      vi.advanceTimersByTime(1000);
+      expect(await c.checkStatus()).toMatchObject({ state: 'running', checked: 1240 });
+      expect(await c.checkStatus()).toMatchObject({ state: 'running', checked: 1240 });
+      vi.advanceTimersByTime(3000);
+      expect((await c.checkStatus()).state).toBe('done');
+      expect(vi.getTimerCount()).toBe(0); // the walk's timer stops at done
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

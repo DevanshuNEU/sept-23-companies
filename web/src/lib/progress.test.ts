@@ -1,7 +1,7 @@
-import type { BaseRates, PlanRow } from '@/api';
+import type { BaseRates } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
 import { buildFixture } from '@/api/fixture/data';
-import { baseRateLine, baseRateParagraph, didToday, formatRate, oneIn, rateEnough, smallSampleNote } from '@/lib/progress';
+import { baseRateLine, baseRateParagraph, formatRate, oneIn, rateEnough, smallSampleNote } from '@/lib/progress';
 
 const fixture = () => new FixtureClient(buildFixture('default'));
 const base = async (): Promise<BaseRates> => (await fixture().progress()).base;
@@ -87,33 +87,6 @@ describe('smallSampleNote', () => {
   });
   it('uses the singular for one request', () => {
     expect(smallSampleNote({ enough: false }, 1, 30)).toBe('Only 1 request so far. Rates this small swing a lot, so none are shown.');
-  });
-});
-
-describe('didToday', () => {
-  it('lists what the default plan has done, in order', async () => {
-    const plan = await fixture().plan();
-    expect(didToday(plan.rows)).toEqual([
-      { label: 'Requests sent', count: 2 },
-      { label: 'Applications sent', count: 2 },
-    ]);
-  });
-  it('omits zero counts', () => {
-    expect(didToday([])).toEqual([]);
-  });
-  it('counts a finished email row as Emails reviewed, after the other two', async () => {
-    const plan = await fixture().plan();
-    const rows: PlanRow[] = plan.rows.map((r) => (r.channel === 'email' ? { ...r, state: 'done' } : r));
-    expect(didToday(rows)).toEqual([
-      { label: 'Requests sent', count: 2 },
-      { label: 'Applications sent', count: 2 },
-      { label: 'Emails reviewed', count: 1 },
-    ]);
-  });
-  it('does not count an email row that is still to do or skipped', async () => {
-    const plan = await fixture().plan();
-    const rows: PlanRow[] = plan.rows.map((r) => (r.channel === 'email' ? { ...r, state: 'skipped' } : r));
-    expect(didToday(rows).map((d) => d.label)).not.toContain('Emails reviewed');
   });
 });
 

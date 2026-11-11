@@ -123,10 +123,10 @@ def review_items(conn: sqlite3.Connection, rows: list[sqlite3.Row], parents: dic
         size_rows.setdefault(survivor_of(parents, e["company_id"]), []).append(e)
     picked = {survivor_of(parents, r[0]) for r in conn.execute(
         "SELECT company_id FROM daily_list_entry WHERE list_date = ? AND state = 'picked'", (today,))}
-    planned_days = load_review_config().planned_days
+    cfg = load_review_config()
     canon = _canon(conn) if canon is None else canon
-    playing = in_play(conn, today=today, planned_days=planned_days, canon=canon)
-    mailing = emailing(conn, today=today, planned_days=planned_days, canon=canon)
+    playing = in_play(conn, today=today, planned_days=cfg.planned_days, canon=canon, reached_days=cfg.reached_days)
+    mailing = emailing(conn, today=today, planned_days=cfg.planned_days, canon=canon)
     holds = company_holds(conn)  # a hold left on a merged-away duplicate holds the survivor; so does any reply
 
     moment = datetime.strptime(now, ISO_FMT)
@@ -221,7 +221,9 @@ def _canon(conn: sqlite3.Connection) -> dict[int, int]:
 
 def _focus(conn: sqlite3.Connection, now: str, canon: dict[int, int]) -> frozenset[int]:
     """The companies whose items belong in Needs you (`scope.attention`)."""
-    return attention(conn, today=ny_day(now), planned_days=load_review_config().planned_days, canon=canon)
+    cfg = load_review_config()
+    return attention(conn, today=ny_day(now), planned_days=cfg.planned_days, reached_days=cfg.reached_days,
+                     canon=canon)
 
 
 def _needs_you(r: sqlite3.Row, parents: dict[int, int], focus: frozenset[int]) -> bool:

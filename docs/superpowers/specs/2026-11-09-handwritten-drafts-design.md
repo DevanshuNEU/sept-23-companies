@@ -145,7 +145,7 @@ no draft has a source. Change:
 - The skill: when research finds nothing, the email says so plainly (for example that they haven't met and why
   this person: their title is on the team that owns the role). Never fake a connection.
 
-**As built (#205).** Table `research_fact` (migration 0008): checked company facts with fact, quote, url, page date,
+**As built (#205).** Table `research_fact` (migration 0010): checked company facts with fact, quote, url, page date,
 `found_by` (gpt, claude or hand) and `verified_at`, fresh for 14 days, kept on the merge survivor.
 `outreach/research/verify.py` fetches each fact's https page (redirects followed hop by hop, each hop checked) and
 keeps a fact only when its quote is on the page; it refuses LinkedIn, contact-data sites, private or local addresses

@@ -221,6 +221,43 @@ class Progress(ProgressCase):
             no_nan(self.get(path).text)
 
 
+    def test_progress_counts_unchanged_without_a_plan(self):
+        # First to see (#9, 2026-11-10): no daily list is built any more. His own touches still count everywhere;
+        # only today's planned and done stay at 0, and a plan on file would change nothing else.
+        today = "2026-11-10T14:00:00Z"
+        own = context().replace('"plan"', '"own"')
+        touch(self.conn, self.acme, self.lena, sent_at=today, ctx=own, accepted_at="2026-11-10T14:30:00Z")
+        touch(self.conn, self.acme, self.lena, sent_at=MON, ctx=own, replied_at="2026-11-10T15:00:00Z",
+              reply_kind="interested")
+        touch(self.conn, self.acme, None, channel="application", sent_at=today, ctx=own)
+        mail = s.person(self.conn, self.acme, "Pat Mail", channel="email")
+        touch(self.conn, self.acme, mail, channel="email", sent_at=today, ctx=own)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM daily_list").fetchone()[0], 0)
+        view = self.progress()
+        self.assertEqual(view["today"], {"planned": 0, "done": 0, "requests": 1, "applications": 1,
+                                         "accepted": 1, "replied": 1})
+        week = self.stages(view["week"])
+        self.assertEqual([week[k]["count"] for k in ("requests", "accepts", "replies", "referrals", "interviews")],
+                         [2, 1, 1, 0, 0])
+        self.assertEqual([(e["label"], e["count"]) for e in view["week"]["effort"]],
+                         [("Requests sent", 2), ("Applications sent", 1), ("Emails sent", 1)])
+        self.assertEqual((view["base"]["requests"], view["base"]["accepts"], view["base"]["replies"]), (2, 1, 1))
+        # A plan for today naming another company changes only today's planned count.
+        other = s.company(self.conn, "Planned Co", "working")
+        self.conn.execute("INSERT INTO daily_list(list_date, built_at, capacity) VALUES ('2026-11-10', ?, 7)",
+                          ("2026-11-10T11:00:00Z",))
+        self.conn.execute("INSERT INTO job_run(job, started_at, finished_at, status, summary) VALUES "
+                          "('plan', ?, ?, 'ok', json_object('date', '2026-11-10'))",
+                          ("2026-11-10T11:00:00Z", "2026-11-10T11:00:05Z"))
+        s._insert(self.conn, "daily_list_entry", {
+            "list_date": "2026-11-10", "company_id": other, "list_group": "level_role", "rank": 1,
+            "state": "picked", "proposed_at": "2026-11-10T11:00:00Z", "decided_at": "2026-11-10T11:30:00Z",
+            "channel": "linkedin_request"})
+        planned = self.progress()
+        self.assertEqual(planned["today"], {**view["today"], "planned": 1})
+        self.assertEqual({k: planned[k] for k in ("week", "month", "base")},
+                         {k: view[k] for k in ("week", "month", "base")})
+
 class TodayAndPlan(ProgressCase):
     def entry(self, rank: int, person_id: int | None, channel: str | None, *, posting_id: int | None = None,
               state: str = "picked", list_date: str = "2026-11-10") -> int:

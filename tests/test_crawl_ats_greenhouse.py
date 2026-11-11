@@ -294,6 +294,24 @@ class GreenhouseTests(unittest.TestCase):
         r, _ = read({US: json_response({"jobs": jobs})})
         self.assertEqual(r.jobs[0].posted_on, "2026-10-01")
 
+    def test_posted_at_from_first_published_in_utc(self):
+        jobs = fixture_jobs()[:1]
+        jobs[0]["first_published"] = "2026-11-09T10:38:00-05:00"
+        r, _ = read({US: json_response({"jobs": jobs})})
+        self.assertEqual((r.jobs[0].posted_at, r.jobs[0].posted_on), ("2026-11-09T15:38:00Z", "2026-11-09"))
+        r, _ = read({US: ok()})
+        self.assertEqual([j.posted_at for j in r.jobs], ["2026-09-15T14:21:33Z", None, "2026-08-30T21:45:02Z"])
+
+    def test_updated_at_is_never_posted_at(self):
+        # updated_at moves on every edit: it stays a fallback for the date only, never the posting time.
+        jobs = fixture_jobs()[:1]
+        for published in (None, "", "2026-02-30T00:00:00Z", "not a date", "2026-11-09", 5):
+            with self.subTest(published=published):
+                jobs[0]["first_published"] = published
+                r, _ = read({US: json_response({"jobs": jobs})})
+                self.assertIsNone(r.jobs[0].posted_at)
+                self.assertEqual(r.jobs[0].posted_on, "2026-11-09" if published == "2026-11-09" else "2026-10-01")
+
     def test_a_tripped_host_propagates_from_the_us_request_and_from_the_eu_hop(self):
         client = FakeClient({US: HostTripped("greenhouse.io")})
         with self.assertRaises(HostTripped):

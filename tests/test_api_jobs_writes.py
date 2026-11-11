@@ -1,19 +1,19 @@
-"""Pass and Go ahead on the job list (#156): `POST /api/jobs/{postingId}/pass` and `/go-ahead`. Scratch store, no network.
+"""Pass and Done on the job list (#156, #195): `POST /api/jobs/{postingId}/pass` and `/done`, and Done's undo
+`POST /api/companies/{companyId}/reached/clear`. Scratch store, no network.
 
-Pass hides one posting and is never a company Not now. Go ahead puts the company on today's list as his own pick:
-size, the 7 day room and a Not now cooldown never stop it; a no-go company, one already listed and one in flight do.
+Pass hides one posting and is never a company Not now. Done records his mark that the company has been reached (the
+first to see ruling in #9): no other check stops it, and the company's rows show it as reached.
 """
 from datetime import date
 
+from outreach.pipeline import reached
 from outreach.pipeline.joblist import passed_posting_ids
-from outreach.plan.build import build_plan
 from outreach.plan.config import default_plan_config
 from outreach.plan.fresh import load_passed_postings, load_passes
 from outreach.ranking.common import canonical_ids
-from outreach.store import log_touch
 from tests import apiseed as s
-from tests.ranking_store import decision, evidence, posting
-from tests.test_api_plan_picks import DAY, PicksCase, _context
+from tests.ranking_store import decision, posting
+from tests.test_api_plan_picks import DAY, PicksCase
 
 
 class WritesCase(PicksCase):
@@ -26,20 +26,16 @@ class WritesCase(PicksCase):
     def passed(self, pid, **kw):
         return self.post(f"/api/jobs/{pid}/pass", {}, **kw)
 
-    def go(self, pid, **kw):
-        return self.post(f"/api/jobs/{pid}/go-ahead", {}, **kw)
+    def done(self, pid, **kw):
+        return self.post(f"/api/jobs/{pid}/done", {}, **kw)
+
+    def clear(self, company_id, **kw):
+        return self.post(f"/api/companies/{company_id}/reached/clear", {}, **kw)
 
     def jobs(self, **params):
         res = self.get("/api/jobs", params=params)
         self.assertEqual(res.status_code, 200, res.text)
         return [r["postingId"] for r in res.json()["rows"]]
-
-    def plan_names(self):
-        return [r["company"]["name"] for r in self.view()["rows"]]
-
-    def clear_plan(self):
-        self.conn.execute("DELETE FROM daily_list_entry")
-        self.conn.execute("DELETE FROM daily_list")
 
 
 class PassTest(WritesCase):
@@ -103,186 +99,153 @@ class PassTest(WritesCase):
         self.assertEqual(self.jobs(q="Ember"), [])  # the write moved the store, so the cached page is not reused
 
 
-class GoAheadTest(WritesCase):
-    def test_go_ahead_adds_a_big_company(self):
-        titan = s.company(self.conn, "Titan")
-        self.ids["Titan"] = titan
-        evidence(self.conn, titan, "size", num_low=5000, num_high=5000)
-        s.score(self.conn, titan, {"live_role": 40.0}, hide={"reason": "too_big"})  # the ranker hides it
-        pid = self.job("Titan")
-        res = self.go(pid)
+class DoneTest(WritesCase):
+    """Done (#195, the first to see ruling in #9): his mark that a company has been reached. No other check stops it."""
+
+    def marks(self, kind="company_reached"):
+        return self.conn.execute("SELECT * FROM event WHERE kind = ? ORDER BY event_id", (kind,)).fetchall()
+
+    def test_done_records_reached_mark(self):
+        pid = self.job("Ember")
+        res = self.done(pid)
         self.assertEqual(res.status_code, 200, res.text)
-        body = res.json()
-        self.assertEqual((body["state"], body["rank"], body["postingId"], body["companyId"]),
-                         ("added", 4, pid, titan))
-        self.assertEqual(body["listDate"], DAY)
-        self.assertIn("Titan", body["text"])
-        rows = self.view()["rows"]
-        row = next(r for r in rows if r["company"]["name"] == "Titan")
-        self.assertEqual(row["entryId"], body["entryId"])
-        self.assertEqual(self.plan_names()[-1], "Titan")
-        self.assertEqual(self.count("SELECT posting_id FROM daily_list_entry WHERE company_id = ?", titan), pid)
+        self.assertEqual(res.json(), {"postingId": pid, "companyId": self.ids["Ember"], "reachedOn": DAY,
+                                      "text": "Marked Ember reached."})
+        [row] = self.marks()
+        self.assertEqual((row["entity"], row["entity_id"], row["company_id"], row["actor"], row["at"]),
+                         ("company", self.ids["Ember"], self.ids["Ember"], "devanshu", self.now))
+        self.assertEqual(self.conn.execute("SELECT json_extract(detail, '$.posting_id'), "
+                                           "json_extract(detail, '$.company_id') FROM event "
+                                           "WHERE kind = 'company_reached'").fetchone()[:], (pid, self.ids["Ember"]))
+        self.assertEqual(reached.marks(self.conn), {self.ids["Ember"]: DAY})
 
-    def test_go_ahead_on_an_unscored_company(self):
-        co = s.company(self.conn, "Fresh Co")
-        self.ids["Fresh Co"] = co
-        pid = self.job("Fresh Co")
-        self.assertEqual(self.go(pid).json()["state"], "added")
-        self.assertIn("Fresh Co", self.plan_names())
+    def test_done_shows_as_reached_on_every_row_of_the_company(self):
+        a, b = self.job("Ember"), self.job("Ember", "Backend Engineer")
+        self.done(a)
+        rows = self.get("/api/jobs", params={"q": "Ember"}).json()["rows"]
+        self.assertEqual({r["postingId"]: r["contactedOn"] for r in rows}, {a: DAY, b: DAY})
+        self.assertEqual(self.jobs(q="Ember", notContacted="true"), [])
 
-    def test_go_ahead_ignores_room_and_cooldown(self):
-        pid_gale = self.job("Gale")  # said Not now to 3 days ago
-        pid_ember = self.job("Ember")
-        pid = s.person(self.conn, self.ids["Iris"], "Bo Fry", channel="linkedin")
-        for n in range(140):
-            log_touch(self.conn, person_id=pid, company_id=self.ids["Iris"], channel="linkedin_request",
-                      sent_at=f"2026-11-0{6 + n % 4}T1{n % 10}:{n % 60:02d}:00Z", context=_context(),
-                      idempotency_key=f"seed:room:{n}")
-        self.assertEqual(self.bench()["room"], 0)
-        self.assertEqual(self.add("Ember").status_code, 409)  # Add to today stops at the room
-        self.assertEqual(self.go(pid_gale).json()["state"], "added")  # Go ahead does not
-        self.assertEqual(self.go(pid_ember).json()["state"], "added")
-        self.assertEqual(self.plan_names()[-2:], ["Gale", "Ember"])
+    def test_done_twice_is_one_mark(self):
+        a, b = self.job("Ember"), self.job("Ember", "Backend Engineer")
+        self.done(a)
+        self.set_now("2026-11-11T15:14:00Z")
+        res = self.done(b)
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual((res.json()["reachedOn"], res.json()["text"]),
+                         (DAY, "Ember was already marked reached on Nov 10."))
+        self.assertEqual(len(self.marks()), 1)
 
-    def test_go_ahead_does_not_pass_or_hide_anything_else(self):
+    def test_done_replays_the_same_key(self):
         pid = self.job("Ember")
-        self.go(pid)
-        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind IN ('pick_passed', 'posting_passed')"), 1)
-        # (the one is Gale's seeded Not now)
-        self.assertEqual(self.jobs(q="Ember"), [pid])
-
-    def test_go_ahead_refuses_duplicate(self):
-        pid = self.job("Ember")
-        self.assertEqual(self.go(pid).status_code, 200)
-        again = self.go(self.job("Ember", "Backend Engineer"))
-        self.assertEqual((again.status_code, again.json()["code"]), (409, "not_allowed"))
-        self.assertIn("Ember is already on today's list.", again.json()["message"])
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list_entry WHERE company_id = ?", self.ids["Ember"]), 1)
-
-    def test_go_ahead_refuses_a_company_already_on_the_list_in_any_state(self):
-        beacon = self.job("Beacon")
-        res = self.go(beacon)
-        self.assertEqual(res.status_code, 409)
-        self.assertIn("Beacon is already on today's list.", res.json()["message"])
-        self.pass_("Beacon")  # now removed from today's list
-        res = self.go(beacon)
-        self.assertEqual(res.status_code, 409)
-        self.assertIn("was on today's list earlier", res.json()["message"])
-
-    def test_go_ahead_refuses_a_no_go_company(self):
-        res = self.go(self.job("Jolt"))
-        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"))
-        self.assertIn("Jolt is on your no-go list", res.json()["message"])
-
-    def test_go_ahead_refuses_a_company_with_someone_contacted_and_waiting(self):
-        res = self.go(self.job("Iris"))
-        self.assertEqual(res.status_code, 409)
-        self.assertIn("Iris is in flight", res.json()["message"])
-        self.assertIn("Nothing was saved.", res.json()["message"])
-
-    def test_a_refusal_writes_nothing(self):
-        before = self.count("SELECT count(*) FROM event")
-        self.go(self.job("Jolt"))
-        self.assertEqual(self.count("SELECT count(*) FROM event"), before)
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list_entry"), 3)
-
-    def test_go_ahead_replays_the_same_key(self):
-        pid = self.job("Ember")
-        first = self.go(pid, key="goahead-key-1")
-        again = self.go(pid, key="goahead-key-1")
+        first = self.done(pid, key="job-done-key-1")
+        again = self.done(pid, key="job-done-key-1")
         self.assertEqual(again.headers["Idempotent-Replay"], "true")
         self.assertEqual(first.json(), again.json())
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list_entry WHERE company_id = ?", self.ids["Ember"]), 1)
-        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'own_pick_requested'"), 1)
+        self.assertEqual(len(self.marks()), 1)
 
-    def test_a_posting_that_is_not_there_is_a_404(self):
-        self.assertEqual(self.go(999999).status_code, 404)
+    def test_done_on_no_go_company_still_records(self):
+        res = self.done(self.job("Jolt"))
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(len(self.marks()), 1)
+        self.assertEqual(reached.marks(self.conn), {self.ids["Jolt"]: DAY})
 
-    def test_go_ahead_follows_a_merged_company_to_its_survivor(self):
+    def test_done_ignores_a_company_in_flight_on_the_list_or_passed(self):
+        for name in ("Iris", "Beacon", "Gale"):  # someone waiting, on today's list, a Not now
+            self.assertEqual(self.done(self.job(name)).status_code, 200, name)
+        self.assertEqual(len(self.marks()), 3)
+
+    def test_done_touches_nothing_but_its_event(self):
+        pid = self.job("Ember")
+        tables = ("daily_list_entry", "outreach_touch", "touch", "linkedin_log", "no_go", "application")
+        before = [self.count(f"SELECT count(*) FROM {t}") for t in tables]
+        events = self.count("SELECT count(*) FROM event")
+        self.done(pid)
+        self.assertEqual([self.count(f"SELECT count(*) FROM {t}") for t in tables], before)
+        self.assertEqual(self.count("SELECT count(*) FROM event"), events + 1)
+        self.assertEqual(self.count("SELECT status FROM company WHERE company_id = ?", self.ids["Ember"]), "candidate")
+        self.assertEqual(self.jobs(q="Ember"), [pid])  # Done never hides the posting
+
+    def test_done_follows_a_merged_company_to_its_survivor(self):
         dupe = s.company(self.conn, "Ember Inc", "removed", merged_into=self.ids["Ember"])
         self.ids["Ember Inc"] = dupe
-        pid = self.job("Ember Inc")
-        body = self.go(pid).json()
+        body = self.done(self.job("Ember Inc")).json()
         self.assertEqual(body["companyId"], self.ids["Ember"])
-        self.assertEqual(self.count("SELECT company_id FROM daily_list_entry WHERE rank = 4"), self.ids["Ember"])
+        self.assertEqual(reached.marks(self.conn), {self.ids["Ember"]: DAY})
 
+    def test_done_on_a_posting_that_is_not_there_is_a_404(self):
+        res = self.done(999999)
+        self.assertEqual((res.status_code, res.json()["code"]), (404, "not_found"))
 
-class BeforeThePlanTest(WritesCase):
-    def setUp(self):
-        super().setUp()
-        self.clear_plan()
+    def test_done_with_a_stray_field_is_a_400(self):
+        self.assertEqual(self.post(f"/api/jobs/{self.job('Ember')}/done", {"company": 1}).status_code, 400)
 
-    def test_go_ahead_before_plan_records_a_request(self):
+    def test_go_ahead_route_is_gone(self):
         pid = self.job("Ember")
-        res = self.go(pid)
+        before = self.count("SELECT count(*) FROM event")
+        self.assertEqual(self.post(f"/api/jobs/{pid}/go-ahead", {}).status_code, 404)
+        self.assertEqual(self.count("SELECT count(*) FROM event"), before)
+        paths = self.app.openapi()["paths"]
+        self.assertIn("/api/jobs/{posting_id}/done", paths)
+        self.assertNotIn("/api/jobs/{posting_id}/go-ahead", paths)
+
+
+class ClearDoneTest(WritesCase):
+    """Undo of Done: `POST /api/companies/{companyId}/reached/clear`."""
+
+    def test_clear_mark_removes_reached(self):
+        pid = self.job("Ember")
+        self.done(pid)
+        res = self.clear(self.ids["Ember"])
         self.assertEqual(res.status_code, 200, res.text)
-        body = res.json()
-        self.assertEqual((body["state"], body["rank"], body["entryId"]), ("requested", None, None))
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list"), 0)
-        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'own_pick_requested' "
-                                    "AND json_extract(detail, '$.list_date') = ?", DAY), 1)
+        self.assertEqual(res.json(), {"companyId": self.ids["Ember"], "cleared": True})
+        row = self.conn.execute("SELECT * FROM event WHERE kind = 'company_reached_cleared'").fetchone()
+        self.assertEqual((row["entity"], row["entity_id"], row["company_id"], row["actor"]),
+                         ("company", self.ids["Ember"], self.ids["Ember"], "devanshu"))
+        self.assertEqual(reached.marks(self.conn), {})
+        self.assertEqual(self.jobs(q="Ember", notContacted="true"), [pid])
+        self.assertIsNone(self.get("/api/jobs", params={"q": "Ember"}).json()["rows"][0]["contactedOn"])
 
-    def test_go_ahead_on_a_saturday_is_kept_for_monday(self):
-        self.set_now("2026-11-14T15:14:00Z")  # Saturday 10:14 in New York
-        body = self.go(self.job("Ember")).json()
-        self.assertEqual((body["state"], body["listDate"]), ("requested", "2026-11-16"))
-        self.assertIn("Monday, Nov 16", body["text"])
-        self.assertNotIn("today", body["text"])
-        self.assertEqual(self.count("SELECT json_extract(detail, '$.list_date') FROM event "
-                                    "WHERE kind = 'own_pick_requested'"), "2026-11-16")
-
-    def test_go_ahead_on_a_sunday_is_kept_for_monday(self):
-        self.set_now("2026-11-15T15:14:00Z")
-        body = self.go(self.job("Ember")).json()
-        self.assertEqual((body["state"], body["listDate"]), ("requested", "2026-11-16"))
-
-    def test_a_weekday_request_says_today(self):
-        body = self.go(self.job("Ember")).json()
-        self.assertEqual(body["listDate"], DAY)
-        self.assertIn("today's list", body["text"])
-
-    def test_a_second_go_ahead_before_the_plan_is_refused(self):
-        self.go(self.job("Ember"))
-        res = self.go(self.job("Ember", "Backend Engineer"))
-        self.assertEqual(res.status_code, 409)
-        self.assertIn("already asked for", res.json()["message"])
-
-    def test_go_ahead_before_plan_is_kept_by_build(self):
-        titan = s.company(self.conn, "Titan")
-        self.ids["Titan"] = titan
-        s.score(self.conn, titan, {"live_role": 1.0}, hide={"reason": "too_big"})
-        pid = self.job("Titan")
-        self.go(pid)
-        result = build_plan(self.conn, today=date.fromisoformat(DAY), read_boards=False)
-        self.assertEqual(result.status, "built")  # the request did not make it "already built"
-        rows = self.conn.execute("SELECT company_id, rank, state, posting_id FROM daily_list_entry "
-                                 "ORDER BY rank").fetchall()
-        self.assertEqual(tuple(rows[0]), (titan, 1, "proposed", pid))
-        self.assertEqual([r["rank"] for r in rows], list(range(1, len(rows) + 1)))
-        self.assertEqual(len({r["company_id"] for r in rows}), len(rows))
-        self.assertIn("Titan", self.plan_names())
-
-    def test_build_does_not_double_a_company_it_would_have_chosen_anyway(self):
-        ember = self.ids["Ember"]
+    def test_mark_after_clear_counts_again(self):
         pid = self.job("Ember")
-        self.go(pid)
-        build_plan(self.conn, today=date.fromisoformat(DAY), read_boards=False)
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list_entry WHERE company_id = ?", ember), 1)
-        self.assertEqual(self.count("SELECT rank FROM daily_list_entry WHERE company_id = ?", ember), 1)
+        self.done(pid)
+        self.clear(self.ids["Ember"])
+        self.set_now("2026-11-11T15:14:00Z")
+        res = self.done(pid)
+        self.assertEqual((res.json()["reachedOn"], res.json()["text"]), ("2026-11-11", "Marked Ember reached."))
+        self.assertEqual(reached.marks(self.conn), {self.ids["Ember"]: "2026-11-11"})
 
-    def test_build_drops_a_request_that_went_no_go_since(self):
-        ember = self.ids["Ember"]
-        self.go(self.job("Ember"))
-        self.conn.execute("INSERT INTO no_go(company_id, reason, source, created_at) VALUES (?, 'no_sponsorship', "
-                          "'devanshu', '2026-11-10T14:00:00Z')", (ember,))
-        build_plan(self.conn, today=date.fromisoformat(DAY), read_boards=False)
-        self.assertEqual(self.count("SELECT count(*) FROM daily_list_entry WHERE company_id = ?", ember), 0)
+    def test_clear_with_no_mark_writes_nothing(self):
+        before = self.count("SELECT count(*) FROM event")
+        res = self.clear(self.ids["Ember"])
+        self.assertEqual(res.json(), {"companyId": self.ids["Ember"], "cleared": False})
+        self.done(self.job("Ember"))
+        self.clear(self.ids["Ember"])
+        self.assertEqual(self.clear(self.ids["Ember"]).json()["cleared"], False)  # a second clear writes nothing
+        self.assertEqual(self.count("SELECT count(*) FROM event"), before + 2)
 
-    def test_go_ahead_after_the_build_takes_the_next_rank(self):
-        co = s.company(self.conn, "Unranked")
-        self.ids["Unranked"] = co
-        pid = self.job("Unranked")
-        build_plan(self.conn, today=date.fromisoformat(DAY), read_boards=False)
-        last = self.count("SELECT max(rank) FROM daily_list_entry")
-        res = self.go(pid)
-        self.assertEqual((res.json()["state"], res.json()["rank"]), ("added", last + 1))
+    def test_clear_never_takes_back_real_outreach(self):
+        # Iris has a LinkedIn request on file: clearing his mark leaves her reached by the request.
+        pid = self.job("Iris")
+        self.done(pid)
+        self.clear(self.ids["Iris"])
+        self.assertEqual(self.get("/api/jobs", params={"q": "Iris"}).json()["rows"][0]["contactedOn"], "2026-11-08")
+
+    def test_clear_on_a_merged_away_id_clears_the_survivor(self):
+        dupe = s.company(self.conn, "Ember Inc", "removed", merged_into=self.ids["Ember"])
+        self.done(self.job("Ember"))
+        res = self.clear(dupe)
+        self.assertEqual(res.json(), {"companyId": self.ids["Ember"], "cleared": True})
+        self.assertEqual(reached.marks(self.conn), {})
+
+    def test_clear_on_a_company_that_is_not_there_is_a_404(self):
+        res = self.clear(999999)
+        self.assertEqual((res.status_code, res.json()["code"]), (404, "not_found"))
+
+    def test_clear_replays_the_same_key(self):
+        self.done(self.job("Ember"))
+        first = self.clear(self.ids["Ember"], key="reached-clear-key-1")
+        again = self.clear(self.ids["Ember"], key="reached-clear-key-1")
+        self.assertEqual(again.headers["Idempotent-Replay"], "true")
+        self.assertEqual(first.json(), again.json())
+        self.assertEqual(self.count("SELECT count(*) FROM event WHERE kind = 'company_reached_cleared'"), 1)

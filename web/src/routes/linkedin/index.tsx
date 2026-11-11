@@ -324,12 +324,12 @@ export default function LinkedInPage() {
               is asked twice.
             </p>
             <p>
-              Who to reach first each day is on{' '}
+              You pick the companies to reach on{' '}
               <Link
-                to="/today"
+                to="/browse"
                 className="rounded-sm text-foreground underline decoration-border underline-offset-3 outline-none hover:decoration-current focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
-                Today&apos;s plan
+                Jobs
               </Link>
               .
             </p>

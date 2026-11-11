@@ -52,7 +52,7 @@ SCHEDULED: dict[str, Every | At] = {
     "plan": At(8, 0, weekdays_only=True),
     "prepare": At(5, 30, weekdays_only=True),
 }
-# Run by hand or inside another job (`rank` runs inside `plan`): no expected time, never late.
+# Run by hand or inside another job (`rank` runs inside the sources job's run-due): no expected time, never late.
 UNSCHEDULED = frozenset({
     "install", "rebuild", "crawl", "daily_list", "import", "discover", "resolve", "find_boards", "rank",
 })
@@ -130,8 +130,12 @@ def counts_of(summary: str) -> list[JobCount]:
 
 
 def switched_off(job: str) -> bool:
-    """True for a job its config turns off: it expects no next run, so it is never late (`prepare`, company first, #9)."""
-    return job == "prepare" and not default_plan_config().prepare["enabled"]
+    """True for a job its config turns off: it expects no next run, so it is never late (`prepare`, company first, #9;
+    `plan`, first to see, #9 2026-11-10)."""
+    if job not in ("prepare", "plan"):
+        return False
+    config = default_plan_config()
+    return not (config.prepare if job == "prepare" else config.plan)["enabled"]
 
 
 def run_summary(row: sqlite3.Row, now: str) -> JobRunSummary:

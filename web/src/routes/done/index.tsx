@@ -22,7 +22,7 @@ export default function DonePage() {
       <PageHeader
         className="mb-4"
         title="Done companies"
-        summary="Closed with an interview or a referral. They never come back to Today, and nothing is sent there."
+        summary="Closed with an interview or a referral. Nothing more is sent there."
       />
       <QueryState query={query} skeleton={<DoneSkeleton />} empty={null}>
         {(view) => <DoneBody view={view} />}

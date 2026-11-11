@@ -35,19 +35,3 @@ export function SourceAnchor({ link, className }: { link: SourceLink; className?
     </a>
   );
 }
-
-/**
- * Where a reason comes from: "From" and each source (design 16.1, `.work-sources`). Nothing with no sources.
- * The caller sets the spacing around it (the mockup puts it 6 px under the reason: `mt-1.5`).
- */
-export function SourceLinks({ links, className }: { links: SourceLink[]; className?: string }) {
-  if (links.length === 0) return null;
-  return (
-    <div className={cn('flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground', className)}>
-      <span>From</span>
-      {links.map((link, i) => (
-        <SourceAnchor key={`${i}:${link.url}`} link={link} />
-      ))}
-    </div>
-  );
-}

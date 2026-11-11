@@ -40,7 +40,7 @@ function ErrorScreen() {
           <div className="flex gap-2">
             {reload}
             <Button asChild variant="outline" size="sm">
-              <Link to={{ pathname: '/today', search }}>Go to Today</Link>
+              <Link to={{ pathname: '/browse', search }}>Go to Jobs</Link>
             </Button>
           </div>
           <p className="max-w-lg break-words font-mono text-xs text-muted-foreground">{errorText(error)}</p>

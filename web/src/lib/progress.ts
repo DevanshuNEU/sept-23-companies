@@ -1,4 +1,4 @@
-import type { BaseRates, PlanRow, ProgressPeriod } from '@/api';
+import type { BaseRates, ProgressPeriod } from '@/api';
 
 // Honest numbers (spec section 16). Every count sits beside its denominator, no rate shows under the
 // minimum sample, and nothing here reads the clock. `enough` comes from the API; the UI never decides it.
@@ -40,20 +40,6 @@ export function smallSampleNote(p: Pick<ProgressPeriod, 'enough'>, requests: num
   void minRequests;
   const noun = requests === 1 ? 'request' : 'requests';
   return `Only ${requests} ${noun} so far. Rates this small swing a lot, so none are shown.`;
-}
-
-/** What today's plan has done so far, in a fixed order, zero counts left out. */
-export function didToday(rows: PlanRow[]): { label: string; count: number }[] {
-  // A company row's request step stands for the wave he sent there (company first, #9): count its people.
-  const asked = (r: PlanRow) => (r.queue ? Math.max(1, r.queue.standing.asked) : 1);
-  const doneSteps = (kind: 'request' | 'apply') =>
-    rows.reduce((n, r) => n + r.steps.filter((s) => s.kind === kind && s.at !== null).length * (kind === 'request' ? asked(r) : 1), 0);
-  const emails = rows.filter((r) => r.channel === 'email' && r.state === 'done').length;
-  return [
-    { label: 'Requests sent', count: doneSteps('request') },
-    { label: 'Applications sent', count: doneSteps('apply') },
-    { label: 'Emails reviewed', count: emails },
-  ].filter((d) => d.count > 0);
 }
 
 /** The smallest group a rate may be drawn from (the findings rule, ruling 13). */

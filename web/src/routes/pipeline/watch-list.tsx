@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 import { safeHref } from '@/lib/safe-href';
 import { watchKindLabel } from '@/lib/status';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
-import { quietLink } from '../today/below-plan';
-import { formatMonthDay } from '../today/short-dates';
+import { quietLink } from '@/lib/quiet-link';
+import { formatMonthDay } from '@/lib/short-dates';
 
 /**
  * The one link under an item: the page that changed (an outside address, opened in a new tab and never fetched), the

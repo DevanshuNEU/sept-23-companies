@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, SearchX } from 'lucide-react';
+import { ArrowUp, Check, SearchX } from 'lucide-react';
 import {
   pollMs,
   queryKeys,
+  useClient,
   usePageClient,
   type Id,
+  type IsoTime,
   type JobRow,
   type JobsParams,
   type JobsSize,
@@ -22,10 +24,14 @@ import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAnnounce, useHotkeys, type Binding } from '@/keyboard/hotkeys';
-import { formatDueDay } from '@/lib/format';
+import { gapTag, postedLabel, repostTag } from '@/lib/format';
+import { quietLink } from '@/lib/quiet-link';
 import { openExternal, safeHref } from '@/lib/safe-href';
+import { formatDateMonthDay, formatMonthDay } from '@/lib/short-dates';
 import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
+import { CheckLineView, CheckNowButton, useCheckNow } from './check-now';
+import { heldRows, isNew, markOpened, readLastOpened } from './new-rows';
 
 const GROUP = 'Jobs';
 /** How long typing waits before the search is asked. */
@@ -47,23 +53,26 @@ const SIZES: { value: JobsSize; label: string; hint: string }[] = [
   { value: 'unknown', label: 'Not known', hint: 'No size on file and no sign of being big' },
 ];
 
+/** Scrolled this little or less still counts as at the top: new rows show at once there. */
+const TOP_PX = 8;
+
 const LINK =
   'rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
 /** Small controls on a desk; thumb sized on a phone. */
 const CHIP = 'h-8 px-3 text-xs max-sm:h-11';
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
 const sizeLine = (j: JobRow) => (j.size === null ? (j.big ? 'Big company, size not known' : 'Size not known') : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
 const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
 
 /**
- * What he has asked for and the server has not heard yet: postings passed and companies being gone ahead with. It is a
- * query only so the pending-write overlay can lay these over it (Undo drops them, a commit settles them).
+ * What he has asked for and the server has not heard yet: postings passed, and Reached (#195): the postings he pressed it
+ * on and their companies, whose rows all show reached at once. It is a query only so the pending-write overlay can lay
+ * these over it (Undo drops them, a commit settles them).
  */
-interface Marks { hidden: Id[]; ahead: Id[] }
-const NO_MARKS: Marks = { hidden: [], ahead: [] };
+interface Marks { hidden: Id[]; done: Id[]; reached: Id[] }
+const NO_MARKS: Marks = { hidden: [], done: [], reached: [] };
 
 /** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
 function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContacted: boolean }): string {
@@ -79,34 +88,51 @@ function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContac
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 }
 
-function Flags({ job }: { job: JobRow }) {
-  if (!job.saysNoSponsorship && !job.everify && !job.yc && !job.contactedOn) return null;
+/**
+ * The row's tags: first what qualifies its time (a repost, a late find), then the company's flags, then the day he
+ * reached the company (a person contacted there, or his own mark). `reachedOn` is that day as words.
+ */
+function Flags({ job, asOf, reachedOn }: { job: JobRow; asOf: IsoTime; reachedOn: string | null }) {
+  const repost = repostTag(job.repostedFrom, asOf);
+  const gap = gapTag(job);
+  if (!repost && !gap && !job.saysNoSponsorship && !job.everify && !job.yc && !reachedOn) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
+      {repost ? <Badge variant="idle">{repost}</Badge> : null}
+      {gap ? <Badge variant="idle">{gap}</Badge> : null}
       {job.saysNoSponsorship ? <Badge variant="warn">Says no sponsorship</Badge> : null}
       {job.everify ? <Badge variant="idle">E-Verify</Badge> : null}
       {job.yc ? <Badge variant="idle">YC</Badge> : null}
-      {job.contactedOn ? <Badge variant="info">You contacted them on {formatDueDay(job.contactedOn)}</Badge> : null}
+      {reachedOn ? <Badge variant="info">{`Reached ${reachedOn}`}</Badge> : null}
     </div>
   );
 }
 
 function JobItem({
   job,
+  asOf,
   current,
+  fresh,
+  reachedOn,
   answer,
-  going,
+  marking,
   onSelect,
   onPass,
-  onGoAhead,
+  onReached,
 }: {
   job: JobRow;
+  asOf: IsoTime;
   current: boolean;
+  /** First seen since his last visit. */
+  fresh: boolean;
+  /** The day his company was reached, as words ("Nov 9"), or null. */
+  reachedOn: string | null;
   answer: string | undefined;
-  going: boolean;
+  /** Reached on this row waits in its undo window. */
+  marking: boolean;
   onSelect: () => void;
   onPass: () => void;
-  onGoAhead: () => void;
+  onReached: () => void;
 }) {
   const href = safeHref(job.url);
   return (
@@ -127,37 +153,64 @@ function JobItem({
             <span className="text-sm font-medium">{job.title}</span>
           )}
           <span className="text-xs text-muted-foreground">{job.levelTag}</span>
+          {fresh ? <Badge variant="info">New</Badge> : null}
         </p>
         <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
           <Link to={`/companies/${job.companyId}`} className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/70">
             {job.companyName}
           </Link>
-          <span>{`${job.dateKind} ${ago(job.ageDays)}`}</span>
+          <span className="tabular-nums">{postedLabel(job, asOf)}</span>
           <span>{sizeLine(job)}</span>
           <span>{job.location}</span>
         </p>
-        <Flags job={job} />
+        <Flags job={job} asOf={asOf} reachedOn={reachedOn} />
       </div>
       {answer !== undefined ? (
         <p role="status" className="flex max-w-72 items-start gap-1.5 text-xs text-foreground">
           <Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-ok" />
           {answer}
         </p>
-      ) : going ? (
+      ) : marking ? (
         <p role="status" className="text-xs text-muted-foreground">
-          Going ahead
+          Marking reached
         </p>
       ) : (
         <div role="group" aria-label="Your answer" className="flex gap-1.5">
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
           </Button>
-          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'a' : undefined} onClick={onGoAhead}>
-            Go ahead
+          <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onReached}>
+            Mark reached
           </Button>
         </div>
       )}
     </li>
+  );
+}
+
+/** The same rows in the same order (the server's copies may differ; `heldRows` takes those). */
+function sameRows(a: readonly JobRow[], b: readonly JobRow[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.postingId === b[i]?.postingId);
+}
+
+/**
+ * "Today: 34 sent, 2 replies", opening Progress (design 4.5): the emails the sender sent today (the sidebar's count)
+ * and the LinkedIn requests he logged, then today's replies, as Progress counts them. Nothing until both have loaded,
+ * and nothing when either did not: the line is a glance, never a guess.
+ */
+function OutreachLine() {
+  const client = useClient();
+  const shell = useViewQuery(queryKeys.shell, () => client.shell(), { pollMs: pollMs.default });
+  const progress = useViewQuery(queryKeys.progress, () => client.progress(), { pollMs: pollMs.default });
+  if (!shell.data || !progress.data) return null;
+  const sent = shell.data.sending.sentToday + progress.data.today.requests;
+  const replies = progress.data.today.replied;
+  return (
+    <p aria-live="off">
+      <Link to="/progress" className={cn(quietLink, 'max-sm:inline-flex max-sm:min-h-6 max-sm:items-center')}>
+        {`Today: ${sent.toLocaleString('en-US')} sent, ${plural(replies, 'reply', 'replies')}`}
+      </Link>
+    </p>
   );
 }
 
@@ -175,15 +228,24 @@ function Skeletons() {
 }
 
 /**
- * Jobs (sidebar, or F on Today; #156): the open engineering postings, newest first, in two tabs (your level, higher
- * levels). He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never
- * its company) and Go ahead puts its company on today's list as his own pick. There is no score and no ranking text.
+ * Jobs (#156), the page Knock opens on (#195): the open engineering postings, newest first by when each was posted
+ * (#193), in two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date,
+ * or when Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the
+ * end. He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its
+ * company) and Reached marks its company as reached, even when he reached it outside Knock. There is no score and no
+ * ranking text. Every row of a reached company says "Reached Nov 9" (a person contacted there, or his own mark).
  *
- * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Go ahead keeps the
- * row and writes the API's own sentence in it ("Added ... to today's list.", or when it is kept for the next list).
+ * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Reached keeps the row,
+ * tags every row of the company at once with Undo for the window, and then writes the API's own sentence in the row.
+ * His mark is taken back later from the company page. The line under the header is today's outreach from the sidebar's
+ * send count and Progress, and opens Progress.
  *
- * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A goes ahead.
- * The page sets no focus on arrival: the keys listen on the whole page.
+ * Check now (#194) asks the crawl job to read every Greenhouse and Ashby board; the line under the header says how it
+ * is going. New rows show at once while he is at the top on no row; scrolled down or on a row, the list stays put and an
+ * "N new" button shows them. A row first seen since his last visit (not a first read, not a repost) says New.
+ *
+ * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A marks done,
+ * C checks now. The page sets no focus on arrival: the keys listen on the whole page.
  */
 export default function BrowsePage() {
   const client = usePageClient('plan');
@@ -200,9 +262,23 @@ export default function BrowsePage() {
   const write = usePendingWrite();
   const marks = useViewQuery(queryKeys.jobsMarks, () => Promise.resolve(NO_MARKS));
   const hidden = useMemo(() => new Set(marks.data?.hidden), [marks.data]);
-  const ahead = useMemo(() => new Set(marks.data?.ahead), [marks.data]);
-  const list = useRef<HTMLUListElement>(null);
+  const marking = useMemo(() => new Set(marks.data?.done), [marks.data]);
+  const reachedNow = useMemo(() => new Set(marks.data?.reached), [marks.data]);
+  const list = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const searchBox = useRef<HTMLInputElement>(null);
+  const check = useCheckNow();
+  // His last visit marks what is new, read once a mount. A visit ends when the tab closes or reloads (or at "N new"), not
+  // when he steps to a company page and back, so the marks stay for the whole sitting.
+  const [since] = useState(readLastOpened);
+  useEffect(() => {
+    const leave = () => markOpened();
+    window.addEventListener('pagehide', leave);
+    return () => window.removeEventListener('pagehide', leave);
+  }, []);
+  const [atTop, setAtTop] = useState(true);
+  /** The rows on screen for one ask (`key`), so new rows can wait while he is scrolled down or on a row. */
+  const [held, setHeld] = useState<{ key: string; rows: JobRow[] } | null>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(text.trim()), TYPING_MS);
@@ -225,11 +301,21 @@ export default function BrowsePage() {
     const seen = new Set<Id>();
     return (query.data?.pages ?? []).flatMap((p) => p.rows).filter((j) => !seen.has(j.postingId) && !!seen.add(j.postingId));
   }, [query.data]);
-  const jobs = useMemo(() => loaded.filter((j) => !hidden.has(j.postingId)), [loaded, hidden]);
+
+  // New rows never move the list under him: scrolled down or on a row, they wait behind "N new" (design 4.5). A new ask
+  // (a tab, a window, a search) starts from what it brings.
+  const listKey = JSON.stringify(params);
+  const sameAsk = !stale && query.data !== undefined && held?.key === listKey;
+  const shown = sameAsk && held ? heldRows(held.rows, loaded, atTop, active !== null, query.hasNextPage) : { rows: loaded, waiting: 0 };
+  if (!stale && query.data !== undefined && (held?.key !== listKey || !sameRows(held.rows, shown.rows))) setHeld({ key: listKey, rows: shown.rows });
+
+  const jobs = useMemo(() => shown.rows.filter((j) => !hidden.has(j.postingId)), [shown.rows, hidden]);
   // A pass the server has not been read after yet still counts: the numbers follow the rows.
-  const passed = loaded.length - jobs.length;
+  const passed = loaded.filter((j) => hidden.has(j.postingId)).length;
   const last = query.data?.pages.at(-1);
   const total = last ? Math.max(last.total - passed, 0) : undefined;
+  const dated = jobs.filter((j) => j.listAt !== null);
+  const undated = jobs.filter((j) => j.listAt === null);
   const counts = last ? { your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0), higher: last.counts.higher - (tab === 'higher' ? passed : 0) } : undefined;
 
   // A pass taken back (Undo, or it did not go through) puts the row back and puts him back on it. Done while rendering,
@@ -257,7 +343,7 @@ export default function BrowsePage() {
   /** Nothing is sent now: the row leaves at once and the toast offers Undo. The pass goes out when the window closes, or when he leaves the page. */
   const pass = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
+    if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
     // The row he is on leaves, and the one below it (else the one above) becomes the current one.
     if (current?.postingId === id) setActive((jobs[index + 1] ?? jobs[index - 1])?.postingId ?? null);
     announce(`Passed. ${job.title} is off the list.`);
@@ -271,24 +357,56 @@ export default function BrowsePage() {
     });
   };
 
-  /** The same: the row says "Going ahead" with Undo for the window; the API's own sentence replaces it once it answers. */
-  const goAhead = (job: JobRow) => {
+  /**
+   * Reached: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
+   * closes. The API's own sentence then replaces the row's buttons, and the list is read again before the mark is dropped,
+   * so the tag does not flash off. Nothing else stops it: Reached on a company already reached just says when.
+   */
+  const markCompanyReached = (job: JobRow) => {
     const id = job.postingId;
-    if (hidden.has(id) || ahead.has(id) || answers.has(id)) return;
-    const label = `Going ahead with ${job.companyName}.`;
+    const company = job.companyId;
+    if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
+    const label = `Marked ${job.companyName} reached.`;
     write({
-      id: `job-ahead:${id}`,
+      id: `job-done:${id}`,
       label,
       afterCommit: label,
-      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, ahead: [...m.ahead, id] }) }],
+      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, done: [...m.done, id], reached: [...m.reached, company] }) }],
       commit: (o) =>
-        client.goAhead(id, o).then((res) => {
+        client.markReached(id, o).then(async (res) => {
           setAnswers((a) => new Map(a).set(id, res.text));
           announce(res.text);
-          void queryClient.invalidateQueries({ queryKey: queryKeys.plan, exact: true });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.company(res.companyId) });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
         }),
     });
   };
+
+  /** "N new": the waiting rows show, the list goes to its top, and this counts as a visit. */
+  const showNew = () => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setAtTop(true);
+    setActive(null);
+    markOpened();
+    announce(`${shown.waiting.toLocaleString('en-US')} new at the top.`);
+  };
+
+  const asOf = last?.asOf;
+  const item = (j: JobRow) => (
+    <JobItem
+      key={j.postingId}
+      job={j}
+      asOf={asOf ?? j.firstSeenAt}
+      current={j.postingId === current?.postingId}
+      fresh={isNew(j, since)}
+      reachedOn={reachedNow.has(j.companyId) && asOf ? formatMonthDay(asOf) : j.contactedOn ? formatDateMonthDay(j.contactedOn) : null}
+      answer={answers.get(j.postingId)}
+      marking={marking.has(j.postingId)}
+      onSelect={() => setActive(j.postingId)}
+      onPass={() => pass(j)}
+      onReached={() => markCompanyReached(j)}
+    />
+  );
 
   const open = current !== null;
   const bindings: Binding[] = [
@@ -296,7 +414,8 @@ export default function BrowsePage() {
     { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
-    { keys: 'a', label: 'Go ahead', group: GROUP, enabled: open, run: () => current && goAhead(current) },
+    { keys: 'a', label: 'Mark the company reached', group: GROUP, enabled: open, run: () => current && markCompanyReached(current) },
+    { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
   useHotkeys(bindings);
 
@@ -308,7 +427,17 @@ export default function BrowsePage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="grid flex-none gap-3 border-b px-6 pt-5 pb-3">
-        <PageHeader title="Jobs" summary={headline} />
+        <PageHeader
+          title="Jobs"
+          summary={
+            <>
+              <p>{headline}</p>
+              <OutreachLine />
+              {check.line ? <CheckLineView line={check.line} /> : null}
+            </>
+          }
+          aside={<CheckNowButton onClick={check.ask} />}
+        />
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <Tabs
             value={tab}
@@ -332,7 +461,7 @@ export default function BrowsePage() {
             <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
             <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
-            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> go ahead</span>
+            <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> mark reached</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -366,7 +495,18 @@ export default function BrowsePage() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scroller} data-jobs-scroll className="relative min-h-0 flex-1 overflow-auto" onScroll={(e) => setAtTop(e.currentTarget.scrollTop <= TOP_PX)}>
+        {shown.waiting > 0 ? (
+          // Zero height and sticky: the button floats over the rows and moves none of them.
+          <div className="pointer-events-none sticky top-0 z-10 h-0">
+            <div className="flex justify-center pt-2">
+              <Button type="button" size="sm" className="pointer-events-auto h-7 gap-1.5 rounded-full px-3 text-xs shadow-sm max-sm:h-11" title="Show the new jobs at the top" onClick={showNew}>
+                <ArrowUp aria-hidden className="size-3.5" />
+                {`${shown.waiting.toLocaleString('en-US')} new`}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {query.isError && !query.data ? (
           <p role="alert" className="px-6 py-6 text-sm">
             The jobs did not load. Nothing was changed.{' '}
@@ -399,20 +539,20 @@ export default function BrowsePage() {
             {whatToWiden(on)}
           </EmptyState>
         ) : (
-          <ul ref={list} aria-label="Jobs" aria-busy={stale} className={cn(stale && 'opacity-60 transition-opacity')}>
-            {jobs.map((j) => (
-              <JobItem
-                key={j.postingId}
-                job={j}
-                current={j.postingId === current?.postingId}
-                answer={answers.get(j.postingId)}
-                going={ahead.has(j.postingId)}
-                onSelect={() => setActive(j.postingId)}
-                onPass={() => pass(j)}
-                onGoAhead={() => goAhead(j)}
-              />
-            ))}
-          </ul>
+          <div ref={list} aria-busy={stale} className={cn(stale && 'opacity-60 transition-opacity')}>
+            {dated.length > 0 ? <ul aria-label="Jobs">{dated.map(item)}</ul> : null}
+            {undated.length > 0 ? (
+              <section aria-labelledby="date-unknown-h">
+                <div className="grid gap-0.5 border-b px-6 pt-6 pb-3">
+                  <h2 id="date-unknown-h" className="text-sm font-semibold">
+                    Date unknown
+                  </h2>
+                  <p className="text-[13px] text-muted-foreground">These boards give no posting date, and Knock found these jobs on its first read.</p>
+                </div>
+                <ul aria-label="Date unknown">{undated.map(item)}</ul>
+              </section>
+            ) : null}
+          </div>
         )}
         {query.hasNextPage ? (
           <div className="grid justify-items-center border-t px-6 py-4">

@@ -14,12 +14,12 @@ from outreach.drafts.followups import company_map, company_reply_held, held_surv
 from outreach.ranking.common import canonical_ids
 from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import clear_item, unit
-from outreach.review.play import emailing, in_play, ny_date
+from outreach.review.play import REACHED_DAYS, emailing, in_play, ny_date
 from outreach.store.timefmt import iso_utc
 
 __all__ = ["ranked_ids", "held_companies", "attention", "crawler_scope", "clear_out_of_scope", "OUT_OF_SCOPE_NOTE"]
 
-OUT_OF_SCOPE_NOTE = "Not in your plan. It comes back if the company does."
+OUT_OF_SCOPE_NOTE = "Not a company you are working on now. It comes back if that changes."
 
 
 def ranked_ids(conn: sqlite3.Connection, top_n: int | None) -> list[int]:
@@ -50,12 +50,13 @@ def flagged_by_him(conn: sqlite3.Connection, canon: Mapping[int, int]) -> frozen
         "AND evidence_key LIKE 'pick-flag:%'"))
 
 
-def attention(conn: sqlite3.Connection, *, today: str, planned_days: int,
+def attention(conn: sqlite3.Connection, *, today: str, planned_days: int, reached_days: int = REACHED_DAYS,
               canon: Mapping[int, int] | None = None) -> frozenset[int]:
-    """The companies whose open items belong in Needs you: in play, being emailed, or held by a reply. `canon` as
-    in `play.live_company_ids`."""
+    """The companies whose open items belong in Needs you: in play (over `reached_days`, the config's
+    `[sweep] reached_days` at every caller), being emailed, or held by a reply. `canon` as in
+    `play.live_company_ids`."""
     canon = canonical_ids(conn) if canon is None else canon
-    playing = in_play(conn, today=today, planned_days=planned_days, canon=canon)
+    playing = in_play(conn, today=today, planned_days=planned_days, canon=canon, reached_days=reached_days)
     mailing = emailing(conn, today=today, planned_days=planned_days, canon=canon)
     return frozenset(playing) | mailing | held_companies(conn) | flagged_by_him(conn, canon)
 
@@ -64,7 +65,7 @@ def crawler_scope(conn: sqlite3.Connection, *, today: str, cfg: ReviewConfig,
                   canon: Mapping[int, int] | None = None) -> tuple[frozenset[int], list[int]]:
     """What the crawler may raise a data gap for: (`attention`, the top `crawler_scope_top` of the ranked list in
     its order)."""
-    return (attention(conn, today=today, planned_days=cfg.planned_days, canon=canon),
+    return (attention(conn, today=today, planned_days=cfg.planned_days, reached_days=cfg.reached_days, canon=canon),
             ranked_ids(conn, cfg.crawler_scope_top))
 
 

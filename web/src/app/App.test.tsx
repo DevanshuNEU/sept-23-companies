@@ -6,12 +6,21 @@ import { FixtureClient } from '@/api/fixture/client';
 import { routes, viewRoutes } from '@/app/routes';
 
 describe('App', () => {
-  it('sends / to Today inside the shell', async () => {
+  it('root opens Jobs inside the shell', async () => {
+    window.history.pushState({}, '', '/');
     render(<App client={new FixtureClient()} />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument();
-    expect(window.location.pathname).toBe('/today');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Jobs' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/browse');
     expect(screen.getByRole('navigation', { name: 'Views' })).toBeInTheDocument();
-    expect(await screen.findByText('2 of 7')).toBeInTheDocument();
+  });
+
+  it.each(['/today', '/proposals', '/nowhere'])('%s redirects to Jobs and keeps the query', async (path) => {
+    window.history.pushState({}, '', `${path}?scenario=queue`);
+    render(<App client={new FixtureClient()} />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Jobs' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/browse');
+    expect(window.location.search).toBe('?scenario=queue');
+    window.history.pushState({}, '', '/');
   });
 });
 
@@ -26,16 +35,6 @@ describe('App routes for results', () => {
   });
 });
 
-describe('the proposals route', () => {
-  it('opens /proposals as All proposed companies, in the heading and the breadcrumb', async () => {
-    window.history.pushState({}, '', '/proposals');
-    render(<App client={new FixtureClient()} />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'All proposed companies' })).toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: 'breadcrumb' })).toHaveTextContent('All proposed companies');
-    window.history.pushState({}, '', '/');
-  });
-});
-
 describe('route table', () => {
   const pathsOf = (list: typeof routes, parent = ''): string[] =>
     list.flatMap((r) => {
@@ -46,6 +45,12 @@ describe('route table', () => {
   it('has no duplicate paths', () => {
     const all = pathsOf(routes);
     expect(new Set(all).size).toBe(all.length);
+  });
+
+  it('has no Today or Proposals view', () => {
+    const paths = viewRoutes.map((r) => r.path);
+    expect(paths).not.toContain('today');
+    expect(paths).not.toContain('proposals');
   });
 
   it('has Progress and Wins as views', () => {

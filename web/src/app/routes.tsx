@@ -12,9 +12,7 @@ import {
   ParentReads,
   PipelinePage,
   ProgressPage,
-  ProposalsPage,
-  ToToday,
-  TodayPage,
+  ToJobs,
   WinsPage,
 } from '@/app/pages';
 
@@ -24,8 +22,6 @@ import {
  * they change and reads them with `useParams()` and `useLocation()`.
  */
 export const viewRoutes: RouteObject[] = [
-  { path: 'today', element: <TodayPage /> },
-  { path: 'proposals', element: <ProposalsPage /> },
   { path: 'browse', element: <BrowsePage /> },
   { path: 'pipeline', element: <PipelinePage /> },
   { path: 'outbox', element: <OutboxPage />, children: [{ path: ':touchId', element: <ParentReads /> }] },
@@ -49,9 +45,12 @@ export const routes: RouteObject[] = [
         // A pathless layout: a failing view renders its error here, inside the shell's outlet.
         errorElement: <RouteError />,
         children: [
-          { index: true, element: <ToToday /> },
+          // Knock opens on the job list (#195). Today and Proposals are gone; their old links land there too.
+          { index: true, element: <ToJobs /> },
+          { path: 'today', element: <ToJobs /> },
+          { path: 'proposals', element: <ToJobs /> },
           ...viewRoutes,
-          { path: '*', element: <ToToday /> },
+          { path: '*', element: <ToJobs /> },
         ],
       },
     ],

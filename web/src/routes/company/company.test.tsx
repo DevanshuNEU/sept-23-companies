@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router';
 import type { CompanyView, Id } from '@/api';
 import { FixtureClient } from '@/api/fixture/client';
-import { companyId } from '@/api/fixture/data';
+import { buildFixture, companyId } from '@/api/fixture/data';
 import { renderWithApp } from '@/test/render';
 import CompanyPage from './index';
 
@@ -349,5 +349,52 @@ describe('Company page, posting flags', () => {
     const flags = within(panel()).getByRole('list', { name: /^Where the reader and the rules disagree/ });
     expect(flags.closest('[class*="bad"]')).toBeNull();
   });
-});
 
+  describe('his Done mark', () => {
+    const marked = () => {
+      const db = buildFixture();
+      db.companies[BROWSERBASE]?.events.unshift({ id: 1, at: '2026-11-09T15:20:00Z', kind: 'company_reached', text: 'Company reached', actor: 'devanshu', importSource: null });
+      return new FixtureClient(db);
+    };
+    const line = () => screen.queryByText('Reached Nov 9 (your mark)');
+
+    it('shows the day he marked it reached, with a way to clear it', async () => {
+      await open(`/companies/${BROWSERBASE}`, marked());
+      expect(line()).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Clear mark' })).toBeInTheDocument();
+    });
+
+    it('shows nothing for a company he never marked, or one whose mark he cleared', async () => {
+      await open();
+      expect(line()).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Clear mark' })).toBeNull();
+    });
+
+    it('Clear mark takes the line off at once, waits in the undo window, then sends one clear', async () => {
+      const client = marked();
+      const clear = vi.spyOn(client, 'clearReached');
+      await open(`/companies/${BROWSERBASE}`, client);
+      fireEvent.click(screen.getByRole('button', { name: 'Clear mark' }));
+      expect(await screen.findByText('Cleared the mark on Browserbase.')).toBeInTheDocument();
+      expect(line()).toBeNull();
+      expect(clear).not.toHaveBeenCalled();
+      act(() => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
+      expect(clear.mock.calls[0]?.[0]).toBe(BROWSERBASE);
+      await waitFor(async () => expect((await client.company(BROWSERBASE)).events[0]?.kind).toBe('company_reached_cleared'));
+      expect(line()).toBeNull();
+    });
+
+    it('Undo inside the window puts the line back and sends nothing', async () => {
+      const client = marked();
+      const clear = vi.spyOn(client, 'clearReached');
+      await open(`/companies/${BROWSERBASE}`, client);
+      fireEvent.click(screen.getByRole('button', { name: 'Clear mark' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+      await waitFor(() => expect(line()).toBeInTheDocument());
+      expect(clear).not.toHaveBeenCalled();
+    });
+  });
+});

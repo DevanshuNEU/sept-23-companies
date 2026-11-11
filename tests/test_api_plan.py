@@ -4,6 +4,7 @@ The plan is #15's (`daily_list`, `daily_list_entry` with its `why`, `linkedin_dr
 page shows from it and from the touches: the row state, the reason, the search link, tomorrow's line. Scratch store,
 no network, no model.
 """
+import dataclasses
 import json
 import time
 from datetime import date
@@ -27,6 +28,18 @@ from tests.apitest import NOW, ApiCase
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "plan"
 CFG = default_plan_config()
+# These tests read the plan's page as it is while the 08:00 plan runs: the shipped config has it off (first to see,
+# #9 2026-11-10), so the module switches it on, and `PlanOffTests` reads it switched off.
+PLAN_ON = dataclasses.replace(CFG, plan=CFG.plan | {"enabled": True})
+_plan_on = mock.patch("outreach.api.routers.plan.default_plan_config", return_value=PLAN_ON)
+
+
+def setUpModule():
+    _plan_on.start()
+
+
+def tearDownModule():
+    _plan_on.stop()
 BANNED, _ = load_banned(FIX / "banned_phrases.txt", scopes=("both", "dm"))
 UNCONFIRMED = load_unconfirmed(FIX / "me.md")
 DAY = "2026-11-10"  # NOW is Tuesday 10:14 in New York
@@ -677,6 +690,19 @@ class TomorrowDraftSpeedTests(ApiCase):
     def ok(self, res) -> dict:
         self.assertEqual(res.status_code, 200, res.text)
         return res.json()
+
+
+class PlanOffTests(ApiCase):
+    """Final review, minor 5: with the plan off nothing builds tomorrow's dry run on each read."""
+
+    def test_the_plan_off_skips_tomorrows_draft(self):
+        self.assertFalse(CFG.get("plan", "enabled"))  # the shipped config
+        with mock.patch("outreach.api.routers.plan.default_plan_config", return_value=CFG), \
+                mock.patch("outreach.api.queries.plan.build_plan", wraps=build_plan) as spy:
+            res = self.get("/api/plan")
+        self.assertEqual(res.status_code, 200, res.text)
+        spy.assert_not_called()
+        self.assertEqual(res.json()["tomorrow"], {"total": 0, "text": "The daily plan is off.", "preview": []})
 
 
 class LeanTodayTests(ApiCase):

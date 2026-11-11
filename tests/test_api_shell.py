@@ -147,7 +147,9 @@ class Shell(ApiCase):
         self.assertEqual(body["unhandledReplies"], 2)
         self.assertEqual(body["draftsToReview"], 2)
         self.assertEqual(body["linkedinReplied"], 1)  # Answered; the LinkedIn page shows only people who replied
-        self.assertEqual(body["openReviewItems"], 1)  # Work holds replies; Li's item is a data gap (#9)
+        # Work holds replies; Li was reached within 14 days (its LinkedIn requests), so it is in play too (#9, first
+        # to see ruling: with Today gone, a recent touch puts a company in play).
+        self.assertEqual(body["openReviewItems"], 2)
         self.assertEqual(body["noGoCount"], 3)  # company, person and the removed company
         self.assertEqual(body["doneCount"], 2)
         self.assertEqual(body["repliesThisMonth"], 3)

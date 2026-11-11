@@ -4,9 +4,9 @@ import { ReplyKindDialog } from '@/components/reply-kind-dialog';
 import { Button } from '@/components/ui/button';
 import { useHotkeys, type Binding } from '@/keyboard/hotkeys';
 import { useViewQuery } from '@/pending/pending';
-import { KeyHint } from '../today/plan-panel';
-import { formatMonthDay } from '../today/short-dates';
-import { usePlanActions } from '../today/use-plan-actions';
+import { KeyHint } from '@/components/key-hint';
+import { formatMonthDay } from '@/lib/short-dates';
+import { useOutcomeActions } from '@/hooks/use-outcome-actions';
 
 /** What was sent, as a noun phrase: "a request", "an email". */
 const SENT: Record<Channel, string> = {
@@ -39,7 +39,7 @@ function replyFrom(t: PromptTouch): string {
  */
 export function OutcomePrompt() {
   const client = usePageClient('plan');
-  const actions = usePlanActions();
+  const actions = useOutcomeActions();
   const prompt = useViewQuery(queryKeys.outcomePrompt, () => client.outcomePrompt(), { pollMs: pollMs.default });
     const [replying, setReplying] = useState<PromptTouch | null>(null);
   const headingId = useId();

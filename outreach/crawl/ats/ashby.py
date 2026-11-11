@@ -6,7 +6,7 @@ has one API host and no EU rule.
 """
 from __future__ import annotations
 
-from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
+from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token, utc_time
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
 from outreach.net import HttpClient
@@ -33,14 +33,15 @@ def _body(job: dict) -> str | None:
 
 
 def _parse(job: dict) -> JobRef | None:
-    """One public posting, or None when it lacks an id or a title."""
+    """One public posting, or None when it lacks an id or a title. `posted_at` is `publishedAt` only, never
+    `updatedAt`. Ashby resets `publishedAt` on a republish, so only a posting's first read keeps it (#193)."""
     raw_id = job.get("id")
     native_id, title = (raw_id.strip() if isinstance(raw_id, str) else ""), _text(job.get("title"))
     if not native_id or not title:
         return None
     return JobRef(native_id=native_id, title=title, url=_text(job.get("jobUrl")), location=_text(job.get("location")),
                   country=_country(job), posted_on=d10(job.get("publishedAt")) or d10(job.get("updatedAt")),
-                  body=_body(job))
+                  body=_body(job), posted_at=utc_time(job.get("publishedAt")))
 
 
 class AshbyAdapter:

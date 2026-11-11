@@ -45,7 +45,7 @@ his ChatGPT login) for the research command only.
 ### Task 1: The research store
 
 **Files:**
-- Create: `outreach/store/migrations/0008_research_fact.sql`, `outreach/research/__init__.py`, `outreach/research/store.py`
+- Create: `outreach/store/migrations/0010_research_fact.sql`, `outreach/research/__init__.py`, `outreach/research/store.py`
 - Test: `tests/test_research_store.py`
 
 **Interfaces:**

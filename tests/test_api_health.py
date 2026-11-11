@@ -142,6 +142,21 @@ class JobRuns(ApiCase):
         self.assertFalse(by["prepare"]["late"])
         self.assertIsNone(by["prepare"]["expectedNextAt"])
 
+    def test_the_plan_switched_off_in_config_is_never_late(self):
+        # First to see (#9, 2026-11-10): with [plan] enabled = false the 08:00 run writes no row, so its last row
+        # would read late every weekday.
+        self.add_run("plan", "2026-11-03T13:00:00Z")  # a week ago: late if it were on
+        on = default_plan_config().plan | {"enabled": True}
+        with mock.patch("outreach.api.queries.jobs.default_plan_config",
+                        return_value=dataclasses.replace(default_plan_config(), plan=on)):
+            by = {j["job"]: j for j in self.health()["jobs"]}
+        self.assertTrue(by["plan"]["late"])
+        self.assertIsNotNone(by["plan"]["expectedNextAt"])
+        self.assertFalse(default_plan_config().plan["enabled"])  # the shipped config has it off
+        by = {j["job"]: j for j in self.health()["jobs"]}
+        self.assertFalse(by["plan"]["late"])
+        self.assertIsNone(by["plan"]["expectedNextAt"])
+
     def test_summary_counts_keep_integers_only(self):
         summary = {"boards_read": 12, "postings_seen": 340, "ratio": 0.5, "note": "ok", "flag": True,
                    "nested": {"a": 1}, "list": [1], "nothing": None, "zero": 0}

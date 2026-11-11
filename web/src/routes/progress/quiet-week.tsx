@@ -1,6 +1,6 @@
 import type { BaseRates, ProgressPeriod } from '@/api';
 import { baseRateParagraph } from '@/lib/progress';
-import { formatDateMonthDay } from '@/routes/today/short-dates';
+import { formatDateMonthDay } from '@/lib/short-dates';
 import { EffortList, FunnelLedger } from './funnel-ledger';
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

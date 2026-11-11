@@ -10,8 +10,8 @@ from outreach.pipeline import joblist
 from outreach.pipeline.joblist import JobFilters, JobRow, passed_posting_ids, query
 from outreach.store import append_event
 from outreach.store.timefmt import utcnow
-from tests.plan_seed import seed_outbound, seed_person
-from tests.ranking_store import board, decision, evidence, merge, no_go, posting
+from tests.plan_seed import seed_email_touch, seed_message, seed_outbound, seed_person
+from tests.ranking_store import BACKFILL, board, decision, evidence, merge, no_go, posting
 from tests.storetest import fresh_store, seed_company
 
 NOW = "2026-11-03T15:00:00Z"  # 10:00 on 2026-11-03 in New York
@@ -37,9 +37,14 @@ class JobListCase(unittest.TestCase):
             evidence(self.conn, cid, "stage", value="yc")
         return cid
 
-    def job(self, company, title="Software Engineer", *, posted="2026-11-02", seen="2026-11-01T12:00:00Z",
-            tier="new_grad", ok=1, **dec):
-        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=seen, last_seen_at=seen)
+    def job(self, company, title="Software Engineer", *, posted="2026-11-02", seen=None, tier="new_grad", ok=1,
+            board_id=None, posted_at=None, seen_gap_s=None, repost_of=None, list_at=BACKFILL, **dec):
+        """A listed posting. First seen at noon UTC on its posted day unless `seen` says otherwise; its list time is
+        what the 0009 backfill gives those dates unless `list_at` says otherwise (None: Date unknown)."""
+        seen = seen or (f"{posted}T12:00:00Z" if posted else "2026-11-01T12:00:00Z")
+        pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=seen, last_seen_at=seen,
+                      board_id=board_id, posted_at=posted_at, seen_gap_s=seen_gap_s, repost_of=repost_of,
+                      list_at=list_at)
         decision(self.conn, pid, level_tier=tier, level_ok=ok, **dec)
         return pid
 
@@ -292,34 +297,6 @@ class LevelStateTests(JobListCase):
 
 
 class DateTests(JobListCase):
-    def test_posted_date_wins_and_is_labeled_posted(self):
-        self.job(self.company(), posted="2026-10-30", seen="2026-11-02T12:00:00Z")
-        row = self.run_query().rows[0]
-        self.assertEqual((row.date, row.date_kind, row.age_days), ("2026-10-30", "posted", 4))
-
-    def test_no_posted_date_uses_first_sight_labeled_seen_never_posted(self):
-        self.job(self.company(), posted=None, seen="2026-11-03T13:00:00Z")
-        row = self.run_query().rows[0]
-        self.assertEqual((row.date, row.date_kind, row.age_days), ("2026-11-03", "seen", 0))
-
-    def test_the_seen_date_is_a_new_york_day(self):
-        # The clocks went back on Nov 1, so 02:30Z on Nov 3 is 21:30 on Nov 2 in New York; in July it is 22:30.
-        self.job(self.company(), posted=None, seen="2026-11-03T02:30:00Z")
-        self.assertEqual(self.run_query().rows[0].date, "2026-11-02")
-        self.job(self.company(), posted=None, seen="2026-07-15T02:30:00Z")
-        self.assertEqual(self.run_query(window_days=0).rows[-1].date, "2026-07-14")
-
-    def test_age_counts_new_york_days_not_hours(self):
-        self.job(self.company(), posted="2026-11-02")
-        # 04:30Z on Nov 3 is 23:30 on Nov 2 in New York: still yesterday's date there, so age 1 at 10:00 Nov 3
-        # becomes age 0 at 23:30 Nov 2.
-        self.assertEqual(self.run_query(now="2026-11-03T04:30:00Z").rows[0].age_days, 0)
-        self.assertEqual(self.run_query(now="2026-11-03T05:30:00Z").rows[0].age_days, 1)
-
-    def test_a_date_ahead_of_today_has_age_zero(self):
-        self.job(self.company(), posted="2026-11-05")
-        self.assertEqual(self.run_query().rows[0].age_days, 0)
-
     def test_window_edges(self):
         co = self.company()
         by_age = {n: self.job(co, posted=(date(2026, 11, 3) - timedelta(days=n)).isoformat())
@@ -355,6 +332,90 @@ class OrderTests(JobListCase):
         posted = self.job(co, posted="2026-11-01")
         seen_later = self.job(co, posted=None, seen="2026-11-02T12:00:00Z")
         self.assertEqual(self.ids(), [seen_later, posted])
+
+
+class ListTimeTests(JobListCase):
+    """The list sorts by each row's list time (#193, design 4.4); a row with none is in the Date unknown group."""
+
+    def test_sorts_by_list_at_to_the_minute(self):
+        small, big = self.company(size=10), self.company(size=5000)
+        gh, ashby = board(self.conn, small, ats="greenhouse"), board(self.conn, big, ats="ashby")
+        # 10:38 and 10:42 New York on Nov 3, both posted the same day: the later one heads the list even though the
+        # earlier one is at the smaller company.
+        at_1038 = self.job(small, posted=None, seen="2026-11-03T15:40:00Z", board_id=gh, seen_gap_s=300,
+                           posted_at="2026-11-03T15:38:00Z", list_at="2026-11-03T15:38:00Z")
+        at_1042 = self.job(big, posted=None, seen="2026-11-03T15:44:00Z", board_id=ashby, seen_gap_s=300,
+                           posted_at="2026-11-03T15:42:00Z", list_at="2026-11-03T15:42:00Z")
+        older = self.job(small, posted="2026-11-02")
+        self.assertEqual(self.ids(), [at_1042, at_1038, older])
+
+    def test_unknown_group_after_dated_rows(self):
+        co = self.company(size=10)
+        old_dated = self.job(co, posted="2026-10-10")
+        unknown_new = self.job(co, posted=None, seen="2026-11-03T14:00:00Z", list_at=None)
+        unknown_old = self.job(co, posted=None, seen="2026-11-02T14:00:00Z", list_at=None)
+        dated = self.job(co, posted="2026-11-01")
+        self.assertEqual(self.ids(), [dated, old_dated, unknown_new, unknown_old])
+        self.assertEqual(self.ids(view="higher"), [])
+
+    def test_unknown_group_shows_in_7_day_window(self):
+        co = self.company(size=10)
+        months_old = self.job(co, posted=None, seen="2026-08-01T14:00:00Z", list_at=None)
+        fresh = self.job(co, posted="2026-11-02")
+        for window in (7, 30, 60, 90, 0):
+            with self.subTest(window=window):
+                self.assertEqual(self.ids(window_days=window), [fresh, months_old])
+        self.assertEqual(self.run_query(window_days=7).counts, {"your_level": 2, "higher": 0})
+
+    def test_window_filters_on_list_at(self):
+        co = self.company(size=10)
+        # Seen yesterday, but the board says it went up 40 days ago: outside 30 days.
+        old_post = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", seen_gap_s=600,
+                            posted_at="2026-09-24T12:00:00Z", list_at="2026-09-24T12:00:00Z")
+        # The 7 day window starts at 00:00 New York on Oct 27 (04:00 UTC, still daylight time then).
+        edge_in = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", list_at="2026-10-27T04:00:00Z")
+        edge_out = self.job(co, posted=None, seen="2026-11-02T12:00:00Z", list_at="2026-10-27T03:59:00Z")
+        self.assertEqual(self.ids(window_days=7), [edge_in])
+        self.assertEqual(self.ids(window_days=30), [edge_in, edge_out])
+        self.assertEqual(self.ids(window_days=60), [edge_in, edge_out, old_post])
+
+    def test_repost_row_carries_old_first_seen(self):
+        co = self.company(size=10)
+        gone = posting(self.conn, co, "Software Engineer", first_seen_at="2026-08-01T12:00:00Z",
+                       last_seen_at="2026-10-20T12:00:00Z", closed=True)
+        again = self.job(co, posted=None, seen="2026-11-03T14:00:00Z", seen_gap_s=1800, repost_of=gone,
+                         posted_at="2026-11-03T13:30:00Z", list_at="2026-11-03T13:30:00Z")
+        first_read = self.job(co, posted=None, seen="2026-11-02T14:00:00Z")
+        rows = {r.posting_id: r for r in self.run_query().rows}
+        self.assertEqual(set(rows), {again, first_read})
+        self.assertEqual((rows[again].list_at, rows[again].posted_at, rows[again].first_seen_at,
+                          rows[again].seen_gap_s, rows[again].first_read, rows[again].reposted_from),
+                         ("2026-11-03T13:30:00Z", "2026-11-03T13:30:00Z", "2026-11-03T14:00:00Z", 1800, False,
+                          "2026-08-01T12:00:00Z"))
+        self.assertEqual((rows[first_read].list_at, rows[first_read].posted_at, rows[first_read].seen_gap_s,
+                          rows[first_read].first_read, rows[first_read].reposted_from),
+                         ("2026-11-02T14:00:00Z", None, None, True, None))
+
+    def test_cursor_pages_across_unknown_group(self):
+        small, big = self.company(size=10), self.company(size=5000)
+        for co in (big, small):
+            for day in ("2026-11-01", "2026-11-02"):
+                self.job(co, posted=day)
+            for seen in ("2026-11-02T12:00:00Z", "2026-11-03T12:00:00Z"):
+                self.job(co, posted=None, seen=seen, list_at=None)
+        full = self.ids(limit=100)
+        self.assertEqual(len(full), 8)
+        unknown = {r[0] for r in self.conn.execute("SELECT posting_id FROM posting WHERE list_at IS NULL")}
+        self.assertEqual(set(full[4:]), unknown)  # every dated row first
+        for limit in (1, 2, 3, 5):
+            seen, after = [], None
+            while True:
+                page = self.run_query(after=after, limit=limit)
+                seen += [r.posting_id for r in page.rows]
+                if page.next_after is None:
+                    break
+                after = page.next_after
+            self.assertEqual(seen, full, msg=f"limit {limit}")
 
 
 class FilterTests(JobListCase):
@@ -393,6 +454,62 @@ class FilterTests(JobListCase):
         seed_outbound(self.conn, person, reached, "linkedin_request", date(2026, 10, 20))
         seed_outbound(self.conn, person, reached, "linkedin_message", date(2026, 10, 25))
         self.assertEqual(self.run_query().rows[0].contacted_on, "2026-10-25")
+
+    def mark(self, company, at, kind="company_reached"):
+        append_event(self.conn, entity="company", entity_id=company, company_id=company, kind=kind,
+                     actor="devanshu", at=at, detail={"company_id": company})
+
+    def test_reached_mark_sets_contacted_on(self):
+        marked = self.company("Marked")
+        self.job(marked)
+        self.mark(marked, "2026-10-28T15:00:00Z")
+        self.assertEqual(self.run_query().rows[0].contacted_on, "2026-10-28")
+
+    def test_the_newer_of_a_mark_and_a_touch_is_contacted_on(self):
+        both, later = self.company("Both"), self.company("Later")
+        self.job(both, posted="2026-11-02")
+        self.job(later, posted="2026-11-01")
+        seed_outbound(self.conn, seed_person(self.conn, both, "Ada"), both, "linkedin_request", date(2026, 10, 25))
+        self.mark(both, "2026-10-20T15:00:00Z")  # an older mark never hides a newer touch
+        seed_outbound(self.conn, seed_person(self.conn, later, "Bo"), later, "linkedin_request", date(2026, 10, 20))
+        self.mark(later, "2026-10-30T15:00:00Z")
+        self.assertEqual([r.contacted_on for r in self.run_query().rows], ["2026-10-25", "2026-10-30"])
+
+    def test_not_contacted_filter_hides_marked(self):
+        marked, cleared, fresh = self.company("Marked"), self.company("Cleared"), self.company("Fresh")
+        a, b, c = self.job(marked), self.job(cleared), self.job(fresh)
+        self.mark(marked, "2026-10-28T15:00:00Z")
+        self.mark(cleared, "2026-10-28T15:00:00Z")
+        self.mark(cleared, "2026-10-28T15:01:00Z", kind="company_reached_cleared")
+        self.assertEqual(sorted(self.ids()), sorted([a, b, c]))
+        self.assertEqual(sorted(self.ids(not_contacted=True)), sorted([b, c]))
+        self.assertIsNone(next(r for r in self.run_query().rows if r.posting_id == b).contacted_on)
+
+    def emailed(self, company, name, sent_on, *, followup="planned"):
+        """A first email sent on `sent_on` (the sender's outreach_touch with it) and a follow-up in `followup`."""
+        person = seed_person(self.conn, company, name, email=f"{name.lower()}@example.com")
+        touch = seed_email_touch(self.conn, person, sent_on, company_id=company, outreach=True)
+        seed_message(self.conn, touch, 0, "sent", sent_on=sent_on)
+        if followup is not None:
+            seed_message(self.conn, touch, 1, followup)
+        return person
+
+    def test_a_sent_email_with_a_follow_up_queued_is_reached(self):
+        # Final review, critical 1: the sender writes the planned follow-ups at the first send, so a sent email is
+        # reached for its whole follow-up cycle (#9 first to see, design 4.5).
+        mailed, fresh = self.company("Mailed"), self.company("Fresh")
+        a, b = self.job(mailed), self.job(fresh)
+        self.emailed(mailed, "Ada", date(2026, 10, 28))
+        self.assertEqual(next(r for r in self.run_query().rows if r.posting_id == a).contacted_on, "2026-10-28")
+        self.assertEqual(self.ids(not_contacted=True), [b])
+
+    def test_a_first_email_still_in_the_outbox_is_not_reached(self):
+        waiting = self.company("Waiting")
+        a = self.job(waiting)
+        person = seed_person(self.conn, waiting, "Bo", email="bo@example.com")
+        seed_message(self.conn, seed_email_touch(self.conn, person, None), 0, "approved")
+        self.assertIsNone(self.run_query().rows[0].contacted_on)
+        self.assertEqual(self.ids(not_contacted=True), [a])
 
     def test_an_application_is_not_contact(self):
         co = self.company()
@@ -440,7 +557,8 @@ class FlagTests(JobListCase):
 
     def test_row_fields(self):
         co = self.company("Acme", size=40)
-        pid = posting(self.conn, co, "Backend Engineer", location="Austin, TX", posted_on="2026-11-01")
+        pid = posting(self.conn, co, "Backend Engineer", location="Austin, TX", posted_on="2026-11-01",
+                      first_seen_at="2026-11-01T12:00:00Z", last_seen_at="2026-11-02T12:00:00Z")
         self.conn.execute("UPDATE posting SET url = 'https://example.com/j/1' WHERE posting_id = ?", (pid,))
         decision(self.conn, pid, level_tier="swe1")
         row = self.run_query().rows[0]

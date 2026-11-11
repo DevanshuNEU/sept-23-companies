@@ -399,11 +399,15 @@ export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; 
 /** A swap: the chosen company took the pick's slot as `row`; the replaced pick is back on the bench (it is not a Not now). */
 export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: PlanRow; text: string }
 /**
- * The job list (#156): open engineering postings he reads one by one, newest first. `date` is the posting's own date
- * (`dateKind` 'posted') or the day Knock first saw it ('seen'); `ageDays` counts from it in New York days.
+ * The job list (#156, #193): open engineering postings he reads one by one, newest first by when each was posted
+ * (`listAt`). The row's time comes from `listAt`, `postedAt` and `firstSeenAt` (`postedLabel` in lib/format).
  */
 export interface JobRow {
-  postingId: Id; title: string; url: string; location: string; levelTag: string; date: IsoDate; dateKind: 'posted' | 'seen'; ageDays: number;
+  postingId: Id; title: string; url: string; location: string; levelTag: string;
+  /** The time the list sorts by; null: Date unknown, listed after every dated row. */
+  listAt: IsoTime | null; postedAt: IsoTime | null /* the board's own posting time */; firstSeenAt: IsoTime;
+  seenGapS: number | null /* seconds since the board's last good read when Knock first saw it */;
+  firstRead: boolean /* found on the board's first read */; repostedFrom: IsoTime | null /* a repost: when Knock first saw the one it repeats */;
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
 }
@@ -416,9 +420,27 @@ export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
 export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; after?: string | null; limit?: number }
 /** Pass: the posting is hidden; the company is untouched. */
 export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
-/** Go ahead: the company is on today's list as his own pick ('added') or kept for today's list and put first when the plan is built ('requested'). `text` is the sentence to show. */
-export interface GoAheadResult {
-  postingId: Id; companyId: Id; entryId: Id | null; state: 'added' | 'requested'; rank: number | null; listDate: IsoDate; text: string;
+/**
+ * Done (#195): his mark that the posting's company has been reached. `companyId` is the survivor of any merge, `reachedOn`
+ * the New York day of the standing mark (the first one when it was already marked), `text` the API's sentence.
+ */
+export interface DoneResult { postingId: Id; companyId: Id; reachedOn: IsoDate; text: string }
+/** Done taken back: `cleared` is false when there was no mark, and nothing was written. */
+export interface ClearDoneResult { companyId: Id; cleared: boolean }
+/**
+ * Check now (#194): `started`, the request is recorded and the crawl job asked to run; `running`, a check already waits
+ * or runs and nothing new was recorded; `not_live`, the request is recorded but nothing was started (not the live
+ * checkout, or the job did not start), so it waits for the next crawl.
+ */
+export interface CheckNowResult { requestedAt: IsoTime; state: 'started' | 'running' | 'not_live' }
+/**
+ * How the check is going: `queued` (asked for, a crawl holds the job), `running` with the crawler's counts, `done` with
+ * the last check's counts, or `idle` (never ran). `pausedHosts` are the ATS names the check stopped reading because
+ * they said to slow down (`greenhouse`).
+ */
+export interface CheckStatus {
+  state: 'idle' | 'queued' | 'running' | 'done'; checked: number; total: number; new: number;
+  startedAt: IsoTime | null; finishedAt: IsoTime | null; pausedHosts: string[];
 }
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {

@@ -1,25 +1,26 @@
-"""Pass and Go ahead on the job list (#156), each inside the caller's `run_write` transaction.
+"""Pass and Done on the job list (#156, #195), each inside the caller's `run_write` transaction.
 
 Pass hides one posting: a `posting_passed` event (entity posting, actor devanshu, detail `posting_id` and
 `company_id`), which `joblist.passed_posting_ids` and `fresh.load_passed_postings` read. It is never a Not now: the
 company is untouched and `fresh.load_passes` (the cooldown) does not read it. Passing a posting twice writes once.
 
-Go ahead (`outreach.plan.picks.add_own_pick`) puts the posting's company on today's list as his own pick, or, before
-the 08:00 plan is built, records the pick for the plan job. The company's size, the 7 day room and a Not now cooldown
-never stop it; a no-go company, a company already on today's list and one with someone contacted and waiting do, in a
-plain sentence. The same key again answers with the first answer and writes nothing (`run_write`).
+Done (the first to see ruling in #9) is his mark that the posting's company has been reached, even when the outreach
+happened outside Knock: a `company_reached` event (`outreach.pipeline.reached`), which the job list reads into
+`contacted_on`. No other check stops it: a no-go company, one in flight or one on an old daily list is marked all the
+same. A company already marked keeps its one mark and Done says when. `clear_done` takes the mark back with a
+`company_reached_cleared` event; a company with no mark writes nothing. The same key again answers with the first
+answer and writes nothing (`run_write`).
 """
 import sqlite3
 from datetime import date
 
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
-from outreach.api.models.jobs import GoAheadResult, PassJobResult
+from outreach.api.models.jobs import ClearDoneResult, DoneResult, PassJobResult
 from outreach.api.queries.company import merge_parents, survivor_of
-from outreach.api.queries.outcomes import NOT_SAVED
 from outreach.outcomes.windows import ny_day
+from outreach.pipeline import reached
 from outreach.pipeline.joblist import passed_posting_ids
-from outreach.plan.picks import OwnPickRefused, add_own_pick
 from outreach.store import append_event
 
 PASSED = "posting_passed"  # event kind: Pass on the job list
@@ -44,21 +45,30 @@ def pass_job(ctx: WriteCtx, posting_id: int) -> PassJobResult:
     return PassJobResult(posting_id=posting_id, company_id=company_id, passed=True)
 
 
-def go_ahead(ctx: WriteCtx, posting_id: int) -> GoAheadResult:
+def done(ctx: WriteCtx, posting_id: int) -> DoneResult:
     conn = ctx.conn
     company_id, name = _posting(conn, posting_id)
-    today = date.fromisoformat(ny_day(ctx.now))
-    try:
-        own = add_own_pick(conn, company_id, today, ctx.now, posting_id=posting_id,
-                           key=ctx.event_key(0))
-    except OwnPickRefused as err:
-        raise ApiProblem("not_allowed", f"{err} {NOT_SAVED}") from None
-    day = own.list_date
-    if own.state == "added":
-        text = f"Added {name} to today's list."
-    elif day == today:
-        text = f"{name} is kept for today's list. It goes first when the plan is built."
-    else:  # asked on a weekend: no plan is built before the next weekday
-        text = f"{name} is kept for {day:%A}, {day:%b} {day.day}. It goes first on that day's list."
-    return GoAheadResult(posting_id=posting_id, company_id=company_id, state=own.state, rank=own.rank,
-                         entry_id=own.entry_id, list_date=day.isoformat(), text=text)
+    standing = reached.marks(conn).get(company_id)
+    if standing is not None:  # one mark: Done again changes nothing and says when he marked it
+        on = date.fromisoformat(standing)
+        return DoneResult(posting_id=posting_id, company_id=company_id, reached_on=standing,
+                          text=f"{name} was already marked reached on {on:%b} {on.day}.")
+    append_event(conn, entity="company", entity_id=company_id, company_id=company_id, kind=reached.REACHED,
+                 actor="devanshu", at=ctx.now, detail={"posting_id": posting_id, "company_id": company_id},
+                 idempotency_key=ctx.event_key(0))
+    return DoneResult(posting_id=posting_id, company_id=company_id, reached_on=ny_day(ctx.now),
+                      text=f"Marked {name} reached.")
+
+
+def clear_done(ctx: WriteCtx, company_id: int) -> ClearDoneResult:
+    conn = ctx.conn
+    if conn.execute("SELECT 1 FROM company WHERE company_id = ?", (company_id,)).fetchone() is None:
+        raise ApiProblem("not_found", f"There is no company {company_id}.")
+    survivor = survivor_of(merge_parents(conn), company_id)
+    standing = reached.marks(conn).get(survivor)
+    if standing is None:
+        return ClearDoneResult(company_id=survivor, cleared=False)
+    append_event(conn, entity="company", entity_id=survivor, company_id=survivor, kind=reached.CLEARED,
+                 actor="devanshu", at=ctx.now, detail={"company_id": survivor, "reached_on": standing},
+                 idempotency_key=ctx.event_key(0))
+    return ClearDoneResult(company_id=survivor, cleared=True)

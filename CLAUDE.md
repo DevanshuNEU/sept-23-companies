@@ -28,15 +28,16 @@ Live means real contacts and real sends.
 | API and web app (:3100) | live checkout, `python -m outreach.api` serves `web/dist` | `com.devanshu.outreach-api` |
 | Sender (every 2 min) | live checkout, `python -m outreach.sending run` | `com.devanshu.outreach-sender` |
 | Crawler (every 30 min) | live checkout, `python -m outreach.crawl tick` | `com.devanshu.outreach-crawl` |
-| Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` | `com.devanshu.outreach-sources` |
+| Sources (daily 06:30) | live checkout, `python -m outreach.sources run-due` (also runs the ranker, since the 08:00 plan is off) | `com.devanshu.outreach-sources` |
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 | Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
 | Follow-up drafter (daily 04:30) | live checkout, `python -m outreach.followup_drafter run` | `com.devanshu.outreach-followup-drafter` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
 The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by
-config (`[prepare] enabled = false`, company first in #9): it prints one line and exits; the 08:00 plan proposes
-company rows only (`[plan] propose_people = false`). The profile judge (06:10, Part of #6 and #15) is off by config too
+config (`[prepare] enabled = false`, company first in #9): it prints one line and exits. The 08:00 plan is off too
+(`[plan] enabled = false`, first to see in #9): it prints one line and exits, so there is no daily list, and Knock
+opens on the job list (Jobs), where Done marks a company as reached. The profile judge (06:10, Part of #6 and #15) is off by config too
 (`[judge] enabled = false` in `outreach/judge/config.toml`): it prints "judge is off" and exits 0; on, it makes at most
 15 model calls a night and only ever adds ranking points and a visible line. The MCP server has no job: Claude
 Code starts it from the registration (`python -m outreach.mcp --print-registration`).
@@ -63,8 +64,11 @@ person at once, log the old value in `event` and raise a flagged Needs-you item;
 Gmail) and `python -m outreach.sending auth` (writes the real token), `python -m outreach.crawl` (every command sends
 real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
 (it reads company pages and calls a model; `--dry-run` runs anywhere), `python -m outreach.followup_drafter run` (it
-calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.research company` (real runs: it calls
-a model and fetches pages; `--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too) and the judging half of `python -m outreach.judge
+calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.sources seed-ats` (it sends real
+requests to every Greenhouse and Ashby board and writes the store; `--dry-run` sends nothing and writes nothing, so it
+runs anywhere on a scratch store), `python -m outreach.research company` (real runs: it calls a model and fetches pages;
+`--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too) and the judging half of
+`python -m outreach.judge
 eval` (elsewhere it scores only what is stored), `python -m outreach.mcp`
 (the server's tools work only here), `python -m outreach.deploy install`, `retire-old` and `rollback` (they change
 launchd), and `python -m outreach.importer run`, `reconcile` and `rehearse` on real data.

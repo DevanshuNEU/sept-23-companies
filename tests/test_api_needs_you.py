@@ -223,6 +223,47 @@ class NeedsYou(ApiCase):
         # The sidebar badge counts Needs you only.
         self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 4)
 
+    def test_needs_you_lists_emailed_and_reply_companies_without_a_plan(self):
+        # First to see (#9, 2026-11-10): no daily list is built any more. A company he is emailing or one held by a
+        # reply still asks for his attention; nothing is in play and the badge counts the two.
+        mailing = s.company(self.conn, "Mailing Co")
+        held = s.company(self.conn, "Held Co")
+        working = s.company(self.conn, "Working Co", "working")
+        s.message(self.conn, s.touch(self.conn, s.person(self.conn, mailing, "Pat Mail")), 0)  # drafted, open touch
+        hold(self.conn, held)
+        for n, cid in enumerate((mailing, held, working)):
+            s.review(self.conn, cid, "domain_missing", created_at=f"2026-11-0{n + 1}T08:00:00Z")
+        self.assertEqual(self.count("SELECT count(*) FROM daily_list"), 0)
+        view = self.view()
+        self.assertEqual([i["company"]["name"] for i in view["open"]], ["Mailing Co", "Held Co"])
+        self.assertEqual([i["inPlay"] for i in view["open"]], [False, False])
+        self.assertEqual([i["holdsEmail"] for i in view["open"]], [True, False])
+        self.assertEqual([i["company"]["picked"] for i in view["open"]], [False, False])
+        self.assertEqual([i["company"]["name"] for i in view["dataGaps"]], ["Working Co"])
+        self.assertEqual(self.get("/api/shell").json()["openReviewItems"], 2)
+
+    def test_the_view_reads_reached_days_from_the_config(self):
+        # Final review, important 3: in play here follows `[sweep] reached_days`, not a default that only matches it.
+        from dataclasses import replace
+        from datetime import date
+        from unittest import mock
+        from outreach.review.config import load_review_config
+        from tests import plan_seed
+        cid = s.company(self.conn, "Reached Co")
+        plan_seed.seed_outbound(self.conn, plan_seed.seed_person(self.conn, cid, "Ada"), cid, "linkedin_request",
+                                date(2026, 11, 5), context_source="own")
+        s.review(self.conn, cid, "flagged", evidence_key="f")
+        short = replace(load_review_config(), reached_days=3)  # reached 5 days ago: out of a 3-day window
+        with mock.patch("outreach.api.queries.needs_you.load_review_config", return_value=short):
+            view = self.view()
+            count = self.get("/api/shell").json()["openReviewItems"]
+        self.assertEqual(view["open"], [])
+        self.assertEqual([(i["company"]["name"], i["inPlay"]) for i in view["dataGaps"]], [("Reached Co", False)])
+        self.assertEqual(count, 0)
+        s.review(self.conn, cid, "flagged", evidence_key="g")  # a new store version: the view is computed again
+        view = self.view()  # the shipped 14 days
+        self.assertEqual([(i["company"]["name"], i["inPlay"]) for i in view["open"]], [("Reached Co", True)] * 2)
+
     def test_every_kind_follows_the_same_scope(self):
         plain, picked = s.company(self.conn, "Plain"), s.company(self.conn, "Picked")
         plan_entry(self.conn, picked, "picked")

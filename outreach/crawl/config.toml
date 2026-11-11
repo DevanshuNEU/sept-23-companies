@@ -10,6 +10,13 @@ defer_s = 1800
 # An outage shields a board (its error, or a mass empty, is held as a deferral) only while its last read is younger
 # than this. After that the read is written as it is, so a host that blocks for good still reaches Needs you.
 outage_grace_s = 86400
+# Check now (#194): seconds one run may take before it stops reading boards (60 to 3600). A check whose progress row
+# has no end and is older than this plus 300 seconds is stale, so a new click can start another.
+check_budget_s = 900
+# A Check now skips a board read in the last this many seconds, and reads every active board of these ATSs (then the
+# boards due on the other ATSs).
+check_skip_recent_s = 60
+check_ats = ["greenhouse", "ashby"]
 
 # The declared User-Agent: no contact address, no URL. Equal to outreach.net.USER_AGENT.
 user_agent = "outreach-crawler/1.0 (personal job search)"

@@ -90,7 +90,7 @@ export default function CompanyPage() {
             <>
               <CompanyHeader
                 view={v}
-                handlers={{ onPause: actions.pause, onResume: () => setResuming(true), onClose: () => setClosing(true), onReopen: () => setReopening(true) }}
+                handlers={{ onPause: actions.pause, onResume: () => setResuming(true), onClose: () => setClosing(true), onReopen: () => setReopening(true), onClearMark: actions.clearMark }}
               />
               <FactsStrip view={v} />
               <Tabs value={tab} onValueChange={(t) => isTab(t) && setTab(t)}>

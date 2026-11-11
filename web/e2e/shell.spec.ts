@@ -7,7 +7,7 @@ test('app loads on 5173 with no console errors', async ({ page, consoleErrors })
 });
 
 const views: Array<[path: string, heading: string]> = [
-  ['/today', 'Today'],
+  ['/browse', 'Jobs'],
   ['/outbox', 'Outbox'],
   ['/outbox/1', 'Outbox'],
   ['/linkedin', 'LinkedIn replies'],
@@ -27,17 +27,20 @@ for (const [path, heading] of views) {
   });
 }
 
-test('/ and unknown paths open Today and keep the query', async ({ page, consoleErrors }) => {
+test('/, the old Today and Proposals, and unknown paths open Jobs and keep the query', async ({ page, consoleErrors }) => {
   await page.goto('/?scenario=empty');
-  await expect(page).toHaveURL(/\/today\?scenario=empty$/);
-  await page.goto('/nowhere');
-  await expect(page).toHaveURL(/\/today$/);
+  await expect(page).toHaveURL(/\/browse\?scenario=empty$/);
+  for (const path of ['/today', '/proposals', '/nowhere']) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/browse$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
+  }
   expect(consoleErrors).toEqual([]);
 });
 
 test('g then o moves to the Outbox', async ({ page }) => {
-  await page.goto('/today');
-  await expect(page.getByRole('heading', { level: 1, name: 'Today' })).toBeVisible();
+  await page.goto('/browse');
+  await expect(page.getByRole('heading', { level: 1, name: 'Jobs' })).toBeVisible();
   await page.keyboard.press('g');
   await page.keyboard.press('o');
   await expect(page).toHaveURL(/\/outbox/);

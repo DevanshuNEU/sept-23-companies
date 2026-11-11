@@ -1,5 +1,6 @@
 """Task 11: the plan commands and the 08:00 launchd template (#15). Scratch stores, fake hooks, nothing is loaded."""
 import contextlib
+import dataclasses
 import io
 import os
 import plistlib
@@ -12,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.plan import __main__ as cli
+from outreach.plan.config import default_plan_config
 from tests.plan_seed import seed_person, seed_scored_company
 from tests.storetest import fresh_store
 
@@ -19,6 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "launchd" / "com.devanshu.outreach-plan.plist.template"
 DAY = "2026-11-10"
 TEAM = ("team", "https://acme.example/team", "an engineer on the team")
+# The shipped config has the plan off (first to see ruling, #9, 2026-11-10). The build tests below run it on.
+PLAN_ON = dataclasses.replace(default_plan_config(), plan={**default_plan_config().plan, "enabled": True})
 
 
 class CliBase(unittest.TestCase):
@@ -29,6 +33,9 @@ class CliBase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, {"OUTREACH_DB": path})
         patch.start()
         self.addCleanup(patch.stop)
+        on = mock.patch.object(cli, "default_plan_config", return_value=PLAN_ON)
+        on.start()
+        self.addCleanup(on.stop)
 
     def world(self):
         ids = [seed_scored_company(self.conn, f"Co{i:02}", 90 - i, ["level_role"]) for i in range(4)]
@@ -113,6 +120,28 @@ class BuildCommandTest(CliBase):
             code, out, err = self.run_main("build", "--date", DAY, "--no-read-boards")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("no store", err)
+
+
+class PlanOffTest(CliBase):
+    """First to see (#9, 2026-11-10): the shipped config switches the 08:00 plan off."""
+
+    def test_plan_build_off_prints_one_line_and_exits(self):
+        self.assertIs(default_plan_config().get("plan", "enabled"), False)
+        self.world()
+        before = (self.count("daily_list"), self.count("daily_list_entry"), self.count("job_run"), self.count("event"))
+        with mock.patch.object(cli, "default_plan_config", return_value=default_plan_config()), \
+                mock.patch("sqlite3.connect") as opened, \
+                mock.patch.object(cli, "crawler_boards_reader") as boards, \
+                mock.patch.object(cli, "rank_runner") as ranker, \
+                mock.patch.object(cli, "_start_caffeinate") as awake:
+            code, out, err = self.run_main("build", root=str(ROOT), live_root=str(ROOT))
+        self.assertEqual((code, out, err), (0, "plan is off (first to see ruling, #9)\n", ""))
+        for hook in (opened, boards, ranker, awake):
+            hook.assert_not_called()
+        self.assertEqual((self.count("daily_list"), self.count("daily_list_entry"), self.count("job_run"),
+                          self.count("event")), before)
+        self.assertEqual(self.count("daily_list_entry"), 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM job_run WHERE job = 'plan'").fetchone()[0], 0)
 
 
 class ShowCommandTest(CliBase):

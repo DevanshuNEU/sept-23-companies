@@ -300,7 +300,7 @@ function DataGaps({ count, open, onOpenChange, children }: { count: number; open
           </CollapsibleTrigger>
         </SectionTitle>
         <p className="mb-2 text-xs text-muted-foreground">
-          Things the crawler could not read, and questions about companies outside your plan. Nothing here holds up an email.
+          Things the crawler could not read, and questions about companies you are not working on now. Nothing here holds up an email.
         </p>
         <CollapsibleContent>
           <Card className="gap-0 overflow-hidden py-0">{children}</Card>

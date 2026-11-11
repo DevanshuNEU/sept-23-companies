@@ -49,6 +49,10 @@ email_max_headcount = 200     # his call to make; the size gate (#9) hides over 
 email_companies_per_day = 6
 
 [plan]
+# First to see (#9, 2026-11-10): Knock stops choosing for him, so the 08:00 plan is off. When false `build` prints
+# "plan is off (first to see ruling, #9)", exits 0 and touches nothing: no store, no board read, no job run. The code
+# and the daily list data stay; true brings the plan back.
+enabled = false
 timezone = "America/New_York"
 scan_limit = 400
 board_read_top_n = 30

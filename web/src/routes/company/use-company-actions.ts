@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { queryKeys, usePageClient, type CloseReason, type CompanyView, type Revision, type ShellSummary, type WriteOptions } from '@/api';
 import { usePendingWrite, type Patch } from '@/pending/pending';
 import { newestRevision, noteRevision, withRevision } from '@/pending/revisions';
+import { REACHED_CLEARED } from '@/lib/reached';
 import { CLOSE_WORD } from './company-status';
 
 type Company = CompanyView['company'];
@@ -126,6 +127,30 @@ export function useCompanyActions(view: CompanyView | undefined) {
     });
   }, [view, write, client, patchCompany, withCompanyRevision]);
 
+  /**
+   * Clears his Done mark from the job list (#195). It waits 8 seconds with Undo, like close: the mark line goes at once,
+   * and nothing is sent until the window ends. It carries no revision (his mark is an event, not a company field). The
+   * job list is read again once it lands, so its rows of this company stop saying reached.
+   */
+  const clearMark = useCallback(() => {
+    if (!view) return;
+    const { id, name } = view.company;
+    const label = `Cleared the mark on ${name}.`;
+    write({
+      id: `reached-clear:${id}`,
+      label,
+      afterCommit: `${label} Press Done on one of its jobs to mark it again.`,
+      patches: [
+        {
+          key: queryKeys.company(id),
+          apply: (v: CompanyView) => ({ ...v, events: [{ id: -1, at: v.asOf, kind: REACHED_CLEARED, text: 'Company reached cleared', actor: 'devanshu', importSource: null }, ...v.events] }),
+        },
+        ...refetch(queryKeys.jobsAll),
+      ],
+      commit: (o) => client.clearReached(id, o),
+    });
+  }, [view, write, client]);
+
   const copyRole = useCallback(() => {
     const title = view?.role?.title;
     if (!title) return;
@@ -137,5 +162,5 @@ export function useCompanyActions(view: CompanyView | undefined) {
     }
   }, [view?.role?.title]);
 
-  return { pause, resume, close, reopen, copyRole };
+  return { pause, resume, close, reopen, clearMark, copyRole };
 }

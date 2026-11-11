@@ -13,6 +13,11 @@ def _variant(old: str, new: str) -> Path:
     return path
 
 
+# The two `enabled = false` lines, told apart by the key after each.
+PLAN_OFF = "enabled = false\ntimezone"
+PREPARE_OFF = "enabled = false\nmultiple"
+
+
 class PlanConfigTest(unittest.TestCase):
     def test_config_loads_every_number_named_here(self):
         c = load_plan_config()
@@ -25,7 +30,7 @@ class PlanConfigTest(unittest.TestCase):
             "lanes": {"role": ["level_role", "intern_junior"], "reason": ["reason_no_role"],
                       "fill": ["any_us_role"], "role_share": 0.8, "reason_share": 0.2},
             "email": {"start_limit": 20, "rows_max": 15, "people_per_company": 2, "hn_post_days": 90},
-            "plan": {"timezone": "America/New_York", "scan_limit": 400, "board_read_top_n": 30,
+            "plan": {"enabled": False, "timezone": "America/New_York", "scan_limit": 400, "board_read_top_n": 30,
                      "roll_forward_days": 5, "propose_people": False},
             "people": {"founder_max_headcount": 25, "employer_fresh_days": 30,
                        "generic_mailboxes": ["info", "hello", "contact", "support", "sales", "press", "admin",
@@ -83,27 +88,34 @@ class PlanConfigTest(unittest.TestCase):
             load_plan_config(_variant('fill = ["any_us_role"]', 'fill = ["any_us_role", "reason_no_role"]'))
 
     def test_company_first_switches_ship_off(self):
-        # #9 company-first ruling (2026-10-26): no night prepare, no person rows in the plan.
+        # #9 company-first ruling (2026-10-26): no night prepare, no person rows in the plan. First to see
+        # (2026-11-10): no 08:00 plan at all.
         c = load_plan_config()
         self.assertIs(c.get("prepare", "enabled"), False)
         self.assertIs(c.get("plan", "propose_people"), False)
+        self.assertIs(c.get("plan", "enabled"), False)
         self.assertIs(c.get("prepare", "deny_rule_checked"), True)  # a separate fact, kept as it was
 
     def test_company_first_switches_must_be_booleans(self):
-        for old, new, name in (("enabled = false", 'enabled = "false"', "prepare.enabled"),
-                               ("enabled = false", "enabled = 0", "prepare.enabled"),
+        for old, new, name in ((PREPARE_OFF, 'enabled = "false"\nmultiple', "prepare.enabled"),
+                               (PREPARE_OFF, "enabled = 0\nmultiple", "prepare.enabled"),
+                               (PLAN_OFF, 'enabled = "false"\ntimezone', "plan.enabled"),
+                               (PLAN_OFF, "enabled = 0\ntimezone", "plan.enabled"),
                                ("propose_people = false", "propose_people = 1", "plan.propose_people"),
                                ("deny_rule_checked = true", 'deny_rule_checked = "yes"', "prepare.deny_rule_checked")):
             with self.assertRaises(ValueError) as ctx:
                 load_plan_config(_variant(old, new))
             self.assertIn(name, str(ctx.exception))
-        self.assertIs(load_plan_config(_variant("enabled = false", "enabled = true")).get("prepare", "enabled"), True)
+        self.assertIs(load_plan_config(_variant(PREPARE_OFF, "enabled = true\nmultiple")).get("prepare", "enabled"),
+                      True)
+        self.assertIs(load_plan_config(_variant(PLAN_OFF, "enabled = true\ntimezone")).get("plan", "enabled"), True)
 
     def test_company_first_switches_missing_name_themselves(self):
-        for old, name in (("enabled = false\n", "prepare.enabled"), ("propose_people = false\n", "plan.propose_people"),
-                          ("deny_rule_checked = true\n", "prepare.deny_rule_checked")):
+        for old, new, name in ((PREPARE_OFF, "multiple", "prepare.enabled"), (PLAN_OFF, "timezone", "plan.enabled"),
+                               ("propose_people = false\n", "", "plan.propose_people"),
+                               ("deny_rule_checked = true\n", "", "prepare.deny_rule_checked")):
             with self.assertRaises(KeyError) as ctx:
-                load_plan_config(_variant(old, ""))
+                load_plan_config(_variant(old, new))
             self.assertIn(name, str(ctx.exception))
 
     def test_route_and_bridge_keys_are_checked(self):

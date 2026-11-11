@@ -102,6 +102,21 @@ class PlayTest(unittest.TestCase):
         self.assertEqual(self.play(), {marked: "marked"})
         self.assertNotIn(plain, self.play())
 
+    def test_a_mark_counts_for_reached_days_like_a_touch(self):
+        # Final review, important 3: a mark with no window kept every company he ever marked in play for good.
+        edge, past, recent = self.company(), self.company(), self.company()
+        self.mark(edge, at="2026-10-27T15:00:00Z")  # 14 days before today
+        self.mark(past, at="2026-10-26T15:00:00Z")  # 15
+        self.mark(recent, at="2026-11-09T15:00:00Z")
+        self.assertEqual(self.play(), {edge: "marked", recent: "marked"})
+        self.assertEqual(in_play(self.conn, today=TODAY, planned_days=DAYS, reached_days=3), {recent: "marked"})
+
+    def test_an_old_mark_with_a_recent_touch_is_reached(self):
+        cid = self.company()
+        self.mark(cid, at="2026-10-01T15:00:00Z")
+        self.reach(cid, date(2026, 11, 9))
+        self.assertEqual(self.play(), {cid: "reached"})
+
     def test_a_company_reached_10_days_ago_is_in_play_and_one_reached_20_days_ago_is_not(self):
         recent, old = self.company(), self.company()
         self.reach(recent, date(2026, 10, 31))

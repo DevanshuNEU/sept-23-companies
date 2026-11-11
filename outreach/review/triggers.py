@@ -263,7 +263,7 @@ _GONE_QUERIES = (
 )
 # The producers this sweep answers for, and the kind each raises: only these go stale.
 _STALE_PRODUCERS = (("size_unknown", "daily_list"), ("domain_missing", "sender"), ("sponsorship_unclear", "rules"))
-_STALE_NOTE = "No longer in your plan."
+_STALE_NOTE = "Not a company you are working on now."
 
 
 # The reason #31's `raise_merge_candidate` writes for a pair joined only by a domain (basis `domain`, or
@@ -362,7 +362,7 @@ def clear_stale(conn: sqlite3.Connection, *, now: str, cfg: ReviewConfig | None 
                 company_ids: Collection[int] | None = None) -> int:
     """Clear this plan's open items (`rules`, `daily_list`, `sender`) older than `stale_days` whose company is out of
     play (a domain item: not being emailed; a sponsorship item: also not in the top-N, and never while the ranked
-    list is empty), with the note `No longer in your plan.` In play is a recent daily list, his Done marks or a
+    list is empty), with the note `Not a company you are working on now.` In play is a recent daily list, his Done marks or a
     person reached in the last `reached_days` days (`play.in_play`), so it needs no list to run. Returns how many it
     cleared."""
     got, _ = _stale(conn, iso_utc(now), cfg or load_review_config(), _scope(company_ids))

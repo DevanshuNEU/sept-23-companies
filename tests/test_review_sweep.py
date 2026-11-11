@@ -144,7 +144,7 @@ class ClearStaleTest(SweepBase):
             self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 3)
         self.assertEqual([self.state(i)[0] for i in (a, c, crawler, other)], ["open"] * 4)
         for review_id in (b, d, e):
-            self.assertEqual(self.state(review_id), ("resolved", "cleared", "No longer in your plan."))
+            self.assertEqual(self.state(review_id), ("resolved", "cleared", "Not a company you are working on now."))
 
     def test_a_working_company_that_left_the_plan_is_cleared_only_after_the_stale_age(self):
         left = self.company("Left", "working")
@@ -155,7 +155,7 @@ class ClearStaleTest(SweepBase):
         self.assertEqual(self.state(a)[0], "open")
         self.old(a, days=14)
         self.assertEqual(clear_stale(self.conn, now=NOW, cfg=CFG), 1)
-        self.assertEqual(self.state(a), ("resolved", "cleared", "No longer in your plan."))
+        self.assertEqual(self.state(a), ("resolved", "cleared", "Not a company you are working on now."))
 
     def test_with_no_ranked_list_old_sponsorship_items_are_held_and_the_report_says_so(self):
         out = self.company("Out")
@@ -214,7 +214,7 @@ class ClearStaleTest(SweepBase):
         self.assertEqual(report.cleared.get("size_unknown"), 1)
         self.assertFalse(any("daily list" in s for s in report.skipped), report.skipped)
         self.assertEqual(self.state(kept)[0], "open")
-        self.assertEqual(self.state(gone), ("resolved", "cleared", "No longer in your plan."))
+        self.assertEqual(self.state(gone), ("resolved", "cleared", "Not a company you are working on now."))
 
     def test_a_company_reached_recently_keeps_its_old_item_with_no_list(self):
         reached, faded = self.company("Reached"), self.company("Faded")

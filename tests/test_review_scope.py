@@ -1,13 +1,17 @@
 """Which companies' items ask for his attention, and the sweep step that clears the crawler's out-of-scope gaps
 (#16, the company-first ruling in #9)."""
+import dataclasses
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
 from outreach.review.config import ReviewConfig
 from outreach.review.items import resolve_item
-from outreach.review.scope import OUT_OF_SCOPE_NOTE, attention, clear_out_of_scope, ranked_ids
+from outreach.review.scope import OUT_OF_SCOPE_NOTE, attention, clear_out_of_scope, crawler_scope, ranked_ids
 from outreach.review.triggers import sweep_needs_you
+from datetime import date
+
+from tests import plan_seed
 from tests.review_seed import seed_email_person, seed_item, seed_plan_row, seed_queued_message
 from tests.storetest import fresh_store, seed_company
 
@@ -56,6 +60,22 @@ class AttentionTest(ScopeBase):
         self.held(held)
         self.assertEqual(attention(self.conn, today=TODAY, planned_days=4), {picked, mailed, held})
         self.assertNotIn(plain, attention(self.conn, today=TODAY, planned_days=4))
+
+    def test_reached_days_is_the_window_for_attention_and_the_crawler_scope(self):
+        # Final review, important 3: every in_play caller passes the config's reached_days.
+        cid = self.company("Reached")
+        person = plan_seed.seed_person(self.conn, cid, "Ada")
+        plan_seed.seed_outbound(self.conn, person, cid, "linkedin_request", date(2026, 11, 5), context_source="own")
+        self.assertIn(cid, attention(self.conn, today=TODAY, planned_days=4))
+        self.assertNotIn(cid, attention(self.conn, today=TODAY, planned_days=4, reached_days=3))
+        short = dataclasses.replace(CFG, reached_days=3)
+        with ranked():
+            self.assertIn(cid, crawler_scope(self.conn, today=TODAY, cfg=CFG)[0])
+            self.assertNotIn(cid, crawler_scope(self.conn, today=TODAY, cfg=short)[0])
+
+    def test_the_clear_note_says_it_in_job_list_words(self):
+        # First to see (#9, 2026-11-10): there is no plan any more, so no note he reads names one.
+        self.assertEqual(OUT_OF_SCOPE_NOTE, "Not a company you are working on now. It comes back if that changes.")
 
     def test_a_hold_on_a_merged_duplicate_holds_the_survivor(self):
         keep, dup = self.company("Keep"), self.company("Dup")

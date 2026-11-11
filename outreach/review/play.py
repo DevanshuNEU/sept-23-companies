@@ -2,9 +2,9 @@
 
 A company is picked or planned only by the latest daily list, never by its status: the importer sets `working` on
 every company he ever touched, so status says nothing about what he chose today. Since the first to see ruling (#9,
-2026-11-10) no daily list is built, so a company is also in play when he marked it Done and has not cleared the mark
-(`outreach.pipeline.reached`), or when he reached a person there in the last `reached_days` days (any channel, from
-`outreach.plan.outbound.load_outbound`). The old lists still count while they are recent, for history.
+2026-11-10) no daily list is built, so a company is also in play when he marked it reached in the last
+`reached_days` days and has not cleared the mark (`outreach.pipeline.reached`), or when he reached a person there in
+those days (any channel, from `outreach.plan.outbound.load_outbound`). The old lists still count while they are recent, for history.
 
 Items for size and domain are raised only for these companies, so the list never floods: of 18,000 stored
 companies a plan names at most 60. Each function is a few set-based queries, never one per company.
@@ -70,8 +70,9 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
 
     Picked: the latest list has it as `picked`. Planned: the latest list has it `proposed`, with or without a named
     person (company first, #9 2026-10-26: a company row with nobody on it is what the plan proposes). The latest list
-    counts only when its date is within `planned_days` of `today`. Marked: he marked it Done (first to see, #9
-    2026-11-10) and has not cleared the mark. Reached: a person there was reached, on any channel, within
+    counts only when its date is within `planned_days` of `today`. Marked: he marked it reached (first to see, #9
+    2026-11-10) within `reached_days` days before `today` and has not cleared the mark (an older mark counts like
+    an old touch, so Needs you never grows without a bound). Reached: a person there was reached, on any channel, within
     `reached_days` days before `today` (`Outbound.reached`: a sent email counts while its follow-ups wait; a first
     email still in the Outbox is not reached yet, and `emailing` covers it).
     Status plays no part here beyond `live_company_ids`: a `working` company on no plan, with no mark and no recent
@@ -90,10 +91,10 @@ def in_play(conn: sqlite3.Connection, *, today: str, planned_days: int,
                 out[cid] = "picked"
             elif row["state"] in _ROW_STATES_KEPT:
                 out.setdefault(cid, "planned")
-    for cid in reached.marks(conn, dict(canon)):
-        if cid in live:
-            out.setdefault(cid, "marked")
     since = date.fromisoformat(today) - timedelta(days=reached_days)
+    for cid, day in reached.marks(conn, dict(canon)).items():
+        if cid in live and date.fromisoformat(day) >= since:
+            out.setdefault(cid, "marked")
     for o in load_outbound(conn, canon, tz="America/New_York"):
         if o.reached and o.sent_on >= since and o.company_id in live:
             out.setdefault(o.company_id, "reached")

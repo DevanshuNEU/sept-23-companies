@@ -35,12 +35,12 @@ class WordsTest(unittest.TestCase):
     def test_size_reason_picked_and_planned(self):
         self.assertEqual(
             words.size_reason("Trigger.dev", "picked"),
-            "You picked Trigger.dev, and nobody has recorded its size. Over 300 people hides a company, so one "
-            "number with a source settles it.")
+            "You picked Trigger.dev, and nobody has recorded its size. Jobs tags a company over 300 people as Big, "
+            "so one number with a source settles it.")
         self.assertEqual(
             words.size_reason("Wave", "planned"),
-            "Wave is in today's plan, and nobody has recorded its size. Over 300 people hides a company, so one "
-            "number with a source settles it.")
+            "Wave is in today's plan, and nobody has recorded its size. Jobs tags a company over 300 people as Big, "
+            "so one number with a source settles it.")
         with self.assertRaises(ValueError):
             words.size_reason("Wave", "other")
 

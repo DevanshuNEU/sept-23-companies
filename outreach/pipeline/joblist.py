@@ -1,4 +1,4 @@
-"""The job list (#156): open engineering postings at his level, newest first, with the facts he checks.
+"""The job list (#156): open engineering postings at his level, newest posted first, with the facts he checks.
 
 One read, no score: he reads every posting himself. The current decision is joined by its key with the current
 ruleset (never through the `current_decision` view, which SQLite materializes and scans per row), company facts come
@@ -20,10 +20,17 @@ The list reads the decision's columns:
   changes only when the rebuild gives it a real state.
 - The level tag: `fit` and `reject` show the tier (new grad, early career, SDE 1, SDE 2); `uncertain` shows "level not
   stated", whatever its tier; a `fit` posting whose tier is `not_stated` or `open` shows "entry level".
-- Date: `posted_on` when there is one (`posted`), else the New York date of the first sighting (`seen`).
-- Order: date newest first, then the smaller company (known small sizes by size, then unknown, then guessed big, then
-  known big by size), then posting id.
-  `after` is a keyset cursor of `(date, size_rank, posting_id)`, so a write between two pages never repeats a row.
+- List time (#193, design 4.4): `posting.list_at`, written once by the crawler (`outreach.crawl.row_clock.list_at`).
+  NULL means the date is not known: such a row is in the Date unknown group, after every dated row in every window
+  and never filtered out by one. The row also carries the board's own time (`posted_at`), the first sighting, the
+  seen gap, `first_read` (no seen gap: the board's first read, or a row from before the gap was kept) and, for a
+  repost, the first sighting of the posting it repeats (`reposted_from`).
+- Windows: a dated row is in the 7, 30, 60 or 90 day window when its list time is at or after 00:00 New York that
+  many days before today.
+- Order: list time newest first, then the smaller company (known small sizes by size, then unknown, then guessed big,
+  then known big by size), then posting id; the Date unknown group last, newest first sighting first, then the same.
+  `after` is a keyset cursor of `(group, time, size_rank, posting_id)`, the group `dated` or `unknown` (the time is
+  the list time, or the first sighting in the unknown group), so a write between two pages never repeats a row.
 
 Reads only; the clock comes in as `now`.
 """
@@ -34,7 +41,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -82,9 +89,12 @@ class JobRow:
     url: str
     location: str
     level_tag: str
-    date: str  # YYYY-MM-DD
-    date_kind: Literal["posted", "seen"]
-    age_days: int  # whole New York days from `date` to today, never below 0
+    list_at: str | None  # the time the list sorts by (canonical UTC); None: Date unknown
+    posted_at: str | None  # the board's own posting time, when it gives one Knock trusts
+    first_seen_at: str  # Knock's first sighting
+    seen_gap_s: int | None  # seconds since the board's last good read when Knock first saw it
+    first_read: bool  # no seen gap: found on the board's first read
+    reposted_from: str | None  # a repost: the first sighting of the posting it repeats
     company_id: int  # the survivor of any merge
     company_name: str
     size: int | None
@@ -121,23 +131,19 @@ def passed_posting_ids(conn: sqlite3.Connection) -> frozenset[int]:
     return frozenset(out)
 
 
-def _ny_day(stamp: str) -> str:
-    """The New York date of a stored UTC moment (registered as an SQL function: the first sighting's day)."""
-    return datetime.strptime(stamp, ISO_FMT).replace(tzinfo=timezone.utc).astimezone(_NY).date().isoformat()
-
-
 # The facts are read once per company (not per posting): `company_fact` is the one view that picks a company's value.
 _SQL = """
 WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
          d.level_tier, {state} AS state, d.sponsorship, d.us,
-         COALESCE(p.posted_on, jl_ny_day(p.first_seen_at)) AS day,
-         CASE WHEN p.posted_on IS NULL THEN 'seen' ELSE 'posted' END AS kind
+         p.list_at, p.posted_at, p.first_seen_at, p.seen_gap_s, rp.first_seen_at AS reposted_from,
+         CASE WHEN p.list_at IS NULL THEN 1 ELSE 0 END AS unk, COALESCE(p.list_at, p.first_seen_at) AS at
   FROM posting p
   JOIN decision d ON d.posting_id = p.posting_id
    AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1)
   LEFT JOIN canon cn ON cn.src = p.company_id
+  LEFT JOIN posting rp ON rp.posting_id = p.repost_of
   WHERE p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' AND d.citizenship = 0
     AND d.eligibility = 'ok' AND d.level_tier <> 'senior'
     AND p.company_id NOT IN (SELECT value FROM json_each(:nogo))
@@ -182,7 +188,8 @@ co AS (
   SELECT co1.*, CASE WHEN co1.size > :big OR co1.big_guess = 1 THEN 1 ELSE 0 END AS big FROM co1
 ),
 rows AS (
-  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc, c.day, c.kind,
+  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc,
+         c.list_at, c.posted_at, c.first_seen_at, c.seen_gap_s, c.reposted_from, c.unk, c.at,
          c.level_tier, c.state, c.sponsorship,
          co.big,
          CASE WHEN (c.state = 'fit' OR (c.state = 'uncertain' AND NOT co.big))
@@ -191,7 +198,7 @@ rows AS (
          CASE WHEN co.size IS NULL THEN (CASE WHEN co.big_guess = 1 THEN :big_rank ELSE :unknown_rank END)
               WHEN co.size <= :big THEN co.size ELSE :big_rank + co.size END AS rank
   FROM cand c JOIN co ON co.cid = c.cid
-  WHERE c.day >= :cutoff AND (:q = '' OR lower(co.name) LIKE :like ESCAPE '\\')
+  WHERE (c.unk = 1 OR c.list_at >= :cutoff) AND (:q = '' OR lower(co.name) LIKE :like ESCAPE '\\')
     AND CASE :size WHEN 'small' THEN co.size <= :big WHEN 'big' THEN co.big
                    WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
@@ -202,25 +209,31 @@ _COUNT = _SQL + "SELECT COALESCE(SUM(yl), 0) AS yl, COUNT(*) AS n FROM rows"
 # and the cursor narrow it to the page.
 _PAGE = _SQL + """
 SELECT * FROM (SELECT rows.*, SUM(yl) OVER () AS yl_total, COUNT(*) OVER () AS n_total FROM rows)
-WHERE yl = :yl AND (:has_after = 0 OR day < :a_day OR (day = :a_day AND (rank > :a_rank
-      OR (rank = :a_rank AND posting_id > :a_id))))
-ORDER BY day DESC, rank, posting_id LIMIT :limit
+WHERE yl = :yl AND (:has_after = 0 OR unk > :a_unk OR (unk = :a_unk AND (at < :a_at OR (at = :a_at
+      AND (rank > :a_rank OR (rank = :a_rank AND posting_id > :a_id))))))
+ORDER BY unk, at DESC, rank, posting_id LIMIT :limit
 """
+_GROUPS = ("dated", "unknown")  # the cursor's group segment, by `unk`
 
 
-def _encode(day: str, rank: int, posting_id: int) -> str:
-    return base64.urlsafe_b64encode(json.dumps([day, rank, posting_id]).encode()).decode().rstrip("=")
+def _encode(unk: int, at: str, rank: int, posting_id: int) -> str:
+    return base64.urlsafe_b64encode(json.dumps([_GROUPS[unk], at, rank, posting_id]).encode()).decode().rstrip("=")
 
 
-def _decode(cursor: str) -> tuple[str, int, int]:
+def _decode(cursor: str) -> tuple[int, str, int, int]:
     try:
-        day, rank, posting_id = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-        date.fromisoformat(day)
-        if not (isinstance(day, str) and type(rank) is int and type(posting_id) is int):
+        group, at, rank, posting_id = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        if not (group in _GROUPS and isinstance(at, str) and type(rank) is int and type(posting_id) is int):
             raise ValueError
-        return day, rank, posting_id
+        datetime.strptime(at, ISO_FMT)
+        return _GROUPS.index(group), at, rank, posting_id
     except (ValueError, TypeError, json.JSONDecodeError):  # binascii.Error and UnicodeDecodeError are ValueErrors
         raise ValueError(f"{cursor!r} is not a job list cursor") from None
+
+
+def _ny_midnight(day: date) -> str:
+    """00:00 New York on `day`, as canonical UTC: the first moment of a window."""
+    return datetime.combine(day, time(0, 0), tzinfo=_NY).astimezone(timezone.utc).strftime(ISO_FMT)
 
 
 def _today(now: str) -> date:
@@ -251,7 +264,7 @@ def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[in
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
     # A company merged into a no-go company is a no-go company too, and so is a merged-away one with its own row.
     nogo = sorted(held | {src for src, dst in canon.items() if dst in held})
-    cutoff = (today - timedelta(days=f.window_days)).isoformat() if f.window_days else "0000-00-00"
+    cutoff = _ny_midnight(today - timedelta(days=f.window_days)) if f.window_days else ""
     return {
         "canon": json.dumps({str(src): dst for src, dst in canon.items() if src != dst}),
         "nogo": json.dumps(nogo), "passed": json.dumps(sorted(passed_posting_ids(conn))),
@@ -280,16 +293,15 @@ def _prepare(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | Non
     contacted = _contacted(conn, canon)
     params = _params(conn, today, f, canon, contacted)
     page = {**params, "yl": int(f.view == "your_level"), "has_after": int(cursor is not None),
-            "a_day": cursor[0] if cursor else "", "a_rank": cursor[1] if cursor else 0,
-            "a_id": cursor[2] if cursor else 0, "limit": limit + 1}
-    conn.create_function("jl_ny_day", 1, _ny_day, deterministic=True)
-    return today, contacted, params, page
+            "a_unk": cursor[0] if cursor else 0, "a_at": cursor[1] if cursor else "",
+            "a_rank": cursor[2] if cursor else 0, "a_id": cursor[3] if cursor else 0, "limit": limit + 1}
+    return contacted, params, page
 
 
 def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> JobPage:
     """One page of the list. `after` is the cursor of the last row seen (None for the first page); `counts` ignore the
     view, so both tabs can show their number. A bad filter or cursor is a ValueError."""
-    today, contacted, params, page = _prepare(conn, now, f, after, limit)
+    contacted, params, page = _prepare(conn, now, f, after, limit)
     cur = conn.cursor()
     cur.row_factory = sqlite3.Row
     found = cur.execute(_PAGE, page).fetchall()
@@ -299,10 +311,10 @@ def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, 
         counted = cur.execute(_COUNT, params).fetchone()
         counts = {"your_level": counted["yl"], "higher": counted["n"] - counted["yl"]}
     more = len(found) > limit
-    rows = [_row(r, today, contacted) for r in found[:limit]]
+    rows = [_row(r, contacted) for r in found[:limit]]
     last = found[limit - 1] if more else None
-    return JobPage(rows, counts[f.view], _encode(last["day"], last["rank"], last["posting_id"]) if last else None,
-                   counts)
+    return JobPage(rows, counts[f.view],
+                   _encode(last["unk"], last["at"], last["rank"], last["posting_id"]) if last else None, counts)
 
 
 def _level_tag(state: str, tier: str) -> str:
@@ -313,19 +325,20 @@ def _level_tag(state: str, tier: str) -> str:
     return _LEVEL_TAGS[tier]
 
 
-def _row(r: sqlite3.Row, today: date, contacted: dict[int, date]) -> JobRow:
+def _row(r: sqlite3.Row, contacted: dict[int, date]) -> JobRow:
     size = r["size"]
     when = contacted.get(r["cid"])
     return JobRow(
         posting_id=r["posting_id"], title=r["title"], url=r["url"], location=r["location"],
-        level_tag=_level_tag(r["state"], r["level_tier"]), date=r["day"], date_kind=r["kind"],
-        age_days=max((today - date.fromisoformat(r["day"])).days, 0), company_id=r["cid"], company_name=r["name"],
+        level_tag=_level_tag(r["state"], r["level_tier"]), list_at=r["list_at"], posted_at=r["posted_at"],
+        first_seen_at=r["first_seen_at"], seen_gap_s=r["seen_gap_s"], first_read=r["seen_gap_s"] is None,
+        reposted_from=r["reposted_from"], company_id=r["cid"], company_name=r["name"],
         size=size, big=bool(r["big"]), says_no_sponsorship=r["sponsorship"] == "no",
         everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None)
 
 
 def explain(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> list[str]:
     """SQLite's query plan lines for the page query and the count query (for the plan test and for timing work)."""
-    _, _, params, page = _prepare(conn, now, f, after, limit)
+    _, params, page = _prepare(conn, now, f, after, limit)
     return ([r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _PAGE, page)]
             + [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _COUNT, params)])

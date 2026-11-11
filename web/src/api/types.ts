@@ -399,11 +399,15 @@ export interface BrowseParams { q: string; levelRole: boolean; visaOk: boolean; 
 /** A swap: the chosen company took the pick's slot as `row`; the replaced pick is back on the bench (it is not a Not now). */
 export interface SwapResult { replacedEntryId: Id; replaced: CompanyRef; row: PlanRow; text: string }
 /**
- * The job list (#156): open engineering postings he reads one by one, newest first. `date` is the posting's own date
- * (`dateKind` 'posted') or the day Knock first saw it ('seen'); `ageDays` counts from it in New York days.
+ * The job list (#156, #193): open engineering postings he reads one by one, newest first by when each was posted
+ * (`listAt`). The row's time comes from `listAt`, `postedAt` and `firstSeenAt` (`postedLabel` in lib/format).
  */
 export interface JobRow {
-  postingId: Id; title: string; url: string; location: string; levelTag: string; date: IsoDate; dateKind: 'posted' | 'seen'; ageDays: number;
+  postingId: Id; title: string; url: string; location: string; levelTag: string;
+  /** The time the list sorts by; null: Date unknown, listed after every dated row. */
+  listAt: IsoTime | null; postedAt: IsoTime | null /* the board's own posting time */; firstSeenAt: IsoTime;
+  seenGapS: number | null /* seconds since the board's last good read when Knock first saw it */;
+  firstRead: boolean /* found on the board's first read */; repostedFrom: IsoTime | null /* a repost: when Knock first saw the one it repeats */;
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
 }

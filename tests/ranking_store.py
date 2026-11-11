@@ -11,6 +11,7 @@ from outreach.store.timefmt import utcnow
 
 _keys = itertools.count(1)
 TEST_RULESET = "r-0000000000a1"
+BACKFILL = object()  # `posting`'s list_at default: what migration 0009's backfill gives the row
 
 _DECISION_DEFAULTS = dict(
     lane="engineering", level_tier="new_grad", level_ok=1, level_basis="Title says new grad", years_asked=None,
@@ -37,14 +38,22 @@ def board(conn: sqlite3.Connection, company_id: int, *, found_by: str = "import"
 def posting(conn: sqlite3.Connection, company_id: int, title: str = "Software Engineer, New Grad", *,
             board_id: int | None = None, body: str = "", location: str = "San Francisco, CA",
             posted_on: str | None = None, first_seen_at: str = "2026-10-01T08:00:00Z",
-            last_seen_at: str = "2026-10-21T08:00:00Z", closed: bool = False, pay: str = "") -> int:
-    """An open posting (closed by hand when `closed`). No board means a `url:` posting."""
+            last_seen_at: str = "2026-10-21T08:00:00Z", closed: bool = False, pay: str = "",
+            posted_at: str | None = None, seen_gap_s: int | None = None, repost_of: int | None = None,
+            list_at: str | None | object = BACKFILL) -> int:
+    """An open posting (closed by hand when `closed`). No board means a `url:` posting. `list_at` defaults to what
+    migration 0009's backfill gives a row with these dates (the posted date at 05:00 UTC, else the first sighting,
+    never later than the first sighting); None means Date unknown."""
     key = f"{'url' if board_id is None else 'b'}:{next(_keys)}"
+    if list_at is BACKFILL:
+        list_at = min(f"{posted_on}T05:00:00Z" if posted_on else first_seen_at, first_seen_at)
     pid = conn.execute(
         "INSERT INTO posting(company_id, board_id, source_key, title, location, posted_on, pay, first_seen_at, "
-        "last_seen_at, closed_at, close_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "last_seen_at, closed_at, close_reason, posted_at, seen_gap_s, repost_of, list_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (company_id, board_id, key, title, location, posted_on, pay, first_seen_at, last_seen_at,
-         last_seen_at if closed else None, "hand" if closed else None)).lastrowid
+         last_seen_at if closed else None, "hand" if closed else None, posted_at, seen_gap_s, repost_of,
+         list_at)).lastrowid
     if body:
         conn.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, body))
     return pid

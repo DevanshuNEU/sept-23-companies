@@ -1,4 +1,4 @@
-import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatMonthName, formatRecipientTime, formatWeekday, formatWeekdayTime, parseIsoDate } from '@/lib/format';
+import { ageDays, formatAge, formatCarriedDay, formatDay, formatDayTime, formatDue, formatClockTime, formatDueDay, formatLocalTime, formatLongDate, formatMonth, formatMonthName, formatRecipientTime, formatWeekday, formatWeekdayTime, gapTag, parseIsoDate, postedLabel, repostTag } from '@/lib/format';
 
 const ASOF = '2026-11-10T15:14:00Z'; // Tuesday 10:14 in Boston
 
@@ -169,5 +169,67 @@ describe('formatMonthName', () => {
   it('names the month of a calendar date, with no zone shift', () => {
     expect(formatMonthName('2026-10-01')).toBe('October');
     expect(formatMonthName('2026-12-31')).toBe('December');
+  });
+});
+
+describe('postedLabel', () => {
+  const row = (o: Partial<Parameters<typeof postedLabel>[0]> = {}) => ({
+    listAt: '2026-11-10T15:08:00Z', postedAt: '2026-11-10T15:08:00Z', firstSeenAt: '2026-11-10T15:10:00Z', firstRead: false, ...o,
+  });
+
+  it('gives a board time today to the minute, with how long ago', () => {
+    expect(postedLabel(row(), ASOF)).toBe('posted 10:08, 6 min ago');
+    expect(postedLabel(row({ listAt: '2026-11-10T15:13:40Z', postedAt: '2026-11-10T15:13:40Z' }), ASOF)).toBe('posted 10:13, just now');
+    expect(postedLabel(row({ listAt: '2026-11-10T13:02:00Z', postedAt: '2026-11-10T13:02:00Z' }), ASOF)).toBe('posted 8:02, 2 hours ago');
+    expect(postedLabel(row({ listAt: '2026-11-10T14:10:00Z', postedAt: '2026-11-10T14:10:00Z' }), ASOF)).toBe('posted 9:10, 1 hour ago');
+  });
+
+  it('gives a board time on an earlier day its date and time, read in New York', () => {
+    // 02:30Z on Nov 9 is 21:30 on Nov 8 in New York.
+    expect(postedLabel(row({ listAt: '2026-11-09T02:30:00Z', postedAt: '2026-11-09T02:30:00Z' }), ASOF)).toBe('posted Nov 8, 21:30');
+    expect(postedLabel(row({ listAt: '2025-12-30T15:00:00Z', postedAt: '2025-12-30T15:00:00Z' }), ASOF)).toBe('posted Dec 30, 2025, 10:00');
+  });
+
+  it('gives a date only board its day', () => {
+    expect(postedLabel(row({ listAt: '2026-11-08T05:00:00Z', postedAt: null, firstSeenAt: '2026-11-08T16:00:00Z' }), ASOF)).toBe('posted Nov 8');
+    expect(postedLabel(row({ listAt: '2026-11-10T05:00:00Z', postedAt: null }), ASOF)).toBe('posted today');
+  });
+
+  it('says first seen, to the minute, when the board gives no time', () => {
+    expect(postedLabel(row({ listAt: '2026-11-10T15:10:00Z', postedAt: null }), ASOF)).toBe('first seen 10:10');
+    expect(postedLabel(row({ listAt: '2026-11-06T15:10:00Z', postedAt: null, firstSeenAt: '2026-11-06T15:10:00Z' }), ASOF)).toBe('first seen Nov 6, 10:10');
+    // The board says later than Knock first saw it: the first sighting wins.
+    expect(postedLabel(row({ listAt: '2026-11-10T15:10:00Z', postedAt: '2026-11-10T15:12:00Z' }), ASOF)).toBe('first seen 10:10');
+  });
+
+  it('gives a row from before list times, and a row with no date, the first-seen day only', () => {
+    const old = { postedAt: null, firstRead: true, listAt: '2026-10-20T14:00:00Z', firstSeenAt: '2026-10-20T14:00:00Z' };
+    expect(postedLabel(row(old), ASOF)).toBe('first seen Oct 20');
+    expect(postedLabel(row({ ...old, listAt: '2026-10-18T05:00:00Z' }), ASOF)).toBe('posted Oct 18');
+    expect(postedLabel(row({ ...old, listAt: null, firstSeenAt: '2026-11-10T13:00:00Z' }), ASOF)).toBe('first seen today');
+    expect(postedLabel(row({ ...old, listAt: null }), ASOF)).toBe('first seen Oct 20');
+  });
+});
+
+describe('gapTag', () => {
+  it('names a gap over 2 hours in hours, then days, on a row dated by its first sighting', () => {
+    const seen = { listAt: '2026-11-10T15:10:00Z', postedAt: null, firstSeenAt: '2026-11-10T15:10:00Z', firstRead: false };
+    expect(gapTag({ ...seen, seenGapS: 7200 })).toBeNull();
+    expect(gapTag({ ...seen, seenGapS: 7201 })).toBe('Found after a 2 hour gap');
+    expect(gapTag({ ...seen, seenGapS: 86_399 })).toBe('Found after a 23 hour gap');
+    expect(gapTag({ ...seen, seenGapS: 3 * 86_400 + 5000 })).toBe('Found after a 3 day gap');
+    expect(gapTag({ ...seen, seenGapS: null, firstRead: true })).toBeNull();
+  });
+
+  it('says nothing when the board gave the time, since the gap does not move it', () => {
+    expect(gapTag({ listAt: '2026-11-10T15:08:00Z', postedAt: '2026-11-10T15:08:00Z', firstSeenAt: '2026-11-10T15:10:00Z', firstRead: false, seenGapS: 3 * 86_400 })).toBeNull();
+    expect(gapTag({ listAt: '2026-11-08T05:00:00Z', postedAt: null, firstSeenAt: '2026-11-10T15:10:00Z', firstRead: false, seenGapS: 3 * 86_400 })).toBeNull();
+  });
+});
+
+describe('repostTag', () => {
+  it('names the day the posting it repeats was first seen', () => {
+    expect(repostTag('2026-10-02T14:30:00Z', ASOF)).toBe('Reposted, first seen Oct 2');
+    expect(repostTag(null, ASOF)).toBeNull();
   });
 });

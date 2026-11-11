@@ -2174,8 +2174,6 @@ export interface components {
         };
         /** JobRowWire */
         JobRowWire: {
-            /** Agedays */
-            ageDays: number;
             /** Big */
             big: boolean;
             /** Companyid */
@@ -2184,23 +2182,28 @@ export interface components {
             companyName: string;
             /** Contactedon */
             contactedOn: string | null;
-            /** Date */
-            date: string;
-            /**
-             * Datekind
-             * @enum {string}
-             */
-            dateKind: "posted" | "seen";
             /** Everify */
             everify: boolean;
+            /** Firstread */
+            firstRead: boolean;
+            /** Firstseenat */
+            firstSeenAt: string;
             /** Leveltag */
             levelTag: string;
+            /** Listat */
+            listAt: string | null;
             /** Location */
             location: string;
+            /** Postedat */
+            postedAt: string | null;
             /** Postingid */
             postingId: number;
+            /** Repostedfrom */
+            repostedFrom: string | null;
             /** Saysnosponsorship */
             saysNoSponsorship: boolean;
+            /** Seengaps */
+            seenGapS: number | null;
             /** Size */
             size: number | null;
             /** Title */

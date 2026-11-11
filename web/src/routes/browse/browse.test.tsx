@@ -11,14 +11,17 @@ import { AppShell } from '@/shell/app-shell';
 import BrowsePage from './index';
 
 /*
- * The job list (#156, the /browse page), on the sample: 80 postings from 11 companies, newest first. At your level: 60
- * (20 in the last 30 days, 6 in the last 7); at higher levels: 20 (6 in the last 30 days). He reads every posting
- * himself: Pass hides one, Go ahead puts its company on today's list.
+ * The job list (#156, the /browse page), on the sample: 82 postings from 11 companies, newest first by when each was
+ * posted. At your level: 62 (22 in the last 30 days, 8 in the last 7, each counting the 2 with no date); at higher
+ * levels: 20 (6 in the last 30 days). He reads every posting himself: Pass hides one, Go ahead puts its company on
+ * today's list.
  */
 
 const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key, ...init });
 const list = () => screen.getByRole('list', { name: 'Jobs' });
 const rows = () => Array.from(list().querySelectorAll<HTMLElement>(':scope > li[data-job]'));
+const undated = () => screen.getByRole('list', { name: 'Date unknown' });
+const row = (id: number) => document.querySelector<HTMLElement>(`li[data-job="${id}"]`) as HTMLElement;
 const titles = () => rows().map((r) => within(r).getAllByRole('link')[0]?.textContent);
 const companies = () => rows().map((r) => r.getAttribute('data-company'));
 const search = () => screen.getByRole('searchbox', { name: 'Search by company name' });
@@ -60,7 +63,7 @@ describe('the Jobs page', () => {
 
   it('says how many at your level in the last 30 days, and each row says what the posting is', async () => {
     await open();
-    expect(await count('20 at your level in the last 30 days')).toBeInTheDocument();
+    expect(await count('22 at your level in the last 30 days')).toBeInTheDocument();
     expect(rows()).toHaveLength(20);
     const first = rows()[0] as HTMLElement;
     const link = within(first).getByRole('link', { name: 'Software Engineer, New Grad' });
@@ -69,7 +72,7 @@ describe('the Jobs page', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
     expect(first).toHaveTextContent('new grad');
     expect(first).toHaveTextContent('Retell AI');
-    expect(first).toHaveTextContent('posted today');
+    expect(first).toHaveTextContent('posted 10:08, 6 min ago');
     expect(first).toHaveTextContent('45 people');
     expect(first).toHaveTextContent('San Francisco, CA');
     expect(first).toHaveTextContent('E-Verify');
@@ -78,13 +81,66 @@ describe('the Jobs page', () => {
     expect(within(first).getByRole('button', { name: /^Go ahead/ })).toBeInTheDocument();
   });
 
-  it('lists newest first, dates a posting by when it was seen when it has no date, and has no score or ranking text', async () => {
+  it('lists newest first by when each job was posted, and has no score or ranking text', async () => {
     await open();
-    const ages = rows().map((r) => /(posted|seen) (today|\d+ days? ago)/.exec(r.textContent ?? '')?.[0]);
-    expect(ages[0]).toBe('posted today');
-    expect(ages[1]).toBe('posted 1 day ago');
-    expect(ages).toContain('seen 4 days ago'); // the fifth posting has no date of its own
+    expect(rows().map((r) => r.getAttribute('data-job')).slice(0, 5)).toEqual(['9000', '9001', '9002', '9004', '9005']);
     expect(document.body).not.toHaveTextContent(/\bfit\b|why it ranked|score/i);
+  });
+
+  it('shows the posted time to the minute', async () => {
+    await open();
+    expect(row(9000)).toHaveTextContent('posted 10:08, 6 min ago'); // the board's time, today
+    expect(row(9001)).toHaveTextContent('posted Nov 9, 9:13'); // the board's time, yesterday
+    expect(row(9002)).toHaveTextContent('posted Nov 8'); // a board that gives only the date
+    expect(row(9002)).not.toHaveTextContent(/posted Nov 8, \d/);
+  });
+
+  it('shows first seen when the board gives no time', async () => {
+    await open();
+    expect(row(9004)).toHaveTextContent('first seen Nov 6, 10:10');
+    expect(row(9004)).not.toHaveTextContent('posted');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Any time' }));
+    // Rows from before list times keep their day, as the list showed it then.
+    await waitFor(() => expect(row(9064)).toHaveTextContent('first seen Aug 26'));
+    expect(row(9064)).not.toHaveTextContent(/Aug 26, \d/);
+    expect(row(9060)).toHaveTextContent('posted Aug 30');
+    expect(row(9060)).not.toHaveTextContent(/Aug 30, \d/);
+  });
+
+  it('tags a late find with its gap', async () => {
+    await open();
+    expect(within(row(9004)).getByText('Found after a 3 day gap')).toBeInTheDocument();
+    expect(row(9009)).toHaveTextContent('first seen'); // seen 30 min after the last read: no tag
+    expect(row(9009)).not.toHaveTextContent('Found after');
+    expect(row(9000)).not.toHaveTextContent('Found after');
+  });
+
+  it('tags a repost with its old date', async () => {
+    await open();
+    expect(within(row(9001)).getByText('Reposted, first seen Oct 2')).toBeInTheDocument();
+    expect(row(9000)).not.toHaveTextContent('Reposted');
+  });
+
+  it('groups rows without a date at the end', async () => {
+    const user = userEvent.setup();
+    await open();
+    const heading = screen.getByRole('heading', { level: 2, name: 'Date unknown' });
+    expect(heading).toHaveTextContent('Date unknown');
+    expect(screen.getByText('These boards give no posting date, and Knock found these jobs on its first read.')).toBeInTheDocument();
+    const late = Array.from(undated().querySelectorAll<HTMLElement>(':scope > li[data-job]'));
+    expect(late.map((r) => r.getAttribute('data-job'))).toEqual(['9080', '9081']);
+    expect(late[0]).toHaveTextContent('first seen Nov 9');
+    expect(late[1]).toHaveTextContent('first seen Nov 8');
+    expect(rows().map((r) => r.getAttribute('data-job'))).not.toContain('9080');
+    // The group comes after every dated row, and the arrows walk on into it.
+    expect(list().compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (let i = 0; i < rows().length; i++) press('ArrowDown');
+    expect(late[0]).toHaveAttribute('aria-current', 'true');
+    // Every window keeps them.
+    await user.click(screen.getByRole('button', { name: '7 days' }));
+    expect(await count('8 at your level in the last 7 days')).toBeInTheDocument();
+    await waitFor(() => expect(undated().querySelectorAll('li[data-job]')).toHaveLength(2));
   });
 
   it('names a big company, an unknown size and the flags a company carries', async () => {
@@ -110,7 +166,7 @@ describe('the Jobs page', () => {
     const yours = screen.getByRole('tab', { name: /^Your level/ });
     const higher = screen.getByRole('tab', { name: /^Higher levels/ });
     expect(yours).toHaveAttribute('aria-selected', 'true');
-    expect(yours).toHaveTextContent('20');
+    expect(yours).toHaveTextContent('22');
     expect(higher).toHaveTextContent('6');
     await user.click(higher);
     expect(await count('6 at higher levels in the last 30 days')).toBeInTheDocument();
@@ -126,10 +182,10 @@ describe('the Jobs page', () => {
     const group = screen.getByRole('group', { name: 'Posted within' });
     expect(within(group).getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(within(group).getByRole('button', { name: '7 days' }));
-    expect(await count('6 at your level in the last 7 days')).toBeInTheDocument();
+    expect(await count('8 at your level in the last 7 days')).toBeInTheDocument();
     expect(rows()).toHaveLength(6);
     await user.click(within(group).getByRole('button', { name: 'Any time' }));
-    expect(await count('60 at your level')).toBeInTheDocument();
+    expect(await count('62 at your level')).toBeInTheDocument();
     await waitFor(() => expect(rows()).toHaveLength(50));
     await user.click(screen.getByRole('button', { name: 'Show more' }));
     await waitFor(() => expect(rows()).toHaveLength(60));
@@ -220,7 +276,7 @@ describe('the Jobs page', () => {
       await user.click(passButton());
       expect(rows()).toHaveLength(19);
       expect(titles()[0]).toBe(second);
-      expect(screen.getByText('19 at your level in the last 30 days')).toBeInTheDocument();
+      expect(screen.getByText('21 at your level in the last 30 days')).toBeInTheDocument();
       expect(await screen.findByText('Passed.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
       expect(sent).not.toHaveBeenCalled();
@@ -234,7 +290,7 @@ describe('the Jobs page', () => {
       await user.click(await screen.findByRole('button', { name: 'Undo' }));
       await waitFor(() => expect(rows()).toHaveLength(20));
       expect(rows()[0]?.getAttribute('data-job')).toBe('9000');
-      expect(screen.getByText('20 at your level in the last 30 days')).toBeInTheDocument();
+      expect(screen.getByText('22 at your level in the last 30 days')).toBeInTheDocument();
       expect(rows()[0]).toHaveAttribute('aria-current', 'true'); // he is back on the row
       await leavePage();
       await settle(0);
@@ -268,7 +324,7 @@ describe('the Jobs page', () => {
       expect(sent.mock.calls[0]?.[0]).toBe(9000);
       expect(sent.mock.calls[0]?.[1]).toMatchObject({ requestId: expect.any(String) });
       await waitFor(() => expect(rows().some((r) => r.getAttribute('data-job') === '9000')).toBe(false));
-      expect(await count('19 at your level in the last 30 days')).toBeInTheDocument();
+      expect(await count('21 at your level in the last 30 days')).toBeInTheDocument();
       await leavePage();
       await settle(0);
       expect(sent).toHaveBeenCalledTimes(1);

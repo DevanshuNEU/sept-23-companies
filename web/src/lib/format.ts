@@ -1,4 +1,4 @@
-import type { IsoDate, IsoTime } from '@/api';
+import type { IsoDate, IsoTime, JobRow } from '@/api';
 
 // The app's zone. Views never read the real clock: every ask takes an explicit instant and zone.
 const APP_ZONE = 'America/New_York';
@@ -162,4 +162,70 @@ const MONTH_NAME = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'l
 /** "October" for a calendar date. A date is a calendar date: no zone moves it. */
 export function formatMonthName(on: IsoDate): string {
   return MONTH_NAME.format(noonOf(on));
+}
+
+/** "Nov 8": the day of an instant in the app's zone, with ", 2025" when it is not `asOf`'s year. */
+function monthDay(at: IsoTime, asOf: IsoTime): string {
+  const p = partsOf(at, { timeZone: APP_ZONE, year: 'numeric', month: 'short', day: 'numeric' });
+  return appDate(at).y === appDate(asOf).y ? `${p.month} ${p.day}` : `${p.month} ${p.day}, ${p.year}`;
+}
+
+/** "just now", "6 min ago", "1 hour ago", "3 hours ago": how long before `asOf`, for a time earlier today. */
+function sinceToday(at: IsoTime, asOf: IsoTime): string {
+  const min = Math.floor((Date.parse(asOf) - Date.parse(at)) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  return h === 1 ? '1 hour ago' : `${h} hours ago`;
+}
+
+type JobTime = Pick<JobRow, 'listAt' | 'postedAt' | 'firstSeenAt' | 'firstRead'>;
+
+const same = (a: IsoTime, b: IsoTime) => Date.parse(a) === Date.parse(b);
+
+/**
+ * Where a job's list time came from: the board's own time, a board that gives only the date, or Knock's first sighting
+ * ('seen'; also a row with no date, and a row from before list times whose date was its first-seen day).
+ */
+function timeKind(j: JobTime): 'board_time' | 'board_date' | 'seen' {
+  if (j.listAt === null) return 'seen';
+  if (j.postedAt !== null) return same(j.listAt, j.postedAt) ? 'board_time' : 'seen';
+  return same(j.listAt, j.firstSeenAt) ? 'seen' : 'board_date';
+}
+
+/**
+ * A job row's time, in New York: "posted 10:08, 6 min ago" (the board's time, today), "posted Nov 8, 21:30" (the
+ * board's time, an earlier day), "posted Nov 8" (a board that gives only the date), "first seen 10:42" or "first seen
+ * Nov 6, 10:10" (no board time). A row with no date, or from before list times, has only its first-seen day.
+ */
+export function postedLabel(j: JobTime, asOf: IsoTime): string {
+  const kind = timeKind(j);
+  if (kind === 'board_time' && j.listAt !== null) {
+    const at = j.listAt;
+    return ageDays(at, asOf) <= 0 ? `posted ${formatClockTime(at)}, ${sinceToday(at, asOf)}` : `posted ${monthDay(at, asOf)}, ${formatClockTime(at)}`;
+  }
+  if (kind === 'board_date' && j.listAt !== null) return ageDays(j.listAt, asOf) <= 0 ? 'posted today' : `posted ${monthDay(j.listAt, asOf)}`;
+  const at = j.firstSeenAt;
+  const today = ageDays(at, asOf) <= 0;
+  if (j.listAt === null || j.firstRead) return today ? 'first seen today' : `first seen ${monthDay(at, asOf)}`;
+  return today ? `first seen ${formatClockTime(at)}` : `first seen ${monthDay(at, asOf)}, ${formatClockTime(at)}`;
+}
+
+/** Over this many seconds between the board's last read and the first sighting, the row says how long it was. */
+// Keep in step with GAP_TAG_S in outreach/crawl/row_clock.py.
+const GAP_TAG_S = 7200;
+
+/**
+ * "Found after a 3 day gap": on a row dated by its first sighting, how long the board had gone unread before it, when
+ * that is over 2 hours. A row with the board's own time or date gets none: the gap does not move its time.
+ */
+export function gapTag(j: JobTime & Pick<JobRow, 'seenGapS'>): string | null {
+  if (j.seenGapS === null || j.seenGapS <= GAP_TAG_S || j.listAt === null || timeKind(j) !== 'seen') return null;
+  const days = Math.floor(j.seenGapS / 86_400);
+  return days >= 1 ? `Found after a ${days} day gap` : `Found after a ${Math.floor(j.seenGapS / 3600)} hour gap`;
+}
+
+/** "Reposted, first seen Oct 2": a repost, with the day Knock first saw the posting it repeats. */
+export function repostTag(repostedFrom: IsoTime | null, asOf: IsoTime): string | null {
+  return repostedFrom === null ? null : `Reposted, first seen ${monthDay(repostedFrom, asOf)}`;
 }

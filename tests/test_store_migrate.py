@@ -365,3 +365,79 @@ class BoardCandidateMigrationTest(unittest.TestCase):
                       {"gated_at": at, "gate_result": "dead", "open_us_engineering": -1}):
             with self.subTest(extra=extra), self.assertRaises(sqlite3.IntegrityError):
                 self.insert(token="x", **extra)
+
+
+class ListTimeMigrationTest(unittest.TestCase):
+    """0009 adds the list time columns (#193): old postings keep their current date, and each board's last good read
+    comes from its last read or its kept reads."""
+
+    T1, T2, T3 = "2026-11-01T10:00:00Z", "2026-11-02T10:00:00Z", "2026-11-03T10:00:00Z"
+
+    def old_store(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old = Path(tmp.name)
+        for version, _name, path in migration_files():
+            if version <= 8:
+                shutil.copy(path, old / path.name)
+        conn = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.row_factory = sqlite3.Row
+        self.assertEqual(migrate(conn, old), 8)
+        return conn
+
+    def board(self, conn, company, token, last_read=None, reads=()):
+        streaks = {"ok": (0, 0), "unchanged": (0, 0), "empty": (1, 0), "error": (0, 2), None: (0, 0)}[last_read]
+        at = self.T3 if last_read else None
+        bid = conn.execute(
+            "INSERT INTO board(company_id, ats, token, last_read, last_read_at, empty_streak, error_streak, "
+            "streak_since, created_at) VALUES (?, 'greenhouse', ?, ?, ?, ?, ?, ?, ?)",
+            (company, token, last_read, at, *streaks, at, self.T1)).lastrowid
+        for read_at, result in reads:
+            run = conn.execute("INSERT INTO job_run(job, started_at) VALUES ('crawl', ?)", (read_at,)).lastrowid
+            conn.execute("INSERT INTO board_read(board_id, run_id, at, result, error) VALUES (?, ?, ?, ?, ?)",
+                         (bid, run, read_at, result, "boom" if result == "error" else ""))
+        return bid
+
+    def test_0009_backfills_list_at_and_last_good_read(self):
+        conn = self.old_store()
+        company = seed_company(conn)
+        for key, posted_on in (("url:dated", "2026-10-01"), ("url:undated", None), ("url:late", "2026-11-05")):
+            conn.execute("INSERT INTO posting(company_id, source_key, title, posted_on, first_seen_at, last_seen_at) "
+                         "VALUES (?, ?, 'Software Engineer', ?, ?, ?)", (company, key, posted_on, self.T2, self.T2))
+        boards = {
+            "ok": self.board(conn, company, "a", "ok"),
+            "unchanged": self.board(conn, company, "b", "unchanged"),
+            "empty": self.board(conn, company, "c", "empty"),
+            "error": self.board(conn, company, "d", "error",
+                                reads=((self.T1, "ok"), (self.T2, "unchanged"), (self.T3, "error"))),
+            "only_errors": self.board(conn, company, "e", "error", reads=((self.T2, "error"), (self.T3, "error"))),
+            "never": self.board(conn, company, "f"),
+        }
+        self.assertEqual(migrate(conn), latest_version())
+        self.assertIn((9, "list_time"), [(r[0], r[1]) for r in conn.execute("SELECT version, name FROM schema_migration")])
+        rows = {r["source_key"]: r for r in conn.execute("SELECT * FROM posting")}
+        self.assertEqual(rows["url:dated"]["list_at"], "2026-10-01T05:00:00Z")
+        self.assertEqual(rows["url:undated"]["list_at"], self.T2)
+        # A posted date later than the first sighting is capped there: a row never sorts after it was first seen.
+        self.assertEqual(rows["url:late"]["list_at"], self.T2)
+        for row in rows.values():
+            self.assertEqual((row["posted_at"], row["seen_gap_s"], row["repost_of"]), (None, None, None))
+        good = {name: conn.execute("SELECT last_good_read_at FROM board WHERE board_id = ?", (bid,)).fetchone()[0]
+                for name, bid in boards.items()}
+        self.assertEqual(good, {"ok": self.T3, "unchanged": self.T3, "empty": self.T3, "error": self.T2,
+                                "only_errors": None, "never": None})
+        index = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'posting_list_at'").fetchone()
+        self.assertIsNotNone(index)
+        self.assertIn("WHERE closed_at IS NULL", index[0])
+        # The new time columns take only canonical UTC, and a repost names a real posting.
+        for column in ("posted_at", "list_at"):
+            with self.subTest(column=column), self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(f"UPDATE posting SET {column} = '2026-11-01T10:00:00+00:00'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("UPDATE board SET last_good_read_at = '2026-11-01'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("UPDATE posting SET repost_of = 999")
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("UPDATE posting SET seen_gap_s = -1")

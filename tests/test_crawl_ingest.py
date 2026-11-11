@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.crawl import bodies, ingest
+from outreach.crawl.ats.ashby import AshbyAdapter
 from outreach.crawl.ats.greenhouse import GreenhouseAdapter
 from outreach.crawl.ats.lever import LeverAdapter
 from outreach.crawl.base import JobRef, ReadResult, Validators, ids_fingerprint
@@ -16,6 +17,7 @@ from outreach.crawl.decisions import decide_postings
 from outreach.crawl.ingest import ReadOutcome, read_board
 from outreach.crawl.polite import HostTripped
 from outreach.net import Response
+from outreach.ranking.common import canonical_ids
 from outreach.rules import ruleset_version
 from outreach.store import body_sha256, start_job
 from tests.fakes import FakeClient, json_response, status_response, text_response, with_greenhouse_details
@@ -1015,6 +1017,110 @@ class LowYieldReadTests(IngestTestCase):
         self.read(status_response(500), at(1))
         self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
 
+
+class ListTimeReadTests(IngestTestCase):
+    """#193: each new posting keeps the time its board says it went up, how long the board had gone unread, and the
+    closed posting it reposts."""
+
+    def gh_job(self, native_id, title, published=None):
+        return {"id": native_id, "title": title, "absolute_url": f"https://job-boards.greenhouse.io/acme/jobs/{native_id}",
+                "location": {"name": "Boston, MA"}, "company_name": "Acme Robotics", "first_published": published}
+
+    def with_job(self, item):
+        return board_json(lambda jobs: jobs.append(item))
+
+    def test_seen_gap_is_time_since_last_good_read(self):
+        self.read(ok())
+        self.assertEqual(self.board()["last_good_read_at"], T0)
+        self.read(status_response(304), at(0.5))  # unchanged is a good read
+        self.assertEqual(self.board()["last_good_read_at"], at(0.5))
+        self.read(ok(self.with_job(self.gh_job(4099000001, "Platform Engineer"))), at(1))
+        new = self.posting("4099000001")
+        self.assertEqual((new["seen_gap_s"], new["list_at"], new["posted_at"]), (43200, at(1), None))
+        self.assertEqual(self.board()["last_good_read_at"], at(1))
+        # An empty read is a good read too.
+        self.read(ok(EMPTY), at(2))
+        self.assertEqual(self.board()["last_good_read_at"], at(2))
+
+    def test_error_read_does_not_move_last_good_read(self):
+        self.read(ok())
+        self.read(status_response(500), at(0.5))
+        board = self.board()
+        self.assertEqual((board["last_read"], board["last_read_at"], board["last_good_read_at"]),
+                         ("error", at(0.5), T0))
+        self.read(ok(self.with_job(self.gh_job(4099000001, "Platform Engineer"))), at(1))
+        self.assertEqual(self.posting("4099000001")["seen_gap_s"], 86400)
+
+    def test_first_read_rows_sort_by_their_posting_time(self):
+        self.read(ok(self.with_job(self.gh_job(4099000001, "Platform Engineer", "2026-03-02T09:00:00-05:00"))))
+        march = self.posting("4099000001")
+        self.assertEqual((march["posted_at"], march["list_at"], march["seen_gap_s"]),
+                         ("2026-03-02T14:00:00Z", "2026-03-02T14:00:00Z", None))
+        # A first-read row with no board time has no list time: it goes to Date unknown, never the top.
+        sales = self.posting(SALES)
+        self.assertEqual((sales["posted_at"], sales["list_at"], sales["seen_gap_s"]), (None, None, None))
+
+    def test_first_read_rows_never_new(self):
+        # A closed posting of the same title exists, but a first read looks nothing up.
+        self.conn.execute("INSERT INTO posting(company_id, source_key, title, first_seen_at, last_seen_at, closed_at, "
+                          "close_reason) VALUES (?, 'url:old', 'Account Executive 7', ?, ?, ?, 'hand')",
+                          (self.company, at(-10), at(-10), at(-5)))
+        self.read(ok(many_jobs(300)))
+        rows = self.conn.execute("SELECT seen_gap_s, list_at, repost_of FROM posting WHERE board_id = ?",
+                                 (self.board_id,)).fetchall()
+        self.assertEqual(len(rows), 300)
+        self.assertEqual({tuple(r) for r in rows}, {(None, None, None)})
+
+    def test_repost_links_closed_posting(self):
+        self.read(ok())
+        self.read(ok(board_json(lambda jobs: jobs.pop(0))), at(1))  # the new grad posting is gone
+        swe = self.posting(SWE)
+        self.assertEqual(swe["close_reason"], "gone_from_board")
+        self.read(ok(self.with_job(self.gh_job(4099000001, "Software Engineer, New Grad",
+                                               "2026-10-23T09:00:00-04:00"))), at(2))
+        again = self.posting("4099000001")
+        self.assertEqual(again["repost_of"], swe["posting_id"])
+        self.assertEqual((again["posted_at"], again["list_at"]), ("2026-10-23T13:00:00Z", "2026-10-23T13:00:00Z"))
+        self.assertIsNone(self.posting(DATA)["repost_of"])
+
+    def test_a_repost_in_the_same_read_is_still_a_repost(self):
+        # One read: the new grad posting disappears and a new id with its title appears. The new row is written
+        # before the old one closes (phase 3, then 5a), and it is still linked.
+        self.read(ok())
+        swe = self.pid(SWE)
+
+        def swap(jobs):
+            old = jobs.pop(0)
+            jobs.append(self.gh_job(4099000001, old["title"], "2026-10-23T09:00:00-04:00"))
+
+        self.read(ok(board_json(swap)), at(1))
+        self.assertEqual(self.posting(SWE)["close_reason"], "gone_from_board")
+        self.assertEqual(self.posting("4099000001")["repost_of"], swe)
+        self.assertIsNone(self.posting(DATA)["repost_of"])
+
+    def test_the_company_family_is_built_once_per_write(self):
+        self.read(ok())
+        jobs = [self.gh_job(4099000000 + n, f"Platform Engineer {n}") for n in range(5)]
+        with mock.patch("outreach.crawl.row_clock.canonical_ids", wraps=canonical_ids) as canon:
+            self.read(ok(board_json(lambda listed: listed.extend(jobs))), at(1))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM posting WHERE seen_gap_s = 86400").fetchone()[0], 5)
+        self.assertEqual(canon.call_count, 1)
+
+    def test_ashby_republish_does_not_move_known_job(self):
+        ashby = seed_board(self.conn, self.company, "ashby", "acme")
+        url = "https://api.ashbyhq.com/posting-api/job-board/acme?includeCompensation=true"
+        listing = json.loads((FIXTURES / "ashby_jobs.json").read_bytes())
+        first_id = listing["jobs"][0]["id"]
+        self.read(None, board_id=ashby,
+                  adapter=AshbyAdapter(FakeClient({url: json_response(listing, etag='"1"')})))
+        before = self.posting(first_id, "ashby:acme")
+        self.assertEqual((before["posted_at"], before["list_at"]), ("2026-09-15T10:21:33Z", "2026-09-15T10:21:33Z"))
+        listing["jobs"][0]["publishedAt"] = "2026-10-22T20:00:00.000+00:00"  # Ashby resets it on a republish
+        self.read(None, at(1), board_id=ashby,
+                  adapter=AshbyAdapter(FakeClient({url: json_response(listing, etag='"2"')})))
+        after = self.posting(first_id, "ashby:acme")
+        self.assertEqual((after["posted_at"], after["list_at"], after["seen_gap_s"]),
+                         (before["posted_at"], before["list_at"], None))
 
 if __name__ == "__main__":
     unittest.main()

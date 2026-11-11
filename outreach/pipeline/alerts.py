@@ -3,13 +3,14 @@
 A posting alerts when it is in "your level" with `level_state = 'fit'` on its current decision (read from the
 decision, not from the tag: an `uncertain` posting at a small company is in the list, tagged "level not stated", but
 never alerts). A row from before migration 0007 that the rebuild has not reached has no state: the v1 rule stands in
-for it (`fit` when `level_ok = 1`). Its date (posted, or seen when it has no posted date) is today in New York, it is
-not passed, and it has no `alert:posting:<id>` event yet. Uncertain and reject rows never alert.
+for it (`fit` when `level_ok = 1`). Its list time (`posting.list_at`, #193) is today in New York, it is not a repost,
+it did not come in on its board's first read, it is not passed, and it has no `alert:posting:<id>` event yet.
+Uncertain and reject rows, Date unknown rows, reposts and a newly added board's jobs never alert.
 
 Quiet hours are 22:00 to 08:00 New York: nothing is sent or recorded then, so what came in waits for the first tick
-after 08:00 (and only alerts if its date is still today). At most one notice goes out per 15 minutes: the time of the
-last one is `pipeline_meta` `last_alert_at`. One notice names up to three postings and says how many more there are.
-Each announced posting gets one `alerted` event, so it is never announced twice.
+after 08:00 (and only alerts if its list time is still today). At most one notice goes out per 15 minutes: the time
+of the last one is `pipeline_meta` `last_alert_at`. One notice names up to three postings and says how many more there
+are. Each announced posting gets one `alerted` event, so it is never announced twice.
 
 The clock comes in as `now`; the notifier is whatever the caller passes (tests pass a list's append).
 """
@@ -54,14 +55,18 @@ def _too_soon(conn: sqlite3.Connection, moment: datetime) -> bool:
 
 
 def _todays(conn: sqlite3.Connection, now: str, today: str) -> list[JobRow]:
-    """Today's rows of "your level", newest first, from one query. A row dated after today (an ATS date in UTC can be
-    tomorrow in New York) is skipped, not a stop: it heads the list and must not hide today's rows. The list is
-    ordered by date, so the walk stops at the first row dated before today."""
+    """Today's rows of "your level" that are neither a repost nor a first read, newest first, from one query. The
+    day is the New York date of the row's list time. A row on a later day (a clock ahead) is skipped, not a stop: it
+    heads the list and must not hide today's rows. The list is ordered by list time with the Date unknown group last,
+    so the walk stops at the first row before today or with no list time."""
     out: list[JobRow] = []
     for row in query(conn, now, JobFilters(view="your_level", window_days=7), None, _LIMIT).rows:
-        if row.date < today:
+        if row.list_at is None:
             break
-        if row.date == today:
+        day = _moment(row.list_at).astimezone(_NY).date().isoformat()
+        if day < today:
+            break
+        if day == today and not row.first_read and row.reposted_from is None:
             out.append(row)
     return out
 

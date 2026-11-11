@@ -1,5 +1,6 @@
 """The draft lab commands (#211). Fake runner, scratch store, made-up people."""
 
+import contextlib
 import io
 import json
 import os
@@ -8,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import live_checkout
 from outreach.draft_lab import __main__ as cli
 from outreach.draft_lab import judge
 from tests.mcptest import fingerprint
@@ -60,6 +62,7 @@ class JudgeCliTest(unittest.TestCase):
         self.assertEqual(runner.calls, [])
         self.assertIn("old note", out.getvalue())
         self.assertIn("new note", out.getvalue())
+        self.assertEqual(list(Path(self.tmp.name).glob("*.md")), [])
 
     def test_judge_outside_the_live_checkout_is_refused(self):
         runner = FakeRunner("{}")
@@ -92,6 +95,44 @@ class JudgeCliTest(unittest.TestCase):
                             runner=FakeRunner(json.dumps({"items": items})))
         self.assertEqual(code, 0)
         self.assertIn("first picks a 0, b 3", out.getvalue())
+
+    def test_incomplete_reply_exits_2_with_counts_and_writes_the_report(self):
+        pairs, _ = judge.pair_sets(judge.load_set(self.a), judge.load_set(self.b))
+        _, key = judge.body_prompt(pairs, seed=4)
+        full = json.loads(winning_reply(pairs, key))
+        full["items"].pop()
+        out, report = io.StringIO(), Path(self.tmp.name) / "r.md"
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b), "--seed", "4", "--out", str(report)],
+                            stdout=out, runner=FakeRunner(json.dumps(full)))
+        self.assertEqual(code, 2)
+        self.assertIn("INCOMPLETE", out.getvalue())
+        self.assertIn("1 missing, 0 malformed", out.getvalue())
+        self.assertTrue(report.exists())
+
+    def test_inbox_summary_shows_missing_items(self):
+        out = io.StringIO()
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b), "--mode", "inbox", "--seed", "2",
+                             "--out", str(Path(self.tmp.name) / "r.md")], stdout=out,
+                            runner=FakeRunner(json.dumps({"items": []})))
+        self.assertEqual(code, 0)
+        self.assertIn("3 missing, 0 malformed", out.getvalue())
+
+    def test_out_inside_the_repo_but_outside_context_is_refused(self):
+        runner, out = FakeRunner("{}"), io.StringIO()
+        inside = Path(live_checkout.REPO_ROOT) / "report.md"
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["judge", "--a", str(self.a), "--b", str(self.b), "--out", str(inside)],
+                            stdout=out, runner=runner)
+        self.assertEqual((code, runner.calls), (1, []))
+        self.assertIn("inside the repo", out.getvalue())
+        self.assertFalse(inside.exists())
+
+    def test_out_under_context_or_outside_the_repo_is_allowed(self):
+        self.assertIsNone(cli._out_refused(str(Path(live_checkout.REPO_ROOT) / ".context" / "draft-lab" / "r.md")))
+        self.assertIsNone(cli._out_refused(str(Path(self.tmp.name) / "r.md")))
+        self.assertIsNone(cli._out_refused(None))
 
     def test_unparseable_reply_is_a_plain_failure(self):
         out = io.StringIO()
@@ -147,6 +188,41 @@ class ExportCliTest(unittest.TestCase):
             self.assertEqual(r["recipient"], "Staff Engineer at Acme")
             self.assertIn(r["body"], ("Body 0.0", "Body 1.0", "Body 2.0"))  # approved first emails only
         self.assertEqual(len(judge.load_set(out_file)), 2)
+
+    def test_export_connection_is_query_only_and_closed(self):
+        seen = []
+
+        class Spy:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, *a):
+                seen.append(sql)
+                return self.conn.execute(sql, *a)
+
+            def close(self):
+                seen.append("close")
+
+        out_file = Path(self.tmp.name) / "set.json"
+        with mock.patch("live_checkout.is_live", return_value=True), \
+                mock.patch.object(cli, "connect", lambda: Spy(self.conn)):
+            cli.main(["export", "--sample", "1", "--out", str(out_file)], stdout=io.StringIO())
+        self.assertIn("PRAGMA query_only = ON", seen[0])
+        self.assertEqual(seen[-1], "close")
+        self.conn.execute("PRAGMA query_only = ON")
+        with self.assertRaises(Exception):
+            self.conn.execute("DELETE FROM message")
+        self.conn.execute("PRAGMA query_only = OFF")
+
+    def test_export_out_inside_the_repo_is_refused_and_sample_must_be_positive(self):
+        inside = Path(live_checkout.REPO_ROOT) / "set.json"
+        out = io.StringIO()
+        with mock.patch("live_checkout.is_live", return_value=True):
+            code = cli.main(["export", "--sample", "2", "--out", str(inside)], stdout=out)
+            self.assertEqual(code, 1)
+            self.assertFalse(inside.exists())
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                cli.main(["export", "--sample", "0", "--out", str(Path(self.tmp.name) / "x.json")], stdout=out)
 
     def test_export_state_and_seed(self):
         a, b = (Path(self.tmp.name) / n for n in ("a.json", "b.json"))

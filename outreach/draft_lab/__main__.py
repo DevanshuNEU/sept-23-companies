@@ -7,7 +7,8 @@
 first emails into a set file; it only reads the store. Both send names, titles and drafts to OpenAI or read the live
 store, so a real run only starts in the live checkout. `judge --dry-run` prints the prompt and calls nothing.
 
-Exit 0 on a scored run; 1 when the judge failed or its reply could not be read.
+Exit 0 on a scored run; 1 when the judge failed, its reply could not be read, or --out points into the repo outside
+.context/ (set files and reports hold real names); 2 when a body-mode reply was INCOMPLETE (items missing or malformed).
 """
 import argparse
 import json
@@ -26,6 +27,13 @@ __all__ = ["main"]
 DEFAULT_SEED = 1
 
 
+def _positive(text: str) -> int:
+    n = int(text)
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return n
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m outreach.draft_lab",
                                      description="Blind GPT judge for two sets of cold-email drafts.")
@@ -38,7 +46,7 @@ def _parser() -> argparse.ArgumentParser:
     j.add_argument("--out", help="report path (default .context/draft-lab/<UTC timestamp>.md)")
     j.add_argument("--dry-run", action="store_true", help="print the prompt; call nothing")
     e = sub.add_parser("export", help="sample stored first emails into a set file (live checkout only)")
-    e.add_argument("--sample", required=True, type=int, help="how many emails")
+    e.add_argument("--sample", required=True, type=_positive, help="how many emails")
     e.add_argument("--state", choices=("approved", "drafted", "sent"), default="approved")
     e.add_argument("--seed", type=int, default=DEFAULT_SEED)
     e.add_argument("--out", required=True, help="set file to write (JSON)")
@@ -57,8 +65,11 @@ def _summary(result, mode: str) -> str:
                 f"human {result.avg_b['human']:.1f} vs {result.avg_a['human']:.1f}, "
                 f"reply {result.avg_b['reply']:.1f} vs {result.avg_a['reply']:.1f}: {judge.verdict(result)}")
     r = result
-    return (f"first picks a {r.first_a}, b {r.first_b}, decoy {r.first_decoy}; "
+    line = (f"first picks a {r.first_a}, b {r.first_b}, decoy {r.first_decoy}; "
             f"opened a {r.opened_a}, b {r.opened_b}, decoy {r.opened_decoy} ({r.items} items)")
+    if r.missing or r.malformed:
+        line += f", {len(r.missing)} missing, {len(r.malformed)} malformed"
+    return line
 
 
 def _default_report_path() -> Path:
@@ -66,7 +77,21 @@ def _default_report_path() -> Path:
     return Path(live_checkout.REPO_ROOT) / ".context" / "draft-lab" / f"{stamp}.md"
 
 
+def _out_refused(out: str | None) -> str | None:
+    """A plain message when `out` is inside the repo but not under .context/ (the repo is public)."""
+    if not out:
+        return None
+    root = Path(live_checkout.REPO_ROOT).resolve()
+    target = Path(out).resolve()
+    if target.is_relative_to(root) and not target.is_relative_to(root / ".context"):
+        return f"refusing --out {out}: it is inside the repo, which is public. Use a path under .context/ or outside the repo."
+    return None
+
+
 def _judge(args, stdout, runner) -> int:
+    if (msg := _out_refused(args.out)) and not args.dry_run:
+        print(msg, file=stdout)
+        return 1
     if not args.dry_run:
         _require_live("the draft judge")
     pairs, only = judge.pair_sets(judge.load_set(args.a), judge.load_set(args.b))
@@ -91,19 +116,30 @@ def _judge(args, stdout, runner) -> int:
     out = Path(args.out) if args.out else _default_report_path()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(judge.report(result, seed=args.seed, mode=args.mode), encoding="utf-8")
-    print(_summary(result, args.mode), file=stdout)
+    line = _summary(result, args.mode)
+    incomplete = args.mode == "body" and judge.verdict(result) == "INCOMPLETE"
+    if incomplete:
+        line += f" ({len(result.missing)} missing, {len(result.malformed)} malformed)"
+    print(line, file=stdout)
     print(f"report: {out}", file=sys.stderr)
-    return 0
+    return 2 if incomplete else 0
 
 
 def _export(args, stdout) -> int:
+    if msg := _out_refused(args.out):
+        print(msg, file=stdout)
+        return 1
     _require_live("the draft export")
     conn = connect()
-    rows = conn.execute(
-        "SELECT m.message_id, m.subject, m.body, p.title, c.name FROM message m "
-        "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
-        "JOIN company c ON c.company_id = p.company_id WHERE m.seq = 0 AND m.state = ? ORDER BY m.message_id",
-        (args.state,)).fetchall()
+    try:
+        conn.execute("PRAGMA query_only = ON")  # the export only reads
+        rows = conn.execute(
+            "SELECT m.message_id, m.subject, m.body, p.title, c.name FROM message m "
+            "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
+            "JOIN company c ON c.company_id = p.company_id WHERE m.seq = 0 AND m.state = ? ORDER BY m.message_id",
+            (args.state,)).fetchall()
+    finally:
+        conn.close()
     picked = random.Random(args.seed).sample(rows, min(args.sample, len(rows)))
     out = [{"id": str(r["message_id"]), "recipient": f"{r['title'] or 'Engineer'} at {r['name']}",
             "subject": r["subject"], "body": r["body"]} for r in picked]

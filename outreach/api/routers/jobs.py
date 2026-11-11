@@ -18,8 +18,8 @@ from outreach.api.clock import get_clock
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import run_write
-from outreach.api.models.jobs import (AppliedResult, CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView, JobView, JobWindow,
-                                      JobWriteBody, PassJobResult)
+from outreach.api.models.jobs import (AppliedResult, CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView,
+                                      JobView, JobWindow, JobWriteBody, PassJobResult)
 from outreach.api.queries import jobs_list as queries
 from outreach.api.routers import row_id
 from outreach.api.services import check_now as check_service

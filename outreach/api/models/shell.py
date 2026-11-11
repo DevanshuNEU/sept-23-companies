@@ -19,6 +19,7 @@ class ShellSummary(Wire):
     open_review_items: int
     no_go_count: int
     done_count: int
+    applied_count: int  # postings he applied to (#218), the Applied list's rows
     sending: SenderSummary
     replies_this_month: int
     jobs: list[JobRunSummary]

@@ -102,8 +102,8 @@ def _summary(rows: list[OutcomeRow], shared: list[Shared], pairs: list[Duplicate
     if mine:
         head = (f"{_plural(len(mine), 'company', 'companies')} interviewed you, out of {len(rows):,} you reached.")
     else:
-        head = (f"No interviews logged yet. When you log one on Today, or a reply turns into an interview, the "
-                f"company shows up here. You reached {_plural(len(rows), 'company', 'companies')}.")
+        head = (f"No interviews logged yet. When a reply turns into an interview, the company shows up here. "
+                f"You reached {_plural(len(rows), 'company', 'companies')}.")
     if ranked:
         head += f" {_plural(ranked, 'company is', 'companies are')} ranked."
     lines.append(head)

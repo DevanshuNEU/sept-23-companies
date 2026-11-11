@@ -101,7 +101,8 @@ class CliTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"OUTREACH_DB": store_path(empty)}):
             code, out, _err = self.run_cli("summary")
         self.assertEqual(0, code)
-        self.assertIn("No interviews logged yet.", out)
+        self.assertIn("No interviews logged yet. When a reply turns into an interview, the company shows up here.", out)
+        self.assertNotIn("Today", out)  # first to see (#9, 2026-11-10): the Today page is gone
 
     def test_export_csv_default_path_uses_the_new_york_date(self):
         with mock.patch.object(cli, "utcnow", lambda: "2026-10-26T02:00:00Z"):

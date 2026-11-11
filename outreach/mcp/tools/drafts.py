@@ -36,7 +36,7 @@ from outreach.drafts.followups import (MAX_FOLLOWUPS, company_map, due_followups
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import PREPARED_BY, Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.people import said_no_ids
-from outreach.mcp.tools.reads import (HOOK_CHARS, MAX_ID, PROJECT_CHARS, Family, PersonInput, company_row, person,
+from outreach.mcp.tools.reads import (HOOK_CHARS, MAX_ID, PROJECT_CHARS, UNTRUSTED, Family, PersonInput, company_row, person,
                                       why_not_email)
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import DraftLocked, LinkedinDraft, get_draft, save_linkedin_draft
@@ -167,7 +167,7 @@ def posting_of(conn: sqlite3.Connection, role: dict | None) -> dict | None:
     if role is None:
         return None
     row = conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (role["posting_id"],)).fetchone()
-    return {"title": role["title"], "url": role["url"], "text": row["body"][:POSTING_CHARS] if row else ""}
+    return {"title": role["title"], "url": role["url"], "text": row["body"][:POSTING_CHARS] if row else "", **UNTRUSTED}
 
 
 def ground_text(ctx: Ctx, evidence: str, stories: str, p: sqlite3.Row) -> str:
@@ -194,7 +194,7 @@ def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
         "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
         "stories": stories,
-        "company_facts": facts,
+        "company_facts": [{**f, **UNTRUSTED} for f in facts],
         "research_needed": not facts,
         "posting": posting_of(ctx.conn, one["role_to_name"]),
         "signature": read_signature(),

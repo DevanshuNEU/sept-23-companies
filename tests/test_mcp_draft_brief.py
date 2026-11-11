@@ -143,6 +143,14 @@ class BriefResearchCase(DraftBriefCase):
         self.assertTrue(got["text"].startswith("We use Go."))
         self.assertEqual(len(got["text"]), 4000)
 
+    def test_posting_and_company_facts_are_marked_untrusted(self):
+        self.fact()
+        pid = seed.posting(self.db, self.acme, "Backend Engineer")
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, "We use Go."))
+        got = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertIs(got["posting"]["untrusted"], True)
+        self.assertTrue(got["company_facts"] and all(f["untrusted"] is True for f in got["company_facts"]))
+
     def test_brief_has_stories_and_its_id_changes_with_them(self):
         before = self.ok("draft_brief", {"person_id": self.pat})
         self.assertEqual(before["stories"], "")

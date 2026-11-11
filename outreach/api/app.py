@@ -18,6 +18,7 @@ from outreach.api.models.ping import Ping
 from outreach.api.queries import sending
 from outreach.api.static import StaticMiddleware
 from outreach.api.settings import Settings, settings_from_env
+from outreach.crawl.kick import kick_crawl
 from outreach.store.db import guard
 from outreach.store.timefmt import utcnow
 
@@ -69,6 +70,7 @@ def create_app(settings: Settings | None = None, *, clock=None, mx_resolvers=Non
                                                                           app.state.config.cache_seconds)
     app.state.view_cache = views.ViewCache(settings.db_path)  # the heavy views' answers (`outreach.api.views`)
     app.state.sweeper_tasks = []
+    app.state.kick_crawl = kick_crawl  # Check now starts the crawl job through this; tests replace it
 
     api = APIRouter(prefix="/api")
 

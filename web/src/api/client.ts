@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult, CheckNowResult, CheckStatus } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -95,6 +95,10 @@ export interface OutreachClient {
   passJob(postingId: Id, o: WriteOptions): Promise<PassJobResult>;
   /** Go ahead puts the posting's company on today's list as his own pick. 'not_allowed' says why not (a no-go company, one already on the list, someone contacted and waiting). */
   goAhead(postingId: Id, o: WriteOptions): Promise<GoAheadResult>;
+  /** Check now (#194): records the request and starts the crawl job; a check already waiting or running is only reported. */
+  checkNow(o: WriteOptions): Promise<CheckNowResult>;
+  /** How the check is going (never cached): the page polls it every second while it is queued or running. */
+  checkStatus(): Promise<CheckStatus>;
   saveNote(noteId: Id, edit: { text: string; reasonLine: string; revision: Revision }, o: WriteOptions): Promise<NoteDraft>;
   confirmReason(noteId: Id, revision: Revision, o: WriteOptions): Promise<NoteDraft>; // reasonState becomes 'confirmed'; 'not_allowed' with an empty line
   markWinsSeen(winIds: Id[], o: WriteOptions): Promise<void>; // 'not_found' for an unknown id

@@ -81,3 +81,21 @@ test('Jobs: the list, the tabs and filters, then pass and go ahead by keyboard',
   await expect(page.getByText('Widen the window or clear the search.')).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
+
+// Check now (#194): C asks for a check; the line under the header says how it is going, every second, until it ends,
+// and the jobs it found land at the top (he is at the top, on no row).
+test('Jobs: Check now by keyboard shows the progress line, then the done line, and the new jobs at the top', async ({ page, consoleErrors }) => {
+  await page.goto('/browse?scenario=queue');
+  const head = page.locator('header').filter({ has: page.getByRole('heading', { level: 1, name: 'Jobs' }) }).first();
+  const jobs = page.getByRole('list', { name: 'Jobs' }).locator('> li[data-job]');
+  await expect(jobs).toHaveCount(20);
+  await expect(jobs.first()).toHaveAttribute('data-job', '9000');
+  await expect(head.getByRole('button', { name: /^Check now/ })).toHaveAttribute('aria-keyshortcuts', 'c');
+
+  await page.locator('body').press('c');
+  await expect(head.getByText('Checked 1,240 of 4,013 boards, 3 new')).toBeVisible();
+  await expect(head.getByText('Checked 4,013 boards in 3 min 10 s. 6 new.')).toBeVisible({ timeout: 10_000 });
+  await expect(jobs.first()).toHaveAttribute('data-job', '9100');
+  await expect(page.getByRole('button', { name: /^\d+ new$/ })).toHaveCount(0);
+  expect(consoleErrors).toEqual([]);
+});

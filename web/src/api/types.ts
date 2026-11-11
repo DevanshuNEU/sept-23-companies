@@ -424,6 +424,21 @@ export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
 export interface GoAheadResult {
   postingId: Id; companyId: Id; entryId: Id | null; state: 'added' | 'requested'; rank: number | null; listDate: IsoDate; text: string;
 }
+/**
+ * Check now (#194): `started`, the request is recorded and the crawl job asked to run; `running`, a check already waits
+ * or runs and nothing new was recorded; `not_live`, the request is recorded but nothing was started (not the live
+ * checkout, or the job did not start), so it waits for the next crawl.
+ */
+export interface CheckNowResult { requestedAt: IsoTime; state: 'started' | 'running' | 'not_live' }
+/**
+ * How the check is going: `queued` (asked for, a crawl holds the job), `running` with the crawler's counts, `done` with
+ * the last check's counts, or `idle` (never ran). `pausedHosts` are the ATS names the check stopped reading because
+ * they said to slow down (`greenhouse`).
+ */
+export interface CheckStatus {
+  state: 'idle' | 'queued' | 'running' | 'done'; checked: number; total: number; new: number;
+  startedAt: IsoTime | null; finishedAt: IsoTime | null; pausedHosts: string[];
+}
 export interface InFlightCompany { company: CompanyRef; status: 'in_flight' | 'replied'; text: string; reason: string; freeOn: IsoDate | null }
 export interface PlanRow {
   entryId: Id; position: number; channel: 'linkedin_request' | 'email'; lane: ListGroup;

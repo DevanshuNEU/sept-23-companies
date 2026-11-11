@@ -19,6 +19,7 @@ export const queryKeys = {
   jobsAll: ['jobs'],
   jobs: (params: object) => ['jobs', params],
   jobsMarks: ['jobs-marks'],
+  checkStatus: ['jobs-check'],
   outcomePrompt: ['outcome-prompt'],
   wins: ['wins'],
   progress: ['progress'],

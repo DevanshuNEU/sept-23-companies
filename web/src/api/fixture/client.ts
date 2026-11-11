@@ -3,11 +3,11 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoTime, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, GoAheadResult, CheckNowResult, CheckStatus,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
-import { buildJobs, jobsView } from './jobs-data';
+import { buildJobs, CHECK_BOARDS, CHECK_STEP_MS, CHECK_TOOK_S, CHECK_WALK, foundJobs, jobsView, sortJobs } from './jobs-data';
 import { benchOrder, browseView, buildExtras, rowToBench, toBrowse } from './browse-data';
 import { askedToday, benchRoom, benchRoomText, benchToRow, emailCountOf, emailTextOf, laneTextOf, pickOrder } from './queue-data';
 
@@ -117,6 +117,9 @@ export class FixtureClient implements OutreachClient {
   private jobList: ReturnType<typeof buildJobs> | undefined;
   private readonly passedJobs = new Set<Id>();
   private readonly wentAhead = new Map<Id, GoAheadResult>();
+  /** Check now: the step of `CHECK_WALK` the check is at, how many checks were asked for (only the first finds postings), and the timer that walks it. */
+  private check: { step: number; nth: number; timer: ReturnType<typeof setInterval> | null } | null = null;
+  private found = 0;
   /** Prompt touches that got an outcome and left the prompt. A reply on a quiet touch still finds its person here. */
   private readonly leftPrompt = new Map<Id, PromptTouch>();
   /** Touch revisions after an outcome. A touch with no entry is at its own revision, or 1. */
@@ -1158,6 +1161,12 @@ export class FixtureClient implements OutreachClient {
 
   private jobPool(): ReturnType<typeof buildJobs> {
     this.jobList ??= buildJobs(this.db.plan.date, this.db.plan.asOf);
+    const finds = foundJobs(this.db.plan.asOf).slice(0, this.found).filter((r) => !this.jobList?.ages.has(r.postingId));
+    if (finds.length > 0) {
+      const ages = new Map(this.jobList.ages);
+      for (const r of finds) ages.set(r.postingId, 0);
+      this.jobList = { rows: sortJobs([...this.jobList.rows, ...finds]), higher: this.jobList.higher, ages };
+    }
     return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)), higher: this.jobList.higher, ages: this.jobList.ages };
   }
 
@@ -1191,6 +1200,45 @@ export class FixtureClient implements OutreachClient {
       };
       this.wentAhead.set(row.companyId, result);
       return result;
+    });
+  }
+
+  /** Check now, as the API: a check already waiting or running is only reported; otherwise a new one starts its walk, one step a second. */
+  checkNow(o: WriteOptions): Promise<CheckNowResult> {
+    return this.write(o, () => {
+      const requestedAt = this.db.plan.asOf;
+      if (this.check !== null && this.check.step < CHECK_WALK.length - 1) return { requestedAt, state: 'running' as const };
+      this.check = { step: 0, nth: (this.check?.nth ?? 0) + 1, timer: setInterval(() => this.advanceCheck(), CHECK_STEP_MS) };
+      return { requestedAt, state: 'started' as const };
+    });
+  }
+
+  /** The sample check's next step (its timer calls this each second; a test may call it itself). New postings join the list as they are found and move the pulse. */
+  advanceCheck(): void {
+    const c = this.check;
+    if (c === null || c.step >= CHECK_WALK.length - 1) return;
+    c.step += 1;
+    const at = CHECK_WALK[c.step] as (typeof CHECK_WALK)[number];
+    if (c.nth === 1 && at.found > this.found) {
+      this.found = at.found;
+      this.revision += 1;
+    }
+    if (c.step === CHECK_WALK.length - 1 && c.timer !== null) {
+      clearInterval(c.timer);
+      c.timer = null;
+    }
+  }
+
+  /** How the check is going: idle until a click, then the walk's current step (queued, running, done). Reading never moves it. */
+  checkStatus(): Promise<CheckStatus> {
+    return this.read((): CheckStatus => {
+      const c = this.check;
+      if (c === null) return { state: 'idle', checked: 0, total: 0, new: 0, startedAt: null, finishedAt: null, pausedHosts: [] };
+      const at = CHECK_WALK[c.step] as (typeof CHECK_WALK)[number];
+      if (at.state === 'queued') return { state: 'queued', checked: 0, total: 0, new: 0, startedAt: null, finishedAt: null, pausedHosts: [] };
+      const startedAt = this.db.plan.asOf;
+      const finishedAt = at.state === 'done' ? new Date(Date.parse(startedAt) + CHECK_TOOK_S * 1000).toISOString().replace('.000Z', 'Z') : null;
+      return { state: at.state, checked: at.checked, total: CHECK_BOARDS, new: c.nth === 1 ? at.found : 0, startedAt, finishedAt, pausedHosts: [] };
     });
   }
 

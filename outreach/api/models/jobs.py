@@ -10,6 +10,8 @@ from outreach.api.models.base import Wire, WireRequest
 JobView = Literal["your_level", "higher"]
 JobWindow = Literal["7", "30", "60", "90", "any"]
 GoAheadState = Literal["added", "requested"]
+CheckNowState = Literal["started", "running", "not_live"]
+CheckState = Literal["idle", "queued", "running", "done"]
 JobSize = Literal["any", "small", "big", "unknown"]
 
 
@@ -66,3 +68,19 @@ class GoAheadResult(Wire):
     entry_id: int | None  # the plan row's id (`GET /api/plan`), None until the plan is built
     list_date: str  # YYYY-MM-DD, the list it is on or for: the next weekday when asked on a weekend
     text: str
+
+
+class CheckNowResult(Wire):
+    requested_at: str  # when the request was recorded; the one already waiting or running when state is running
+    state: CheckNowState  # started: recorded and the crawl job asked to run; running: a check is already queued or
+    # running, nothing recorded; not_live: recorded, but this is not the live checkout, so nothing was started
+
+
+class CheckStatus(Wire):
+    state: CheckState
+    checked: int
+    total: int
+    new: int
+    started_at: str | None
+    finished_at: str | None
+    paused_hosts: list[str]  # hosts the check stopped reading because they said to slow down

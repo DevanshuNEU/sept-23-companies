@@ -35,13 +35,13 @@ const row = (stage: string) => {
 const bar = (stage: string) => row(stage).querySelector<HTMLElement>('[data-slot="lbar"] > i');
 
 describe('ProgressPage', () => {
-  it('shows today against the plan', async () => {
+  it("shows today's counts, with no plan column now that the daily plan is off", async () => {
     await open();
     const today = await screen.findByRole('table', { name: 'Today' });
-    const cells = within(today).getAllByRole('cell').map((c) => c.textContent);
-    expect(cells[0]).toBe('2 of 7 on the plan');
     // Requests, applications, accepted, replied: plain counts.
-    expect(cells.slice(1)).toEqual(['2', '2', '0', '0']);
+    expect(within(today).getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Requests sent', 'Applications sent', 'Accepted', 'Replied']);
+    expect(within(today).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2', '2', '0', '0']);
+    expect(today).not.toHaveTextContent(/plan|People done/);
   });
 
   it('the week ledger shows 9 of 31 (29%) for accepts and 2 of 31 (6%) for replies', async () => {
@@ -144,10 +144,10 @@ describe('ProgressPage', () => {
     expect(screen.queryByRole('table', { name: /^Funnel/ })).not.toBeInTheDocument();
   });
 
-  it('an empty plan says no plan today, never "of 0"', async () => {
+  it('a day with no plan says nothing about one, and never "of 0"', async () => {
     await open('empty');
     const today = await screen.findByRole('table', { name: 'Today' });
-    expect(within(today).getByText('No plan today')).toBeInTheDocument();
+    expect(within(today).queryByText('No plan today')).toBeNull();
     expect(today).not.toHaveTextContent('of 0');
   });
 

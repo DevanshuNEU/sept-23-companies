@@ -23,7 +23,7 @@ const link =
 /** Nothing counted in the period: no stage, no effort. */
 const nothingLogged = (p: ProgressPeriod) => p.stages.every((s) => s.count === 0) && p.effort.every((e) => e.count === 0);
 
-/** Today against the plan: people done of the plan, then what he logged. A plan of nothing says so, never "of 0". */
+/** What he logged today. The daily plan is off (#195), so there is no plan count to set it against. */
 function TodayLedger({ today }: { today: ProgressView['today'] }) {
   const grey = (n: number) => cn('h-10 px-3 py-2', n === 0 && 'text-muted-foreground');
   return (
@@ -31,7 +31,7 @@ function TodayLedger({ today }: { today: ProgressView['today'] }) {
       <table aria-label="Today" className="w-full text-[13px] leading-[18px] tabular-nums">
         <thead>
           <tr className="border-b text-xs text-muted-foreground">
-            {['People done', 'Requests sent', 'Applications sent', 'Accepted', 'Replied'].map((h) => (
+            {['Requests sent', 'Applications sent', 'Accepted', 'Replied'].map((h) => (
               <th key={h} scope="col" className="h-8 px-3 text-left font-medium whitespace-nowrap">
                 {h}
               </th>
@@ -40,15 +40,6 @@ function TodayLedger({ today }: { today: ProgressView['today'] }) {
         </thead>
         <tbody>
           <tr>
-            <td className={grey(today.done)}>
-              {today.planned > 0 ? (
-                <>
-                  <b className="font-semibold">{today.done}</b> <span className="text-muted-foreground">of {today.planned} on the plan</span>
-                </>
-              ) : (
-                <span className="text-muted-foreground">No plan today</span>
-              )}
-            </td>
             <td className={grey(today.requests)}>{today.requests}</td>
             <td className={grey(today.applications)}>{today.applications}</td>
             <td className={grey(today.accepted)}>{today.accepted}</td>
@@ -70,7 +61,7 @@ function PageSkeleton() {
 }
 
 /**
- * Progress (design 16.3): today against the plan, then the week or month as a ledger with the work done beside it.
+ * Progress (design 16.3): what he logged today, then the week or month as a ledger with the work done beside it.
  * Counts always sit beside their denominators; the API says whether a period has enough requests for a rate.
  */
 export default function ProgressPage() {

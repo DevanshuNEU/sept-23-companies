@@ -51,7 +51,7 @@ any of those things, and the store refuses them on this connection whatever is a
 
 Drafts follow .claude/skills/cold-email/SKILL.md and GitHub issue #9 (research first, his voice, at most 120
 words, exactly 2 links with the portfolio in his signature, no visa mention). Call draft_brief first for each
-person; save_draft needs its brief_id and refuses a draft without a current one. Use only facts from mail/me.md
+person, part 1 and part 2; save_draft needs its brief_id and refuses a draft without a current one. Use only facts from mail/me.md
 and what Devanshu or the store gives about the person or the company. save_draft and save_followup run the #9
 checks on every save: a block still saves, so fix it and save again. A LinkedIn note's reason line is only a proposal: Devanshu confirms it or writes his own.
 mark_no_go only raises a Needs-you item; Devanshu confirms it.

@@ -164,7 +164,7 @@ deleted.
   with a test that reproduces it. Tests never run a real refresh, a real send, or a crawl.
 - **Drafting harness (#135): code before and after the model.** The drafter never chooses what it reads. The
   `draft_brief` tool builds its whole input in code: the person, his DevVault voice files, me.md above its open
-  questions, and the limits. `save_draft` refuses a draft without a current `brief_id` (the hash of those files and the
+  questions, and the limits, in two parts with one `brief_id` (the whole is over the 60k a tool result may be). `save_draft` refuses a draft without a current `brief_id` (the hash of those files and the
   person), so a draft cannot be saved without a brief made from the current voice files (the id proves the pack was current, not that it was read). After the model, the voice checks in `outreach/drafting` and the
   #9 checks run on every save. The package makes no model calls. His voice rules live in DevVault and in
   `outreach/drafting`, never copied into the skill. A change that lets a draft skip the brief breaks this rule.

@@ -1,5 +1,6 @@
 """The draft_brief tool (#135): the voice files, me.md evidence, the person and the limits, built by code, with a brief
 id that save_draft later checks. It is read-only."""
+import json
 import os
 import shutil
 import tempfile
@@ -9,6 +10,7 @@ from unittest import mock
 
 from outreach.drafting.brief import brief_id, read_evidence, read_stories
 from outreach.drafting.voice import VOICE_FILES, load_voice_pack
+from outreach.mcp.server import MAX_RESULT_CHARS
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
 
@@ -31,14 +33,60 @@ class DraftBriefCase(McpCase):
 
     def test_brief_has_voice_files_evidence_limits_and_id(self):
         got = self.ok("draft_brief", {"person_id": self.pat})
-        self.assertEqual([f["path"] for f in got["voice"]["files"]], list(VOICE_FILES))
-        self.assertTrue(all(f["text"].strip() for f in got["voice"]["files"]))
+        voice = self.ok("draft_brief", {"person_id": self.pat, "part": 2})["voice"]
+        self.assertEqual([f["path"] for f in voice["files"]], list(VOICE_FILES))
+        self.assertTrue(all(f["text"].strip() for f in voice["files"]))
         self.assertIn("94% Hit@1", got["evidence"])
         self.assertNotIn("installs", got["evidence"])
         self.assertEqual(got["person"]["person"]["id"], self.pat)
         self.assertEqual(got["limits"]["words"], [0, 120])
         self.assertEqual(got["limits"]["max_links"], 2)
         self.assertIn("can_draft_email", got)
+
+    def test_brief_comes_in_two_parts_with_one_id(self):
+        one = self.ok("draft_brief", {"person_id": self.pat})
+        two = self.ok("draft_brief", {"person_id": self.pat, "part": 2})
+        self.assertEqual((one["part"], one["parts"], two["part"], two["parts"]), (1, 2, 2, 2))
+        self.assertEqual(one["brief_id"], two["brief_id"])
+        self.assertEqual(self.ok("draft_brief", {"person_id": self.pat, "part": 1}), one)
+        for key in ("person", "evidence", "posting", "company_facts", "avoid", "signature", "limits"):
+            self.assertIn(key, one)
+            self.assertNotIn(key, two)
+        for key in ("voice", "stories"):
+            self.assertIn(key, two)
+            self.assertNotIn(key, one)
+        self.assertIn("part 2", one["next"])
+
+    def test_part_must_be_1_or_2(self):
+        for part in (0, 3):
+            self.assertEqual(self.error("draft_brief", {"person_id": self.pat, "part": part})["code"], "bad_input")
+
+    def test_part_2_refuses_an_unknown_person(self):
+        self.assertEqual(self.error("draft_brief", {"person_id": 99999, "part": 2})["code"],
+                         self.error("person", {"person_id": 99999})["code"])
+
+    def test_each_part_fits_with_files_at_their_real_size(self):
+        """The live files are about 30k of voice, 9k of stories and 8k of me.md: one brief was 66k and the server
+        refused it for everyone. Each part must fit with room to grow."""
+        voice = Path(tempfile.mkdtemp(prefix="voice-big-"))
+        self.addCleanup(shutil.rmtree, voice, ignore_errors=True)
+        source = Path(os.environ["OUTREACH_VOICE_DIR"])
+        for rel in VOICE_FILES:
+            (voice / rel).parent.mkdir(parents=True, exist_ok=True)
+            (voice / rel).write_text((source / rel).read_text(encoding="utf-8") + "\nA plain line about voice." * 380,
+                                     encoding="utf-8")
+        self.me.write_text(ME.replace("## Needs", "- Another true line from me.md here.\n" * 230 + "\n## Needs"),
+                           encoding="utf-8")
+        stories = Path(tempfile.mkdtemp(prefix="stories-big-")) / "stories.md"
+        stories.write_text("The night the queue stalled and I stayed up.\n" * 200, encoding="utf-8")
+        self.db.execute("UPDATE person SET profile_text = ? WHERE person_id = ?", ("Builds things. " * 300, self.pat))
+        pid = seed.posting(self.db, self.acme, "Backend Engineer")
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, "We use Go. " * 600))
+        with mock.patch.dict(os.environ, {"OUTREACH_VOICE_DIR": str(voice), "OUTREACH_STORIES": str(stories)}):
+            parts = [self.ok("draft_brief", {"person_id": self.pat, "part": n}) for n in (1, 2)]
+        sizes = [len(json.dumps(p)) for p in parts]
+        self.assertGreater(sum(sizes), MAX_RESULT_CHARS * 5 // 6, sizes)  # real scale: about 66k in all
+        self.assertTrue(all(size < MAX_RESULT_CHARS * 3 // 4 for size in sizes), sizes)
 
     def test_brief_limits_words_are_0_to_120(self):
         rec = seed.person(self.db, self.acme, "Rae Recruiter", role_kind="recruiter", email="rae@acme.example")
@@ -152,11 +200,11 @@ class BriefResearchCase(DraftBriefCase):
         self.assertTrue(got["company_facts"] and all(f["untrusted"] is True for f in got["company_facts"]))
 
     def test_brief_has_stories_and_its_id_changes_with_them(self):
-        before = self.ok("draft_brief", {"person_id": self.pat})
+        before = self.ok("draft_brief", {"person_id": self.pat, "part": 2})
         self.assertEqual(before["stories"], "")
         path = self.stories_file("The night the queue stalled.")
         with mock.patch.dict(os.environ, {"OUTREACH_STORIES": str(path)}):
-            after = self.ok("draft_brief", {"person_id": self.pat})
+            after = self.ok("draft_brief", {"person_id": self.pat, "part": 2})
         self.assertEqual(after["stories"], "The night the queue stalled.")
         self.assertNotEqual(after["brief_id"], before["brief_id"])
 

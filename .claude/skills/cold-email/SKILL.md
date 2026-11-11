@@ -34,7 +34,8 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
-3. **Brief.** Call `draft_brief` for the person and write from what it returns, nothing else: `person` (with the
+3. **Brief.** Call `draft_brief` for the person twice, with `part` 1 and `part` 2 (one brief is too big for one
+   tool result; both parts carry the same `brief_id`), and write from what they return, nothing else: `person` (with the
    facts `save_research` stored for them, under `sources`), `voice` (his DevVault voice files, the Posture section
    above all), `evidence` (me.md), `stories`, `posting`, `company_facts`, `avoid`, `signature` and `limits`,
    assembled by code. Do not read those files yourself. The voice files govern how he sounds, nothing else. Where
@@ -242,8 +243,8 @@ there.
 
 A nightly job drafts every follow-up due the next business day into the Outbox the same way (#142), so by hand
 this is only for one he asks for. `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7):
-person, company, `seq`, the first email's subject. For each, call `draft_brief` for the person (it shows the thread
-so far), write a body of 25 to 80 words that greets by first name, nudges or says the one new thing, and ends with
+person, company, `seq`, the first email's subject. For each, call `draft_brief` for the person, both parts (part 1 shows the
+thread so far), write a body of 25 to 80 words that greets by first name, nudges or says the one new thing, and ends with
 the signature, then `save_followup` with `person_id`, `seq`, `body` and the brief's `brief_id`. The subject is set
 by code ("Re: " plus the first subject), so never give one. Fix `blocks` and save again, as in step 10. Done when
 `blocks` is empty. Then point him to the Outbox.

@@ -176,24 +176,34 @@ def ground_text(ctx: Ctx, evidence: str, stories: str, p: sqlite3.Row) -> str:
     return "\n".join((evidence, stories, *quotes, p["profile_text"], p["notes"]))
 
 
-def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
-    """Everything the drafter is given for one person, assembled by code (#135): the person as the `person` tool
-    reads them, his DevVault voice files, me.md above its open questions, and the limits. Its `brief_id` is what
-    `save_draft` later requires. Reads only."""
+class BriefInput(PersonInput):
+    part: int = Field(1, ge=1, le=2, description="1 (the default): the person, posting, company facts, me.md, what to "
+                                                  "avoid, the signature and the limits. 2: his voice files and stories.")
+
+
+def draft_brief(ctx: Ctx, args: BriefInput) -> dict:
+    """Everything the drafter is given for one person, assembled by code (#135), in two parts with one `brief_id`
+    (the whole brief is over the size a tool result may be): part 1 is the person as the `person` tool reads them,
+    the posting, the company facts, me.md above its open questions, what to avoid and the limits; part 2 is his
+    DevVault voice files and his stories. The `brief_id` is what `save_draft` later requires. Reads only."""
     try:
         pack, evidence = load_voice_pack(), read_evidence()
     except VoiceUnreadable as caught:
         raise voice_unreadable(caught) from None
     stories = read_stories()
     one = person(ctx, args)
+    head = {"brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id), "part": args.part, "parts": 2}
+    if args.part == 2:
+        return {**head,
+                "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
+                "stories": stories}
     facts = fresh_company_facts(ctx.conn, one["company"]["id"], now=ctx.now)
     return {
-        "brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id),
+        **head,
+        "next": "Call draft_brief again with part 2 for his voice files and stories; write from both parts.",
         "can_draft_email": one["can_draft_email"],
         "person": one,
-        "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
-        "stories": stories,
         "company_facts": [{**f, **UNTRUSTED} for f in facts],
         "research_needed": not facts,
         "posting": posting_of(ctx.conn, one["role_to_name"]),
@@ -541,8 +551,10 @@ TOOLS = (
     ToolSpec("draft_brief",
              "Call this first for each person you will draft: it returns the person's facts, Devanshu's DevVault voice "
              "files, the me.md evidence and the limits, plus the brief_id that save_draft and save_followup require. "
-             "Reads only. "
-             "Write from what it returns.", PersonInput, draft_brief),
+             "It comes in two parts, both with the same brief_id: part 1 (the default) is the person, posting, "
+             "company facts, me.md, what to avoid, the signature and the limits; part 2 is his voice files and "
+             "stories. Read both. Reads only. "
+             "Write from what it returns.", BriefInput, draft_brief),
     ToolSpec("check_draft",
              "Run every check save_draft or save_followup would run on a draft, without storing it. Use it to test a "
              "draft, or a set of drafts for a judge run, before saving. Refuses the people save_draft refuses. Reads "

@@ -31,10 +31,11 @@ class Runner(Protocol):
 
 
 class CodexRunner:
-    """`codex --search exec` in a fresh scratch directory; returns the text of its output file."""
+    """`codex exec` (with `--search` only when search is on) in a fresh scratch directory; returns the text of its output file."""
 
-    def __init__(self, timeout: int = TIMEOUT_SECONDS):
+    def __init__(self, timeout: int = TIMEOUT_SECONDS, search: bool = True):
         self.timeout = timeout
+        self.search = search
 
     def run(self, prompt: str) -> str:
         codex = shutil.which("codex")
@@ -42,7 +43,7 @@ class CodexRunner:
             raise RuntimeError("the codex CLI is not on PATH")
         with tempfile.TemporaryDirectory(prefix="knock-research-") as scratch:
             out = Path(scratch) / "reply.txt"
-            cmd = [codex, "--search", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
+            cmd = [codex, *(["--search"] if self.search else []), "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
                    "-C", scratch, "-o", str(out), "-"]
             try:
                 done = subprocess.run(cmd, input=prompt, text=True, capture_output=True, timeout=self.timeout)

@@ -210,7 +210,8 @@ class SaveDraftInput(Input):
     person_id: int = Field(ge=1, le=MAX_ID)
     subject: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=5000, description="The whole email, links included.")
-    hook: str = Field(min_length=1, max_length=HOOK_CHARS, description="The one fact about the person the email opens on.")
+    hook: str = Field(min_length=1, max_length=HOOK_CHARS,
+                      description="The one fact the email opens on: about the company, the posting or the person.")
     hook_on: str | None = Field(None, max_length=10, pattern=DATE,
                                 description="YYYY-MM-DD the hook happened; stored as 'hook (date)' so the checks can "
                                             "tell an old hook.")

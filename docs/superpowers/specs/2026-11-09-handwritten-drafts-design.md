@@ -219,6 +219,11 @@ buried", "if you're busy, one line back would really help"). The ban on saying y
 thread goes. Each follow-up no longer has to add a new fact; it may, when there is a good one. It stays on the first
 email's role, uses no markdown, and never repeats a sentence from the thread.
 
+**As built (#211).** The skill is at version 5: research first, projects first, a plain company fact or a true tie to
+open, a personal subject from his side, his stories when they fit, and the five-openings and three-drafts steps kept
+from #9's 2026-10-27 ruling. The MCP server instructions now match #9 (at most 120 words, 2 links with the portfolio in
+his signature, no visa mention). A skill change ships only after the judge in Part 5 passes.
+
 ### Part 5. The blind judge (tool, on demand)
 
 A command that scores two sets of drafts the way the lab did, so a skill change is measured before it ships:
@@ -231,6 +236,19 @@ per-recipient scores, the deciding quotes, and phrases repeated across each set.
 - Never run by a launchd job. It sends names, titles and drafts to OpenAI, so it runs only when he or Claude starts
   it.
 - The judge's prompt is a file in the module, the one used in the lab, so scores stay comparable.
+
+**As built (#211).** `outreach/draft_lab`. Set files are JSON lists of `{id, recipient, subject, body}`. The judge is GPT
+through the Codex CLI with no web search (read-only sandbox). Two modes. Body (default): per recipient it picks the most
+human, personal, warm, likely to get a reply, and best overall. Inbox: subject and first line against 4 template decoys
+(first picks, opened, archived). Versions are shuffled per recipient with a printed seed. Body verdict: PASS when the new
+set is picked in at least 8 of 12 (two thirds of the compared, non-tie items) and loses neither the human nor the reply
+average; INCOMPLETE when any item is missing or malformed; FAIL otherwise. `python -m outreach.draft_lab judge --a A.json
+--b B.json [--mode body|inbox] [--seed N] [--out FILE] [--dry-run]` prints one summary line and writes a markdown report
+(default `.context/draft-lab/<timestamp>.md`); exit 0, 1 on a hard failure, 2 on INCOMPLETE (body mode). Real runs only in
+the live checkout; `--dry-run` prints the prompt and calls nothing. An `--out` inside the repo must sit under `.context/`
+(set files hold real names and the repo is public). `python -m outreach.draft_lab export --sample N [--state
+approved|drafted|sent] [--seed N] --out FILE` writes a read-only random sample of stored first emails as a set file; live
+checkout only.
 
 ## Devanshu's rulings (2026-11-09)
 

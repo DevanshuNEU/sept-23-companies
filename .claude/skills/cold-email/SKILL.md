@@ -34,8 +34,9 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
-3. **Brief.** Call `draft_brief` for the person twice, with `part` 1 and `part` 2 (one brief is too big for one
-   tool result; both parts carry the same `brief_id`), and write from what they return, nothing else: `person` (with the
+3. **Brief.** Call `draft_brief` for the person (part 1). Part 2 (`part` 2: his voice files and stories) is the same
+   for every person: read it once in a session, and again only when part 1's `pack_id` differs from the one you read.
+   The `brief_id` to save with is the person's, from part 1. Write from what the two parts return, nothing else: `person` (with the
    facts `save_research` stored for them, under `sources`), `voice` (his DevVault voice files, the Posture section
    above all), `evidence` (me.md), `stories`, `posting`, `company_facts`, `avoid`, `signature` and `limits`,
    assembled by code. Do not read those files yourself. The voice files govern how he sounds, nothing else. Where
@@ -47,7 +48,10 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
 4. **Posting.** Read `posting`: what the job is, in the posting's own words. Done when you can name the work the
    role does in one line taken from the posting (or know `posting` is null and use the role title).
 5. **Company.** `company_facts` are checked, quoted facts: what the company launched or is building, what the team
-   owning the role works on. When `research_needed` is true there are none. In the live checkout run
+   owning the role works on. Facts are stored and stay fresh for 14 days, so a company is researched once, not per
+   person. When `research_needed` is true there are none. Before any research (the company's or its people's), tell
+   Devanshu which company you will research and its site (from the people's email domain, the board or the posting),
+   say so if another company shares the name, and wait for his yes. Then, in the live checkout, run
    `uv run python -m outreach.research company <company_id>` (GPT researches it once and code keeps only facts whose
    quote is on the page), or research the web yourself and call `save_research` with the `company_id`. A fact
    `save_research` returns under `rejected` was not stored and is never used. Done when
@@ -80,7 +84,7 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    - Never show him the openings, the other drafts or a ranking, and never ask him to pick; only the kept one goes
      on. Done when it meets every rule in "The email".
 9. **Subject.** Written last, from the email you just wrote (see "The subject" below). Done when it fits the patterns
-   there and appears nowhere in `avoid.recent_subjects`.
+   there. A subject may repeat one used before: there are only so many plain ways to name a role.
 10. **Check, then save.** Run `check_draft` (`person_id`, `subject`, `body`, `hook`): it runs every save check and
     stores nothing. Fix its blocks and every `reused_sentence`, `same_opening`, `narrated_email`, `subject_length`
     and `no_person_fact` warning the facts allow (for `no_person_fact`, say plainly why you picked them). Then
@@ -181,7 +185,9 @@ Northeastern". Commas, colons and full stops carry the rhythm; every dash is a p
 Written last, from his side or the pair's, while the first line comes from theirs: the subject carries his story,
 lesson, result or honest gap, a plain question about the role, or a shared past, and the first line carries their
 company fact or the true tie. Take it from the most concrete true thing in the email. At most about 40 characters,
-lowercase is fine. What got opened first in the lab's inbox tests:
+lowercase is fine. It must be clear to a stranger without the body: from the subject and the first two lines, the
+reader knows who he is and what he wants without reading the rest. Never a bare score or count ("99% consistent, 4
+of 8 right", "0 out of 10, with 8 right" lost the inbox test). Keep subject and body clean: no tricks, no teasers. What got opened first in the lab's inbox tests:
 
 - a shared past: "your <student group> days at northeastern"
 - his small true story: "$500 in claude credits led me here"
@@ -251,17 +257,12 @@ by code ("Re: " plus the first subject), so never give one. Fix `blocks` and sav
 
 ## Changing this skill
 
-A change to how this skill writes ships only after the blind judge picks it, all in the live checkout. The baseline
-is the current skill's own output for the same people: draft set a with the skill as it stands, set b with the
-changed one. Stored Outbox emails are older skill output plus his edits, so they are no baseline.
-
-Build the people list with `uv run python -m outreach.draft_lab export --sample 12 --out .context/draft-lab/a.json`
-(stored first emails, read only). Each item carries `person_id`; use it for `draft_brief` and `check_draft`, and keep
-the same `id` and `person_id` in both sets (the judge ignores `person_id`, so it never reaches GPT). Then draft those
-12 people with the current skill into `a.json` and with the changed skill into `.context/draft-lab/b.json`, in the
-same format (a JSON list of `{"id", "recipient", "subject", "body"}`). For a judge run, skip the intake and save
-steps, ignore `already_emailed`, `approved_or_later` and `edited_by_devanshu` (`check_draft` allows them), and never
-call `save_draft`. Then
-`uv run python -m outreach.draft_lab judge --a .context/draft-lab/a.json --b .context/draft-lab/b.json`: it must
-pick b in at least 8 of 12, and b must not lose on either average score (`human`, `reply`). The report says PASS or
-FAIL. Set files hold real names, so they stay under `.context/`.
+Devanshu reviews every email before it is sent; that review is the test of a change to this skill. The blind judge is
+a tool for comparing two versions, not a gate: `uv run python -m outreach.draft_lab export --sample 12 --out
+.context/draft-lab/a.json` (stored first emails, read only, each with `person_id`), then draft those people with each
+version into set files of the same format (a JSON list of `{"id", "recipient", "subject", "body"}`, same `id` and
+`person_id` in both) through `draft_brief` and `check_draft`, never `save_draft` (`check_draft` allows
+`already_emailed`, `approved_or_later` and `edited_by_devanshu`), and run `uv run python -m outreach.draft_lab judge
+--a .context/draft-lab/a.json --b .context/draft-lab/b.json` (add `--mode inbox` for subjects). Scores move about half
+a point between runs on the same emails, so run two seeds before reading much into a gap. Set files hold real names,
+so they stay under `.context/`.

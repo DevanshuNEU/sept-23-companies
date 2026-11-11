@@ -18,6 +18,7 @@ save, and either one unreadable blocks the note. An identical second save writes
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -181,6 +182,12 @@ class BriefInput(PersonInput):
                                                   "avoid, the signature and the limits. 2: his voice files and stories.")
 
 
+def pack_id(pack, stories: str) -> str:
+    """Names part 2 (his voice files and stories), the same for every person: a drafter reads part 2 once and again
+    only when this changes."""
+    return hashlib.sha256(f"{pack.digest}\n{stories}".encode("utf-8")).hexdigest()[:16]
+
+
 def draft_brief(ctx: Ctx, args: BriefInput) -> dict:
     """Everything the drafter is given for one person, assembled by code (#135), in two parts with one `brief_id`
     (the whole brief is over the size a tool result may be): part 1 is the person as the `person` tool reads them,
@@ -192,7 +199,8 @@ def draft_brief(ctx: Ctx, args: BriefInput) -> dict:
         raise voice_unreadable(caught) from None
     stories = read_stories()
     one = person(ctx, args)
-    head = {"brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id), "part": args.part, "parts": 2}
+    head = {"brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id), "part": args.part, "parts": 2,
+            "pack_id": pack_id(pack, stories)}
     if args.part == 2:
         return {**head,
                 "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
@@ -200,7 +208,8 @@ def draft_brief(ctx: Ctx, args: BriefInput) -> dict:
     facts = fresh_company_facts(ctx.conn, one["company"]["id"], now=ctx.now)
     return {
         **head,
-        "next": "Call draft_brief again with part 2 for his voice files and stories; write from both parts.",
+        "next": "Part 2 holds his voice files and stories. Call draft_brief with part 2 unless you already read "
+                "part 2 with this pack_id; write from both parts.",
         "can_draft_email": one["can_draft_email"],
         "person": one,
         "evidence": evidence,

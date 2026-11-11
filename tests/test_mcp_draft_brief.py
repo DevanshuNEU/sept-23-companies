@@ -57,6 +57,18 @@ class DraftBriefCase(McpCase):
             self.assertNotIn(key, one)
         self.assertIn("part 2", one["next"])
 
+    def test_pack_id_is_the_same_for_every_person_and_changes_with_the_stories(self):
+        """Part 2 is the same for every person, so the drafter reads it once and again only when pack_id changes."""
+        other = seed.person(self.db, self.acme, "Sam Other", email="sam@acme.example")
+        mine, theirs = (self.ok("draft_brief", {"person_id": pid}) for pid in (self.pat, other))
+        self.assertEqual(mine["pack_id"], theirs["pack_id"])
+        self.assertNotEqual(mine["brief_id"], theirs["brief_id"])
+        self.assertEqual(self.ok("draft_brief", {"person_id": self.pat, "part": 2})["pack_id"], mine["pack_id"])
+        path = Path(tempfile.mkdtemp(prefix="stories-")) / "stories.md"
+        path.write_text("A new story.", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"OUTREACH_STORIES": str(path)}):
+            self.assertNotEqual(self.ok("draft_brief", {"person_id": self.pat})["pack_id"], mine["pack_id"])
+
     def test_part_must_be_1_or_2(self):
         for part in (0, 3):
             self.assertEqual(self.error("draft_brief", {"person_id": self.pat, "part": part})["code"], "bad_input")

@@ -1341,7 +1341,7 @@ export function computeShell(db: Pick<FixtureDb, 'today' | 'outbox' | 'linkedin'
   return {
     asOf: db.today.asOf, pickedToday: db.today.picked, capacityToday: db.today.capacity, unhandledReplies: db.outbox.counts.replied, draftsToReview: db.outbox.counts.review,
     linkedinReplied: db.linkedin.counts.replied, openReviewItems: db.needsYou.open.length, noGoCount: db.noGo.companies.length + db.noGo.people.length,
-    doneCount: db.done.companies.length, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
+    doneCount: db.done.companies.length, appliedCount: 0, sending: { state: s.state, sentToday: s.sentToday, limitToday: s.limitToday },
     repliesThisMonth: db.done.metrics.repliesThisMonth, jobs: db.jobs,
     plan: { done: db.plan.done, total: db.plan.total }, winsUnseen: db.wins.unseen,
     pipeline: { text: 'Coverage 32%, level 51%', alarms: [], tone: 'idle' },

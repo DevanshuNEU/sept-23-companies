@@ -118,6 +118,7 @@ function JobItem({
   marking,
   onSelect,
   onPass,
+  onApplied,
   onReached,
 }: {
   job: JobRow;
@@ -132,6 +133,7 @@ function JobItem({
   marking: boolean;
   onSelect: () => void;
   onPass: () => void;
+  onApplied: () => void;
   onReached: () => void;
 }) {
   const href = safeHref(job.url);
@@ -178,6 +180,9 @@ function JobItem({
         <div role="group" aria-label="Your answer" className="flex gap-1.5">
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="You applied online: keep it on Applied and take it off this list" aria-keyshortcuts={current ? 'i' : undefined} onClick={onApplied}>
+            Mark applied
           </Button>
           <Button type="button" variant="secondary" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" title="Mark this company as reached" aria-keyshortcuts={current ? 'a' : undefined} onClick={onReached}>
             Mark reached
@@ -232,7 +237,8 @@ function Skeletons() {
  * (#193), in two tabs (your level, higher levels). Each row says when: the board's time to the minute, the board's date,
  * or when Knock first saw it, with a tag for a repost or a late find. Rows with no date sit under Date unknown at the
  * end. He reads every posting himself: the title opens it in a new tab, Pass hides that posting for good (never its
- * company) and Reached marks its company as reached, even when he reached it outside Knock. There is no score and no
+ * company), Mark applied keeps it on the Applied list and takes it off this one (#218), and Reached marks its company
+ * as reached, even when he reached it outside Knock. There is no score and no
  * ranking text. Every row of a reached company says "Reached Nov 9" (a person contacted there, or his own mark).
  *
  * Pass takes the row off at once and puts it back, with the reason, if the pass did not go through. Reached keeps the row,
@@ -244,7 +250,7 @@ function Skeletons() {
  * is going. New rows show at once while he is at the top on no row; scrolled down or on a row, the list stays put and an
  * "N new" button shows them. A row first seen since his last visit (not a first read, not a repost) says New.
  *
- * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, A marks done,
+ * Keys: the arrows move through the rows (also from the search box), Enter opens the posting, X passes, I marks applied, A marks done,
  * C checks now. The page sets no focus on arrival: the keys listen on the whole page.
  */
 export default function BrowsePage() {
@@ -358,6 +364,29 @@ export default function BrowsePage() {
   };
 
   /**
+   * Applied (#218): like Pass, the row leaves at once and the toast offers Undo; nothing is sent until the window closes.
+   * Then the posting is his application for good: it lists on Applied and never comes back here.
+   */
+  const markApplied = (job: JobRow) => {
+    const id = job.postingId;
+    if (hidden.has(id) || marking.has(id) || answers.has(id)) return;
+    if (current?.postingId === id) setActive((jobs[index + 1] ?? jobs[index - 1])?.postingId ?? null);
+    announce(`Saved to Applied. ${job.title} is off the list.`);
+    write({
+      id: `job-applied:${id}`,
+      label: 'Saved to Applied.',
+      afterCommit: 'Saved to Applied.',
+      patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, hidden: [...m.hidden, id] }) }],
+      commit: (o) =>
+        client.markApplied(id, o).then(async () => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.applied });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.shell });
+          await queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+        }),
+    });
+  };
+
+  /**
    * Reached: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
    * closes. The API's own sentence then replaces the row's buttons, and the list is read again before the mark is dropped,
    * so the tag does not flash off. Nothing else stops it: Reached on a company already reached just says when.
@@ -404,6 +433,7 @@ export default function BrowsePage() {
       marking={marking.has(j.postingId)}
       onSelect={() => setActive(j.postingId)}
       onPass={() => pass(j)}
+      onApplied={() => markApplied(j)}
       onReached={() => markCompanyReached(j)}
     />
   );
@@ -414,6 +444,7 @@ export default function BrowsePage() {
     { keys: 'arrowup', label: 'Previous job', group: GROUP, inInputs: true, enabled: open, run: () => move(-1) },
     { keys: 'enter', label: 'Open the posting', group: GROUP, enabled: open, run: () => current && openExternal(current.url) },
     { keys: 'x', label: 'Pass', group: GROUP, enabled: open, run: () => current && pass(current) },
+    { keys: 'i', label: 'I applied online', group: GROUP, enabled: open, run: () => current && markApplied(current) },
     { keys: 'a', label: 'Mark the company reached', group: GROUP, enabled: open, run: () => current && markCompanyReached(current) },
     { keys: 'c', label: 'Check now', group: GROUP, run: check.ask },
   ];
@@ -461,6 +492,7 @@ export default function BrowsePage() {
             <span className="inline-flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="inline-flex items-center gap-1"><Kbd>Enter</Kbd> open</span>
             <span className="inline-flex items-center gap-1"><Kbd>X</Kbd> pass</span>
+            <span className="inline-flex items-center gap-1"><Kbd>I</Kbd> applied</span>
             <span className="inline-flex items-center gap-1"><Kbd>A</Kbd> mark reached</span>
           </p>
         </div>

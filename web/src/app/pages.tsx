@@ -9,6 +9,7 @@ export const NeedsYouPage = lazy(() => import('@/routes/needs-you/index'));
 export const NoGoPage = lazy(() => import('@/routes/no-go/index'));
 export const CompanyPage = lazy(() => import('@/routes/company/index'));
 export const DonePage = lazy(() => import('@/routes/done/index'));
+export const AppliedPage = lazy(() => import('@/routes/applied/index'));
 export const ProgressPage = lazy(() => import('@/routes/progress/index'));
 export const BrowsePage = lazy(() => import('@/routes/browse/index'));
 export const WinsPage = lazy(() => import('@/routes/wins/index'));

@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { NavLink } from 'react-router';
-import { Activity, Award, Ban, Building2, ChartColumn, CircleAlert, CircleCheck, Gauge, Moon, Search, Send, Sun, Telescope, Workflow } from 'lucide-react';
+import { Activity, Award, Ban, Building2, ChartColumn, CircleAlert, CircleCheck, ClipboardCheck, Gauge, Moon, Search, Send, Sun, Telescope, Workflow } from 'lucide-react';
 import { pollMs, queryKeys, useClient, type JobRunSummary, type PipelineLine, type SenderState, type ShellSummary } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -183,6 +183,9 @@ function ListItems({ s }: { s: ShellSummary | undefined }) {
           </NavItem>
           <NavItem to="/no-go" icon={Ban} label="No-go" described={s && s.noGoCount > 0 ? `${s.noGoCount}` : undefined}>
             {s && s.noGoCount > 0 ? <Count value={s.noGoCount} /> : null}
+          </NavItem>
+          <NavItem to="/applied" icon={ClipboardCheck} label="Applied" described={s && s.appliedCount > 0 ? `${s.appliedCount}` : undefined}>
+            {s && s.appliedCount > 0 ? <Count value={s.appliedCount} /> : null}
           </NavItem>
           <NavItem to="/done" icon={CircleCheck} label="Done" described={s && s.doneCount > 0 ? `${s.doneCount}` : undefined}>
             {s && s.doneCount > 0 ? <Count value={s.doneCount} /> : null}

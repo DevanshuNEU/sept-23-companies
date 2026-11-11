@@ -78,6 +78,8 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   // The job list (#156): the page, Pass and Done (#195), and Check now (#194). Done's undo is a company write.
   jobs: 'plan',
   passJob: 'plan',
+  markApplied: 'plan',
+  applied: 'plan',
   markReached: 'plan',
   clearReached: 'company',
   checkNow: 'plan',

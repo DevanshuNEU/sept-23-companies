@@ -3,7 +3,7 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoDate, IsoTime, JobRow, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedRow, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus,
 } from '../types';
 import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
@@ -118,6 +118,8 @@ export class FixtureClient implements OutreachClient {
   /** The job list (#156): the sample postings, the ones he passed, and his standing Done marks (#195), company id to the day. */
   private jobList: ReturnType<typeof buildJobs> | undefined;
   private readonly passedJobs = new Set<Id>();
+  /** Postings marked applied (#218), newest last; like a pass, they leave the job list. */
+  private readonly appliedJobs = new Map<Id, AppliedRow>();
   private readonly reachedMarks = new Map<Id, IsoDate>();
   /** Check now: the step of `CHECK_WALK` the check is at, how many checks were asked for (only the first finds postings), and the timer that walks it. */
   private check: { step: number; nth: number; timer: ReturnType<typeof setInterval> | null } | null = null;
@@ -1174,7 +1176,7 @@ export class FixtureClient implements OutreachClient {
       const mark = this.reachedMarks.get(r.companyId);
       return mark !== undefined && (r.contactedOn === null || mark > r.contactedOn) ? { ...r, contactedOn: mark } : r;
     };
-    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId)).map(reached), higher: this.jobList.higher, ages: this.jobList.ages };
+    return { rows: this.jobList.rows.filter((r) => !this.passedJobs.has(r.postingId) && !this.appliedJobs.has(r.postingId)).map(reached), higher: this.jobList.higher, ages: this.jobList.ages };
   }
 
   /** The job list, as the API: tab, window, size, contacted filter and company search, 50 a page by cursor. Never a posting he passed. */
@@ -1190,6 +1192,24 @@ export class FixtureClient implements OutreachClient {
       this.passedJobs.add(postingId);
       return { postingId, companyId: row.companyId, passed: true };
     });
+  }
+
+  /** Applied, as the API: the posting leaves the job list and lists on Applied; applied again says when. */
+  markApplied(postingId: Id, o: WriteOptions): Promise<AppliedResult> {
+    return this.write(o, () => {
+      const standing = this.appliedJobs.get(postingId);
+      if (standing) return { postingId, companyId: standing.companyId, appliedOn: standing.appliedOn, text: `Already applied on ${formatDateMonthDay(standing.appliedOn)}.` };
+      const row = this.jobPool().rows.find((r) => r.postingId === postingId);
+      if (!row) throw new ApiError('not_found', `There is no posting ${postingId}.`);
+      const on = this.db.plan.date;
+      this.appliedJobs.set(postingId, { postingId, companyId: row.companyId, companyName: row.companyName, title: row.title, url: row.url, appliedOn: on, open: true });
+      return { postingId, companyId: row.companyId, appliedOn: on, text: 'Saved to Applied.' };
+    });
+  }
+
+  /** The Applied list, as the API: newest first. */
+  applied(): Promise<AppliedView> {
+    return this.read(() => ({ asOf: this.db.plan.asOf, rows: [...this.appliedJobs.values()].reverse() }));
   }
 
   /** Done, as the API: his mark that the company was reached, once per company. Nothing else stops it. */

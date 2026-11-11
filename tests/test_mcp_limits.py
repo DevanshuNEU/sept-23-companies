@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 import live_checkout
-from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.brief import brief_id, read_evidence, read_stories
 from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
@@ -154,10 +154,10 @@ class SweepCase(McpCase):
                                                                  "email": "ned@acme.example"}]}, None),
             "save_draft": ({"person_id": self.lee, "subject": "Your queue rewrite", "body": BODY,
                             "hook": "His post on the queue rewrite", "project": "queue",
-                            "brief_id": brief_id(load_voice_pack(), read_evidence(), self.lee)}, None),
+                            "brief_id": brief_id(load_voice_pack(), read_evidence() + "\n" + read_stories(), self.lee)}, None),
             "save_followup": ({"person_id": self.sam, "seq": 1, "body": "Hi Sam, one more note on the ledger idea. "
                                                                         "Thanks, Devanshu",
-                               "brief_id": brief_id(load_voice_pack(), read_evidence(), self.sam)}, self.planned),
+                               "brief_id": brief_id(load_voice_pack(), read_evidence() + "\n" + read_stories(), self.sam)}, self.planned),
             "save_linkedin_note": ({"person_id": self.lin, "body": "Hi Lin, I read your post on the queue rewrite.",
                                     "reason_line": "I read your post on the queue rewrite"}, None),
             "reader_next": ({"limit": 1}, None),

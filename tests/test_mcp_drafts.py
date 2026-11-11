@@ -35,6 +35,8 @@ class DraftCase(McpCase):
         self.addCleanup(patcher.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
+        self.db.execute("UPDATE person SET profile_text = 'Wrote the ledger rewrite post.' WHERE person_id = ?",
+                        (self.pat,))
         self.mx("acme.example", "ok")
 
     def mx(self, domain, status, at="2026-11-10T14:00:00Z"):
@@ -52,7 +54,7 @@ class DraftCase(McpCase):
 
     def brief_id(self, person_id=None) -> str:
         """What draft_brief gives for this person now, computed here so an unknown person id can be saved too."""
-        return drafting_brief.brief_id(load_voice_pack(), drafting_brief.read_evidence(), person_id or self.pat)
+        return drafting_brief.brief_id(load_voice_pack(), drafting_brief.read_evidence() + "\n" + drafting_brief.read_stories(), person_id or self.pat)
 
     def first(self, person_id=None):
         return self.db.execute(

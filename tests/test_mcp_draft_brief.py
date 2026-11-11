@@ -7,10 +7,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from outreach.drafting.brief import brief_id, read_evidence
+from outreach.drafting.brief import brief_id, read_evidence, read_stories
 from outreach.drafting.voice import VOICE_FILES, load_voice_pack
 from tests import apiseed as seed
-from tests.mcptest import McpCase, fingerprint
+from tests.mcptest import NOW, McpCase, fingerprint
 
 ME = "# Evidence bank\n\n- OpenCodeIntel: 94% Hit@1 on a 665-query research eval.\n\n## Needs Devanshu\n- ASK: `installs`\n"
 
@@ -84,7 +84,7 @@ class DraftBriefCase(McpCase):
 
     def test_brief_id_matches_the_checks_save_draft_will_run(self):
         got = self.ok("draft_brief", {"person_id": self.pat})
-        want = brief_id(load_voice_pack(), read_evidence(self.me), self.pat)
+        want = brief_id(load_voice_pack(), read_evidence(self.me) + "\n" + read_stories(), self.pat)
         self.assertEqual(got["brief_id"], want)
 
     def test_brief_writes_nothing(self):
@@ -112,3 +112,65 @@ class DraftBriefCase(McpCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BriefResearchCase(DraftBriefCase):
+    def fact(self, company_id=None, quote="We build queue tools for small teams.", verified_at=NOW):
+        self.db.execute(
+            "INSERT INTO research_fact(company_id, fact, quote, url, found_by, verified_at) VALUES (?,?,?,?,?,?)",
+            (company_id or self.acme, "Builds queue tools", quote, "https://acme.example/about", "claude", verified_at))
+
+    def stories_file(self, text: str) -> Path:
+        path = Path(tempfile.mkdtemp(prefix="stories-")) / "stories.md"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_brief_has_company_facts_and_research_needed(self):
+        got = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertEqual((got["company_facts"], got["research_needed"]), ([], True))
+        self.fact()
+        got = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertEqual([f["quote"] for f in got["company_facts"]], ["We build queue tools for small teams."])
+        self.assertFalse(got["research_needed"])
+
+    def test_brief_has_the_posting_text(self):
+        self.assertIsNone(self.ok("draft_brief", {"person_id": self.pat})["posting"])
+        pid = seed.posting(self.db, self.acme, "Backend Engineer")
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pid, "We use Go. " * 600))
+        got = self.ok("draft_brief", {"person_id": self.pat})["posting"]
+        self.assertEqual(got["title"], "Backend Engineer")
+        self.assertTrue(got["url"].startswith("https://"))
+        self.assertTrue(got["text"].startswith("We use Go."))
+        self.assertEqual(len(got["text"]), 4000)
+
+    def test_brief_has_stories_and_its_id_changes_with_them(self):
+        before = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertEqual(before["stories"], "")
+        path = self.stories_file("The night the queue stalled.")
+        with mock.patch.dict(os.environ, {"OUTREACH_STORIES": str(path)}):
+            after = self.ok("draft_brief", {"person_id": self.pat})
+        self.assertEqual(after["stories"], "The night the queue stalled.")
+        self.assertNotEqual(after["brief_id"], before["brief_id"])
+
+    def test_numbers_from_stories_are_grounded(self):
+        path = self.stories_file("I cut the backlog from 4,812 jobs to zero in a night.")
+        body = "Hi Pat,\n\nI cut a backlog of 4,812 jobs to zero in one night.\n\nThanks,\nDevanshu"
+        with mock.patch.dict(os.environ, {"OUTREACH_STORIES": str(path)}):
+            got = self.ok("check_draft", {"person_id": self.pat, "body": body, "subject": "queues"})
+        self.assertNotIn("voice_ungrounded", [w["code"] for w in got["warns"]])
+        got = self.ok("check_draft", {"person_id": self.pat, "body": body, "subject": "queues"})
+        self.assertIn("voice_ungrounded", [w["code"] for w in got["warns"]])
+
+    def test_a_brief_made_before_the_stories_changed_is_stale(self):
+        bid = self.ok("draft_brief", {"person_id": self.pat})["brief_id"]
+        path = self.stories_file("A new story.")
+        with mock.patch.dict(os.environ, {"OUTREACH_STORIES": str(path)}):
+            err = self.error("save_draft", {"person_id": self.pat, "subject": "s", "body": "Hi Pat,\n\nHello.",
+                                            "hook": "h", "project": "p", "brief_id": bid})
+        self.assertEqual(err["code"], "stale_brief")
+
+    def test_numbers_from_company_fact_quotes_are_grounded(self):
+        self.fact(quote="Acme serves 7,321 teams.")
+        body = "Hi Pat,\n\nAcme serves 7,321 teams and I like that.\n\nThanks,\nDevanshu"
+        got = self.ok("check_draft", {"person_id": self.pat, "body": body, "subject": "queues"})
+        self.assertNotIn("voice_ungrounded", [w["code"] for w in got["warns"]])

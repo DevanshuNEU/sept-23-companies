@@ -37,7 +37,7 @@ CLEAN_CODES = [
     "no_mail_server", "placeholder", "markdown_link", "visa_line", "too_many_links", "link_shortener",
     "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length",
     "stale_hook", "subject_wording", "subject_length", "subject_reused", "link_count", "signature", "narrated_email",
-    "reused_sentence", "same_opening", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "reused_sentence", "same_opening", "no_person_fact", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
     "voice_rhythm",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
@@ -72,6 +72,7 @@ class ChecksCase(unittest.TestCase):
         self.assertTrue(ok)
         self.acme = seed.company(self.conn, "Acme", "working")
         self.pat = seed.person(self.conn, self.acme, "Pat Lee", email="pat@acme.example")
+        self.conn.execute("UPDATE person SET profile_text = ? WHERE person_id = ?", ("Wrote the queue rewrite post.", self.pat))
         self.touch = seed.touch(self.conn, self.pat)
         self.mid = seed.message(self.conn, self.touch, 0, subject=SUBJECT, body=BODY)
         self.conn.execute("UPDATE message SET hook = ? WHERE message_id = ?", (HOOK, self.mid))
@@ -680,6 +681,30 @@ class Warns(ChecksCase):
         self.assertEqual(self.one(found, "mail_server_unknown")["severity"], "warn")
         self.assertEqual(self.codes(found, "block"), [])
         self.assertNotIn("no_mail_server", [c["code"] for c in found])
+
+
+class NoPersonFact(ChecksCase):
+    def bare(self, role_kind="engineer", **changes):
+        self.conn.execute("UPDATE person SET profile_text = '   ', role_kind = ? WHERE person_id = ?",
+                          (role_kind, self.pat))
+        return self.run_on(**changes)
+
+    def test_no_person_fact_warns_for_engineer_without_facts(self):
+        for kind in ("engineer", "manager", "founder"):
+            check = self.one(self.bare(kind), "no_person_fact")
+            self.assertEqual(check["severity"], "warn")
+            self.assertIn("rests on the role alone", check["detail"])
+
+    def test_no_person_fact_passes_with_a_source_or_profile(self):
+        self.assert_passes(self.run_on(), "no_person_fact")
+        self.conn.execute("UPDATE person SET profile_text = '' WHERE person_id = ?", (self.pat,))
+        self.conn.execute("INSERT INTO person_source(person_id, kind, url, recorded_at) VALUES (?, 'post', ?, ?)",
+                          (self.pat, "https://blog.example/queue", "2026-11-01T12:00:00Z"))
+        self.assert_passes(self.run_on(), "no_person_fact")
+
+    def test_no_person_fact_skips_recruiters_and_followups(self):
+        self.assertNotIn("no_person_fact", [c["code"] for c in self.bare("recruiter")])
+        self.assertNotIn("no_person_fact", [c["code"] for c in self.bare("engineer", seq=1)])
 
 
 class Shape(ChecksCase):

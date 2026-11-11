@@ -24,7 +24,8 @@ from datetime import date, datetime, timedelta
 
 from pydantic import Field
 
-from outreach.drafting.brief import brief_id, check_brief, read_evidence
+from outreach.drafting.brief import brief_id, check_brief, read_evidence, read_stories
+from outreach.research.store import fresh_company_facts
 from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
 from outreach.drafting.sameness import evidence_used, load_corpus, overused, recent_openings, recent_subjects
 from outreach.drafting.signature import read_signature
@@ -158,6 +159,23 @@ def avoid(ctx: Ctx) -> dict:
             "overused": overused(corpus), "evidence_used": evidence_used(ctx.conn, since=since)}
 
 
+POSTING_CHARS = 4000
+
+
+def posting_of(conn: sqlite3.Connection, role: dict | None) -> dict | None:
+    """The role the person is named for: title, link and the posting text (cut to POSTING_CHARS); None without one."""
+    if role is None:
+        return None
+    row = conn.execute("SELECT body FROM posting_body WHERE posting_id = ?", (role["posting_id"],)).fetchone()
+    return {"title": role["title"], "url": role["url"], "text": row["body"][:POSTING_CHARS] if row else ""}
+
+
+def ground_text(ctx: Ctx, evidence: str, stories: str, p: sqlite3.Row) -> str:
+    """The text a number in a draft must come from: me.md, his stories, the company's fact quotes, the person's own."""
+    quotes = [f["quote"] for f in fresh_company_facts(ctx.conn, p["company_id"], now=ctx.now)]
+    return "\n".join((evidence, stories, *quotes, p["profile_text"], p["notes"]))
+
+
 def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
     """Everything the drafter is given for one person, assembled by code (#135): the person as the `person` tool
     reads them, his DevVault voice files, me.md above its open questions, and the limits. Its `brief_id` is what
@@ -166,13 +184,19 @@ def draft_brief(ctx: Ctx, args: PersonInput) -> dict:
         pack, evidence = load_voice_pack(), read_evidence()
     except VoiceUnreadable as caught:
         raise voice_unreadable(caught) from None
+    stories = read_stories()
     one = person(ctx, args)
+    facts = fresh_company_facts(ctx.conn, one["company"]["id"], now=ctx.now)
     return {
-        "brief_id": brief_id(pack, evidence, args.person_id),
+        "brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id),
         "can_draft_email": one["can_draft_email"],
         "person": one,
         "voice": {"digest": pack.digest, "files": [{"path": path, "text": text} for path, text in pack.files]},
         "evidence": evidence,
+        "stories": stories,
+        "company_facts": facts,
+        "research_needed": not facts,
+        "posting": posting_of(ctx.conn, one["role_to_name"]),
         "signature": read_signature(),
         "avoid": avoid(ctx),
         "limits": {"words": list(DEFAULT_WORDS), "max_links": MAX_LINKS,
@@ -215,25 +239,26 @@ def stored_hook(args: SaveDraftInput, today: date) -> str:
     return f"{hook} ({on.isoformat()})"
 
 
-def require_brief(brief: str, person_id: int) -> tuple[str, str]:
-    """(evidence, voice digest) when `brief` is the id draft_brief gives for this person now: the voice files and
+def require_brief(brief: str, person_id: int) -> tuple[str, str, str]:
+    """(evidence, stories, voice digest) when `brief` is the id draft_brief gives for this person now: the voice files and
     me.md are read again here, so an edit since the brief makes it stale. Anything else refuses (#135)."""
     try:
         pack, evidence = load_voice_pack(), read_evidence()
     except VoiceUnreadable as caught:
         raise voice_unreadable(caught) from None
-    if not check_brief(brief, pack, evidence, person_id):
+    stories = read_stories()
+    if not check_brief(brief, pack, evidence + "\n" + stories, person_id):
         raise ToolError("stale_brief", "This draft was not made from a current brief for this person.",
                         "Call draft_brief for this person again, write from what it returns, then save. "
                         "Nothing was written.")
-    return evidence, pack.digest
+    return evidence, stories, pack.digest
 
 
 def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
     conn = ctx.conn
     subject, body, project = text(args.subject, "subject"), text(args.body, "body"), text(args.project, "project")
     hook = stored_hook(args, ctx.today)
-    evidence, digest = require_brief(args.brief_id, args.person_id)
+    evidence, stories, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
@@ -253,7 +278,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
             raise stale(args.revision)
         found = checks_of(ctx, p, message_id=first["message_id"] if first else None, seq=0, subject=subject,
                           body=body, hook=hook, banned=banned,
-                          ground="\n".join((evidence, p["profile_text"], p["notes"])))
+                          ground=ground_text(ctx, evidence, stories, p))
         found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
                       "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if first is not None and (first["subject"], first["body"], first["hook"], first["project"]) == (
@@ -294,6 +319,7 @@ def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
     body = text(args.body, "body")
     try:
         evidence = read_evidence()
+        stories = read_stories()
     except VoiceUnreadable as caught:
         raise voice_unreadable(caught) from None
     p = person_row(conn, args.person_id)
@@ -320,7 +346,7 @@ def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
                          (touch["touch_id"], args.seq)).fetchone()
         subject, message_id = f"Re: {first['subject']}", m["message_id"] if m else None
     found = checks_of(ctx, p, message_id=message_id, seq=args.seq, subject=subject, body=body, hook=args.hook,
-                      banned=banned_list(), ground="\n".join((evidence, p["profile_text"], p["notes"])))
+                      banned=banned_list(), ground=ground_text(ctx, evidence, stories, p))
     return {"word_count": word_count(body),
             "blocks": [brief(c) for c in found if c["severity"] == "block"],
             "warns": [brief(c) for c in found if c["severity"] == "warn"],
@@ -363,7 +389,7 @@ def stopped(conn: sqlite3.Connection, p: sqlite3.Row, touch: sqlite3.Row) -> Too
 def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
     conn = ctx.conn
     body = text(args.body, "body")
-    evidence, digest = require_brief(args.brief_id, args.person_id)
+    evidence, stories, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
     with transaction(conn):
         p = person_row(conn, args.person_id)
@@ -395,7 +421,7 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
             raise stale(args.revision)
         subject = f"Re: {first['subject']}"
         found = checks_of(ctx, p, message_id=m["message_id"], seq=args.seq, subject=subject, body=body, hook="",
-                          banned=banned, ground="\n".join((evidence, p["profile_text"], p["notes"])))
+                          banned=banned, ground=ground_text(ctx, evidence, stories, p))
         found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
                       "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if m["state"] == "drafted" and (m["subject"], m["body"]) == (subject, body):

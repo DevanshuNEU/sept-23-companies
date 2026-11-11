@@ -81,7 +81,7 @@ BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown
                "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
               "subject_reused", "link_count", "signature", "narrated_email", "reused_sentence", "same_opening",
-              "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "no_person_fact", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -427,6 +427,24 @@ OPENING_LAST = 100
 OPENING_WORDS = 4
 
 
+FACT_KINDS = ("engineer", "manager", "founder")
+
+
+def _person_fact(conn, d: DraftInput) -> Check | None:
+    """A first email to an engineer, manager or founder with nothing on file about them rests on the role alone."""
+    if d.seq >= 1 or d.role_kind not in FACT_KINDS:
+        return None
+    has = conn.execute(
+        "SELECT EXISTS(SELECT 1 FROM person_source WHERE person_id = :p) "
+        "OR EXISTS(SELECT 1 FROM person WHERE person_id = :p AND trim(profile_text) != '')", {"p": d.person_id}
+    ).fetchone()[0]
+    if has:
+        return _check("no_person_fact", "pass", "Something on file about them", "The person has a profile or a source.")
+    return _check("no_person_fact", "warn", "Nothing known about them",
+                  "This email rests on the role alone. Look for something they wrote or shipped, or say plainly why "
+                  "you picked them.")
+
+
 def _sameness(conn, d: DraftInput) -> list[Check]:
     """Two warns on a first email: a sentence he has used in other emails, and an opening many of his last ones share.
     His other first emails only; the message itself is left out."""
@@ -595,6 +613,7 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _signature(d),
         _narrated(d),
         *_sameness(conn, d),
+        _person_fact(conn, d),
         _length(d),
         _stale_hook(d, now),
         _subject_wording(d),

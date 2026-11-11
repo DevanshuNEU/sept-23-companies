@@ -28,8 +28,8 @@ from outreach.net import USER_AGENT, HttpClient
 from outreach.sources.boards import BoardRef, normalize_token
 from outreach.sources.keys import classify_domain, registrable_domain
 
-__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "TERMS_EXCLUDED", "BoardHit", "RefreshResult", "StapplyDirectory",
-           "board_match_key", "board_token"]
+__all__ = ["MANIFEST_URL", "STAPPLY_ATS", "TERMS_EXCLUDED", "BoardHit", "ListRow", "RefreshResult",
+           "StapplyDirectory", "board_match_key", "board_token", "list_rows"]
 
 MANIFEST_URL = "https://storage.stapply.ai/jobhive/v1/manifest.json"
 MAX_HITS = 3
@@ -103,6 +103,34 @@ def board_token(list_name: str, slug: str, url: str) -> str | None:
         return normalize_token(ats, _token(list_name, slug, url))
     except ValueError:
         return None
+
+
+@dataclass(frozen=True)
+class ListRow:
+    """One row of a stapply list with a valid board: the company name, the row's URL and the board."""
+    name: str
+    url: str
+    ref: BoardRef
+
+
+def list_rows(folder: Path, list_name: str) -> list[ListRow]:
+    """The rows of one list (`<list_name>.csv` in the folder) in file order, each board once (its first row wins). A
+    row with no valid token is left out. `ValueError` for a list with no board.ats (a `TERMS_EXCLUDED` list among
+    them, which is never read) and for a folder without the file."""
+    ats = STAPPLY_ATS.get(list_name)
+    if ats is None:
+        raise ValueError(f"the stapply list {list_name!r} is not one Knock reads")
+    path = Path(folder) / f"{list_name}.csv"
+    if not path.is_file():
+        raise ValueError(f"no {path.name} in {folder}; run: python -m outreach.sources fetch stapply")
+    rows: dict[str, ListRow] = {}
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        for row in csv.DictReader(f):
+            url = (row.get("url") or "").strip()
+            token = board_token(list_name, (row.get("slug") or "").strip(), url)
+            if token is not None and token not in rows:
+                rows[token] = ListRow((row.get("name") or "").strip(), url, BoardRef(ats, token))
+    return list(rows.values())
 
 
 @dataclass(frozen=True)

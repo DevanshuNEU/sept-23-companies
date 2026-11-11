@@ -14,6 +14,9 @@ import { formatDateMonthDay } from '@/lib/short-dates';
 import { cn } from '@/lib/utils';
 import { useViewQuery } from '@/pending/pending';
 
+/** The job link, drawn as on Jobs: it opens the posting in a new tab. */
+const LINK =
+  'rounded-sm underline decoration-foreground/30 underline-offset-3 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70';
 const plural = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'job' : 'jobs'}`;
 
 /**
@@ -127,7 +130,7 @@ function AppliedTable({ rows }: { rows: AppliedRow[] }) {
               >
                 <TableCell className={cn(cell, 'font-medium')}>
                   {href ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                    <a href={href} target="_blank" rel="noopener noreferrer" className={LINK} onClick={(e) => e.stopPropagation()}>
                       {r.title}
                     </a>
                   ) : (

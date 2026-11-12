@@ -178,7 +178,7 @@ per company it tried (keyed `slug-probed:<company_id>:<date>`; the company is no
   - Oracle: the real cap on `limit`, and what a wrong `siteNumber` returns.
   - Breezy: the `/p/{id}` detail fallback.
   - Teamtailor: the location fields and the offset paging.
-  - BambooHR: that `/jobs/embed2.php` answers (the research table lists `/careers/list`, which the reference adapter says died in 2024), and the detail shape.
+  - BambooHR: that `/careers/list` answers (said dead in 2024, back on 2026-11-12 with a `totalCount`; `/jobs/embed2.php` now answers JSON with no count, #157), and the detail shape.
   - JazzHR: the list rows and detail page.
   - Ashby: what a nonexistent token returns. If it is a 200 with no jobs, slug probing must not read that as a board.
   - Also check how long the first tick takes to decide (the first Greenhouse pass decides about 13,000 postings, roughly 70 s of CPU in batches of 100), and that the host-blocked item and `tripped` look right when one host is made to fail on a scratch store.

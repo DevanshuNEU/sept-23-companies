@@ -19,6 +19,7 @@ REQUIRED = {
               "new_grad", "early_career", "open_level", "level_nouns", "level_qualifiers",
               "off_lane_unless_software", "software_titles", "ambiguous", "ambiguous_margin", "software_words", "physical_words",
               "phd_titles"),
+    "role": ("out_always", "software_core", "ai", "out_unless_core", "allowed"),
     "years": ("experience_words", "preferred", "degree_alternative", "company_age", "company_voice", "candidate_voice",
               "body_entry", "master_words", "master_abbreviations", "bachelor_words", "upper_bound", "technologies",
               "phd_words", "phd_cues", "phd_softeners"),
@@ -48,6 +49,7 @@ class Config:
     sponsorship: dict
     eligibility: dict
     facts: dict
+    role: dict  # the software role lists (#250), read by role.py
     raw: bytes  # the file bytes, stored with the ruleset row
 
 

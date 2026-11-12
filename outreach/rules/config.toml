@@ -194,6 +194,51 @@ level_qualifiers = [
   "front end", "back end", "frontend", "backend", "full stack", "fullstack", "mobile",
 ]
 
+# The software role (#250, #9 job board ruling 2026-11-12): the Jobs list shows only these roles; the rest go to the
+# Other roles tab. Read by role.py, title only, first match wins: out_always, software_core, ai, out_unless_core,
+# allowed; no match is other. The labeled titles in tests/fixtures/role_titles.tsv pin every list. The lane above is
+# not changed by this section.
+[role]
+# Out whatever else the title says: "Software Engineer in Test", "Software Engineer, iOS", "Salesforce Developer".
+out_always = [
+  "in test", "test software", "test systems", "sdet", "qa", "quality assurance", "quality engineer", "test engineer", "test automation",
+  "ios", "android", "mobile", "embedded", "firmware", "hardware", "fpga", "asic",
+  "salesforce", "servicenow", "sap", "pega", "cobol", "mainframe",
+  "data scientist", "data scientists", "data analyst", "data analysts",
+  "site reliability", "sre", "devops", "devsecops", "mlops", "design engineer",
+  "professional services", "support engineer", "technical support", "sales engineer", "solutions engineer",
+  "solution engineer", "solutions architect", "implementation", "customer success", "database administrator", "dba",
+]
+# A software engineer or developer title, whatever its specialty ("Software Engineer, Machine Learning").
+software_core = [
+  "software engineer", "software engineers", "software engineering", "software developer", "software developers",
+  "software development", "software dev", "sw engineer", "sw developer", "swe", "sde",
+  "full stack", "fullstack", "backend", "back end", "frontend", "front end",
+]
+# An AI engineer title, even beside a word the next list rules out ("AI/ML Engineer", "Data & AI Engineer").
+ai = [
+  "ai engineer", "ai engineers", "ai/ml engineer", "applied ai", "llm", "llms", "genai", "gen ai", "generative ai",
+  "ai developer",
+]
+# Out unless a software_core or ai word is in the title: "Machine Learning Engineer", "Platform Engineer",
+# "Member of Technical Staff - Security", "Founding Research Scientist".
+out_unless_core = [
+  "machine learning", "ml engineer", "ml infrastructure", "data engineer", "data engineering", "security",
+  "platform engineer", "platform engineering", "infrastructure engineer", "infrastructure engineering", "database",
+  "network", "scientist", "scientists", "research engineer", "cybersecurity", "cyber", "device",
+]
+# The other titles #9 lets in.
+allowed = [
+  "ai", "cloud engineer", "cloud developer", "cloud development", "cloud computing developer", "cloud software",
+  "forward deployed", "forward deploy", "fde", "product engineer", "founding", "member of technical staff", "mts",
+  "distributed systems", "systems software", "software systems engineer", "user interface developer",
+  "ui developer", "ui engineer", "golang",
+  "java developer", "java engineer", "python developer", "python engineer", "typescript developer",
+  "typescript engineer", "javascript developer", "javascript engineer", "node developer", "react developer",
+  "react engineer", "go developer", "go engineer", "golang developer", "golang engineer", "web developer",
+  "web engineer",
+]
+
 [years]
 # refresh/finalcheck.py:41 YOE (a number of years counts only when one of these follows 'years' in the sentence)
 experience_words = [

@@ -369,7 +369,7 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(
             RULE_FILES,
             ("config.toml", "config.py", "text.py", "title.py", "years.py", "location.py", "sponsorship.py",
-             "eligibility.py", "facts.py", "decide.py"),
+             "eligibility.py", "facts.py", "decide.py", "role.py"),
         )
         self.assertEqual(NOT_RULES, ("__init__.py", "version.py", "rebuild.py"))
 

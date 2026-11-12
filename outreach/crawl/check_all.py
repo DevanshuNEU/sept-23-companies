@@ -34,7 +34,7 @@ from outreach.crawl.config import ATS_HOSTS, CrawlConfig
 from outreach.crawl.polite import PoliteClient
 from outreach.crawl.tick import _Pass, _read_boards, plan_date, resolve_combiner
 from outreach.pipeline import check_state
-from outreach.pipeline.joblist import LISTED_SQL, listed_params
+from outreach.pipeline.joblist import LISTED_SQL, SOFTWARE_SQL, listed_params
 from outreach.store import atomic, describe_error
 
 __all__ = ["select_check", "held_ats", "run_pending_check", "write_progress", "PROGRESS_EVERY_S"]
@@ -105,7 +105,8 @@ def _ats_name(bucket: str) -> str:
 
 _NEW_SQL = ("SELECT count(*) FROM posting p JOIN decision d ON d.posting_id = p.posting_id "
             "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
-            f"WHERE p.posting_id > :floor AND p.seen_gap_s IS NOT NULL AND p.repost_of IS NULL AND {LISTED_SQL}")
+            f"WHERE p.posting_id > :floor AND p.seen_gap_s IS NOT NULL AND p.repost_of IS NULL AND {LISTED_SQL} "
+            f"AND {SOFTWARE_SQL}")
 
 
 def _listed_new(conn: sqlite3.Connection, floor: int, listed: Mapping[str, str]) -> int:

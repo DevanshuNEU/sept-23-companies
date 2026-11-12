@@ -39,7 +39,7 @@ BATCH_SIZE = 500
 
 _COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us", "sponsorship",
             "sponsorship_quote", "citizenship", "citizenship_quote", "eligibility", "eligibility_reason",
-            "eligibility_quote", "start_2027", "level_state", "years_ms")
+            "eligibility_quote", "start_2027", "level_state", "years_ms", "role")
 _WRITTEN = _COLUMNS + ("provisional", "reader_version")
 _UPSERT = (
     "INSERT INTO decision(posting_id, ruleset_version, decided_at, " + ", ".join(_WRITTEN) + ") VALUES (?, ?, ?, "
@@ -98,6 +98,8 @@ def stored_decision(row: sqlite3.Row) -> Decision:
         values[flag] = bool(values[flag])
     if values["level_state"] is None:  # a row stored before 0007 and not yet rebuilt
         values["level_state"] = interim_level_state(values["level_ok"], values["level_tier"])
+    if values["role"] is None:  # a row stored before 0014 and not yet rebuilt stays listed (#250)
+        values["role"] = "software"
     return Decision(**values)
 
 

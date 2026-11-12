@@ -251,6 +251,15 @@ class ProgressTests(CheckCase):
         self.assertEqual([r.title for r in listed], [ENGINEER["title"]])  # the sales posting is never listed
         self.assertEqual(self.progress()["new"], 1)
 
+    def test_an_other_role_is_not_new(self):
+        # #250: the header's "N new" counts what the level tabs list, software roles only.
+        self.known("eng")
+        self.request()
+        scientist = {**ENGINEER, "id": 6_000_001, "title": "Data Scientist, New Grad",
+                     "absolute_url": "https://job-boards.greenhouse.io/eng/jobs/6000001"}
+        self.tick({gh("eng"): board_of(ENGINEER, scientist)})
+        self.assertEqual(self.progress()["new"], 1)
+
     def test_a_repost_is_not_new(self):
         bid = self.known("eng")
         self.request()

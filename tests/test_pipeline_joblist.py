@@ -190,11 +190,11 @@ class LevelTests(JobListCase):
         self.job(co, tier="swe2", ok=0)
         old = self.job(co, posted="2026-08-01")
         page = self.run_query()
-        self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1}))
+        self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1, "other": 0}))
         page = self.run_query(view="higher")
-        self.assertEqual((page.total, page.counts), (1, {"your_level": 2, "higher": 1}))
+        self.assertEqual((page.total, page.counts), (1, {"your_level": 2, "higher": 1, "other": 0}))
         page = self.run_query(window_days=0)
-        self.assertEqual(page.counts, {"your_level": 3, "higher": 1})
+        self.assertEqual(page.counts, {"your_level": 3, "higher": 1, "other": 0})
         self.assertIn(old, self.ids(window_days=0))
 
     def test_counts_follow_the_other_filters(self):
@@ -202,8 +202,45 @@ class LevelTests(JobListCase):
         self.job(small)
         self.job(big)
         self.job(big, tier="swe2", ok=0)
-        self.assertEqual(self.run_query(size="small").counts, {"your_level": 1, "higher": 0})
-        self.assertEqual(self.run_query(size="big").counts, {"your_level": 1, "higher": 1})
+        self.assertEqual(self.run_query(size="small").counts, {"your_level": 1, "higher": 0, "other": 0})
+        self.assertEqual(self.run_query(size="big").counts, {"your_level": 1, "higher": 1, "other": 0})
+
+
+class RoleTests(JobListCase):
+    """#250: only software roles are on the two level tabs; every other listed posting is on Other roles."""
+
+    def test_other_roles_are_their_own_group(self):
+        co = self.company(size=50)
+        sw = self.job(co)
+        other = self.job(co, "Data Scientist I", role="other")
+        higher = self.job(co, tier="swe2", ok=0, level_state="reject", role="software")
+        unset = self.job(co, "Software Engineer II")  # role NULL: stored before 0014, not rebuilt yet
+        self.assertEqual(sorted(self.ids()), sorted([sw, unset]))
+        self.assertEqual(self.ids(view="higher"), [higher])
+        self.assertEqual(self.ids(view="other"), [other])
+        for view in ("your_level", "higher", "other"):
+            with self.subTest(view=view):
+                self.assertEqual(self.run_query(view=view).counts, {"your_level": 2, "higher": 1, "other": 1})
+
+    def test_an_other_role_at_any_level_is_other(self):
+        co = self.company(size=900)
+        senior_ish = self.job(co, "Data Engineer II", tier="swe2", ok=0, level_state="reject", role="other")
+        self.assertEqual((self.ids(), self.ids(view="higher"), self.ids(view="other")), ([], [], [senior_ish]))
+
+    def test_an_empty_page_still_counts_other(self):
+        self.job(self.company())
+        page = self.run_query(view="other")
+        self.assertEqual((page.rows, page.total, page.counts), ([], 0, {"your_level": 1, "higher": 0, "other": 0}))
+
+    def test_a_cursor_pages_within_its_own_group(self):
+        co = self.company()
+        sw = [self.job(co, posted=f"2026-11-0{d}") for d in (1, 2, 3)]
+        other = [self.job(co, "Data Scientist I", posted=f"2026-11-0{d}", role="other") for d in (1, 2, 3)]
+        first = self.run_query(view="other", limit=2)
+        rest = self.run_query(view="other", limit=2, after=first.next_after)
+        self.assertEqual(sorted(r.posting_id for r in first.rows + rest.rows), sorted(other))
+        cross = self.run_query(view="other", limit=50, after=self.run_query(limit=1).next_after)
+        self.assertFalse({r.posting_id for r in cross.rows} & set(sw))
 
 
 class LevelStateTests(JobListCase):
@@ -235,7 +272,7 @@ class LevelStateTests(JobListCase):
         self.assertEqual(self.ids(), [])
         page = self.run_query(view="higher")
         self.assertEqual({r.posting_id: r.level_tag for r in page.rows}, {i: "SDE 2" for i in ids})
-        self.assertEqual(page.counts, {"your_level": 0, "higher": 3})
+        self.assertEqual(page.counts, {"your_level": 0, "higher": 3, "other": 0})
 
     def test_a_fit_posting_keeps_its_tier_tag(self):
         co = self.company(size=50)
@@ -271,7 +308,7 @@ class LevelStateTests(JobListCase):
         unsure_big = self.job(big, tier="swe2", ok=0)
         self.assertEqual(set(self.ids()), {fit_big, unsure_small})
         self.assertEqual(self.ids(view="higher"), [unsure_big])
-        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 1})
+        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 1, "other": 0})
 
     def test_a_row_with_no_state_follows_the_v1_rule_a_swe2_without_level_ok_is_higher(self):
         # The v1 list put a tier it could name without level_ok in higher at every size: the fallback keeps that.
@@ -293,7 +330,7 @@ class LevelStateTests(JobListCase):
         self.job(small, tier="swe2", ok=0, level_state="uncertain")
         self.job(small, tier="swe2", ok=0, level_state="reject")
         page = self.run_query(limit=1)
-        self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1}))
+        self.assertEqual((page.total, page.counts), (2, {"your_level": 2, "higher": 1, "other": 0}))
 
 
 class DateTests(JobListCase):
@@ -365,7 +402,7 @@ class ListTimeTests(JobListCase):
         for window in (7, 30, 60, 90, 0):
             with self.subTest(window=window):
                 self.assertEqual(self.ids(window_days=window), [fresh, months_old])
-        self.assertEqual(self.run_query(window_days=7).counts, {"your_level": 2, "higher": 0})
+        self.assertEqual(self.run_query(window_days=7).counts, {"your_level": 2, "higher": 0, "other": 0})
 
     def test_window_filters_on_list_at(self):
         co = self.company(size=10)
@@ -695,7 +732,7 @@ class BigGuessTests(JobListCase):
         unclear = [self.job(c, level_state="fit", us="unknown") for c in (known, guessed)]
         self.assertEqual(set(self.ids()), set(yes))
         self.assertEqual(set(self.ids(view="higher")), set(unclear))
-        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 2})
+        self.assertEqual(self.run_query().counts, {"your_level": 2, "higher": 2, "other": 0})
 
     def test_unknown_us_at_small_company_stays(self):
         small, unknown = self.company(size=50), self.company()
@@ -733,7 +770,7 @@ class BigGuessTests(JobListCase):
         self.assertEqual(self.ids(size="small"), [a])
         self.assertEqual(sorted(self.ids(size="big")), sorted([b, d]))
         self.assertEqual(self.ids(size="unknown"), [c])
-        self.assertEqual(self.run_query(size="big").counts, {"your_level": 2, "higher": 0})
+        self.assertEqual(self.run_query(size="big").counts, {"your_level": 2, "higher": 0, "other": 0})
 
     def test_order_puts_guessed_big_before_known_big(self):
         small, unknown, guessed, known_big = (self.company(size=s) for s in (10, None, None, 5000))
@@ -774,7 +811,7 @@ class ScaleTests(JobListCase):
         # fit rows are all his level (1000); uncertain counts at the three small companies (600 of 1000); the
         # unknown-size one has 600 open US postings, so it is a guessed big company and so, with the 900-person one,
         # its uncertain rows (400) are higher with the rejected SDE 2 (1000).
-        self.assertEqual(page.counts, {"your_level": 1600, "higher": 1400})
+        self.assertEqual(page.counts, {"your_level": 1600, "higher": 1400, "other": 0})
         self.assertEqual(page.total, 1600)
 
 
@@ -829,7 +866,7 @@ class HourWindowAndLevelTests(JobListCase):
         rows = self.levels_fixture()
         page = self.run_query(levels=frozenset({"swe1", "swe2"}))
         self.assertEqual(sorted(r.posting_id for r in page.rows), sorted([rows["swe1"], rows["swe2"]]))
-        self.assertEqual(page.counts, {"your_level": 2, "higher": 0})
+        self.assertEqual(page.counts, {"your_level": 2, "higher": 0, "other": 0})
         self.assertEqual(self.run_query().counts["your_level"], 6)
 
     def test_an_uncertain_row_counts_as_level_not_stated_whatever_its_tier(self):

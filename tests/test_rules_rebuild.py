@@ -439,6 +439,31 @@ class RecordEvidenceTests(RebuildTestCase):
         self.assertIsNone(row["level_state"])
         self.assertEqual(rebuild_module.stored_decision(row), decided)
 
+    def test_decision_row_stores_the_role(self):
+        # #250: the job list reads role from the stored decision.
+        sw = self.posting("Software Engineer")
+        other = self.posting("Data Scientist I")
+        decide_and_store(self.conn, sw)
+        decide_and_store(self.conn, other)
+        role = dict(self.conn.execute("SELECT posting_id, role FROM current_decision").fetchall())
+        self.assertEqual((role[sw], role[other]), ("software", "other"))
+        pd_role = self.conn.execute("SELECT role FROM posting_decision WHERE posting_id = ?", (other,)).fetchone()[0]
+        self.assertEqual(pd_role, "other")
+
+    def test_stored_decision_reads_a_null_role_as_software(self):
+        # A row stored before 0014 and not yet rebuilt stays on the list until the rebuild decides it.
+        pid = self.posting("Data Scientist I")
+        decide_and_store(self.conn, pid)
+        self.conn.execute("UPDATE decision SET role = NULL")
+        row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertEqual(rebuild_module.stored_decision(row).role, "software")
+
+    def test_the_role_column_refuses_other_values(self):
+        pid = self.posting()
+        decide_and_store(self.conn, pid)
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "CHECK"):
+            self.conn.execute("UPDATE decision SET role = 'engineering'")
+
     def test_decision_row_stores_level_state_and_years_ms(self):
         pid = self.posting()
         decided = decide_and_store(self.conn, pid)

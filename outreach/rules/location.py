@@ -36,6 +36,7 @@ class _Patterns:
         self.shared = phrases(loc["shared_city_names"])
         self.countries = phrases(loc["non_us_countries"])
         self.fillers = phrases(loc["title_fillers"])
+        self.us_possible = phrases(loc["us_possible"])
 
 
 def _read_part(part: str, p: _Patterns) -> str:
@@ -104,6 +105,8 @@ def us_status(location: str, country: str | None, cfg: Config, title: str | None
     parts = {_read_part(part, p) for part in _SPLIT.split(location or "")}
     if "yes" in parts:
         return "yes"
+    if read != "no" and p.us_possible.search(location or ""):
+        return "unknown"  # "North America or South America": the US may be in it, so a region beside it is no "no"
     if read == "no" or "no" in parts:
         return "no"
     if title and _title_names_non_us_country(title, p):

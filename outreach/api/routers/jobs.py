@@ -39,7 +39,8 @@ async def jobs(request: Request, view: JobView = "your_level", window: JobWindow
                not_contacted: bool = Query(False, alias="notContacted"), q: str = Query("", max_length=100),
                after: str | None = Query(None, max_length=CURSOR_MAX), limit: int = Query(50, ge=1, le=50),
                levels: str | None = Query(None, max_length=100, pattern=LEVELS_PATTERN)) -> Response:
-    """The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page. `window`
+    """The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a
+    page. `window`
     is days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips."""
     hours = int(window[:-1]) if window.endswith("h") else 0
     days = 0 if hours or window == "any" else int(window)

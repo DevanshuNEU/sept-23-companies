@@ -187,6 +187,19 @@ class DiagnoseTests(MissCase):
         got = diagnose(conn, "https://boards.greenhouse.io/retellai/jobs/123")
         self.assertEqual((got.cause, got.company_id), ("no_board", cid))
 
+    def test_oracle_and_amazon_links_are_diagnosed(self):
+        # #244: an Oracle host's first label is a code, never a company name.
+        conn = self.conn
+        seed_company(conn, "eihu")
+        oracle = "https://eihu.fa.us8.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/job/2617897"
+        self.assertEqual(diagnose(conn, oracle).cause, "no_company")
+        saic = seed_company(conn, "SAIC")
+        board = seed_board(conn, saic, "oracle_orc", "eihu.fa.us8.oraclecloud.com/CX")
+        self.assertEqual((diagnose(conn, oracle).cause, diagnose(conn, oracle).board_id), ("not_read_yet", board))
+        amazon = seed_company(conn, "Amazon")
+        got = diagnose(conn, "https://amazon.jobs/en/jobs/10583340/software-development-engineer-early-career-2027-us")
+        self.assertEqual((got.cause, got.company_id), ("no_board", amazon))
+
     def test_a_merged_company_answers_as_the_company_it_was_merged_into(self):
         conn = self.conn
         keep = seed_company(conn, "Acme")

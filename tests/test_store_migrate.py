@@ -216,11 +216,22 @@ class LevelStateMigrationTest(unittest.TestCase):
         self.assertEqual(migrate(conn), latest_version())
         self.assertIn((7, "level_state"), [(r[0], r[1]) for r in conn.execute("SELECT version, name FROM schema_migration")])
         columns = [r["name"] for r in conn.execute("PRAGMA table_info(decision)")]
-        self.assertEqual(columns[-2:], ["level_state", "years_ms"])
+        self.assertEqual(columns[-3:-1], ["level_state", "years_ms"])
         after = conn.execute("SELECT * FROM decision").fetchone()
         self.assertEqual(tuple(after)[:len(before[0])], before[0])
         self.assertIsNone(after["level_state"])
         self.assertIsNone(after["years_ms"])
+
+    def test_migration_0014_adds_an_empty_role(self):
+        # #250: role is the last decision column; a row stored before 0014 keeps it NULL until the rebuild.
+        conn = self.old_store()
+        migrate(conn)
+        self.assertIn((14, "decision_role"),
+                      [(r[0], r[1]) for r in conn.execute("SELECT version, name FROM schema_migration")])
+        self.assertEqual([r["name"] for r in conn.execute("PRAGMA table_info(decision)")][-1], "role")
+        self.assertIsNone(conn.execute("SELECT role FROM decision").fetchone()["role"])
+        for view in ("current_decision", "posting_decision"):
+            self.assertIn("role", [r["name"] for r in conn.execute(f"PRAGMA table_info({view})")])
 
     def test_level_state_check_refuses_other_values(self):
         db = fresh_store()

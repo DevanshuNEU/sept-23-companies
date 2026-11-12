@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from .config import Config, default_config
 from .eligibility import eligibility, starts_2027
 from .location import us_status
+from .role import role_of
 from .sponsorship import citizenship_required, sponsorship_stance
 from .text import clean_text
 from .title import III_BASIS, classify_title
@@ -49,6 +50,7 @@ class Decision:
     start_2027: bool
     level_state: str  # fit, reject or uncertain (#154): every builder states it
     years_ms: int | None = None  # years asked of a master's degree holder, None when the posting gives none
+    role: str = "software"  # software or other (#250): the Jobs list shows software roles only
 
     def as_row(self) -> dict:
         """The `decision` table's columns (without posting_id, ruleset_version and decided_at), booleans as 0 or 1."""
@@ -59,7 +61,7 @@ class Decision:
             "citizenship": int(self.citizenship), "citizenship_quote": self.citizenship_quote,
             "eligibility": self.eligibility, "eligibility_reason": self.eligibility_reason,
             "eligibility_quote": self.eligibility_quote, "start_2027": int(self.start_2027),
-            "level_state": self.level_state, "years_ms": self.years_ms,
+            "level_state": self.level_state, "years_ms": self.years_ms, "role": self.role,
         }
 
 
@@ -149,7 +151,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
         us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
-        level_state=state, years_ms=asked.ms,
+        level_state=state, years_ms=asked.ms, role=role_of(title, cfg),
     )
 
 

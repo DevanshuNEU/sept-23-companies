@@ -40,6 +40,9 @@ class ReadResult:
 
     `unchanged` and `error` carry no jobs, `error` needs a message, `empty` has no jobs and `ok` has at least one.
     `board_name` is the org name the ATS reports for the board when the list response carries it, else ''.
+    `partial` (an `ok` read only) means the board answered but its list was not whole: a few rows were broken or
+    listed twice, or it came up a little short of its own count. The read stores what it listed and closes nothing,
+    and its validators are not kept, so the next read compares in full. `partial_note` says what was missing.
     """
     result: Literal["ok", "empty", "error", "unchanged"]
     jobs: tuple[JobRef, ...]
@@ -47,6 +50,8 @@ class ReadResult:
     http_status: int | None = None
     error: str = ""
     board_name: str = ""
+    partial: bool = False
+    partial_note: str = ""
 
     def __post_init__(self):
         if self.result not in _RESULTS:
@@ -57,6 +62,10 @@ class ReadResult:
             raise ValueError("an error read needs an error message")
         if self.result == "ok" and not self.jobs:
             raise ValueError("an ok read has at least one job")
+        if self.partial and self.result != "ok":
+            raise ValueError("only an ok read can be partial")
+        if self.partial != bool(self.partial_note):
+            raise ValueError("a partial read needs a note, and only a partial read has one")
 
 
 class Adapter(Protocol):

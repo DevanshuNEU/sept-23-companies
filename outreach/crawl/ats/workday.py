@@ -5,7 +5,10 @@ wday/cxs/{tenant}/{site}/jobs` takes `{"limit", "offset", "searchText", "applied
 `{"total", "jobPostings": [...], "facets": [...]}`. Workday refuses a limit above 20, and it reports `total` on the
 first page only (later pages say 0), so the count comes from page 1.
 
-A list that may be incomplete is `error`, never `ok` (Review Focus 1). Workday lists at most 2,000 rows: past that,
+A list that may be incomplete is `error` or a partial `ok`, never a whole `ok` (Review Focus 1). Network and HTTP
+trouble, a wrong shape and a list over the cap are `error`. When the board answered but a few rows were broken (no
+usable `externalPath` or title) or listed twice (the pages moved), or the list came up at most `SHORT_ALLOWED` short of
+its total, the read is a partial `ok` (#232): the rows it got are stored and nothing is closed. Workday lists at most 2,000 rows: past that,
 offsets wrap to page 1. A list that reports 2,000 or more is split by the `jobFamilyGroup` facet, each family read
 to its end and the postings joined by `externalPath`. The read is `error` ("list capped") when a family itself
 reports 2,000 or more, when the first page has no family facet, when the families together cover fewer postings than
@@ -28,6 +31,13 @@ __all__ = ["WorkdayAdapter", "posted_on_from_relative"]
 
 PAGE_SIZE = 20
 LIST_CAP = 2000
+SHORT_SHARE = 0.02  # a list this share short of its total (broken, repeated or missing rows) is still read, as partial
+SHORT_MIN = 3       # ... or this many rows, whichever is more
+
+
+def short_allowed(total: int) -> int:
+    """How many rows a list of `total` may come up short and still be read as a partial `ok`."""
+    return max(SHORT_MIN, int(total * SHORT_SHARE))
 _HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 _LIST = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
 _DETAIL = "https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}{path}"
@@ -64,8 +74,10 @@ class _Listing:
 
     `capped` means the first page reported the cap or more: nothing was paged and `rows` is empty."""
 
-    def __init__(self, total: int, rows: dict[str, dict], first: dict, resp: Response, capped: bool = False):
+    def __init__(self, total: int, rows: dict[str, dict], first: dict, resp: Response, capped: bool = False,
+                 broken: int = 0, repeated: int = 0):
         self.total, self.rows, self.first, self.resp, self.capped = total, rows, first, resp, capped
+        self.broken, self.repeated = broken, repeated  # rows skipped: no usable path or title; listed twice
 
 
 def _family_ids(data: dict) -> list[str]:
@@ -126,21 +138,22 @@ class WorkdayAdapter:
         if total == 0 and page:
             return read_error("the answer says total 0 but lists postings", status=got.status)
         rows: dict[str, dict] = {}
+        broken = repeated = 0
         resp, offset = got, 0
         while True:
+            fresh = 0
             for item in page:
                 path = _text(item.get("externalPath")) if isinstance(item, dict) else ""
                 if not _valid_path(path) or not _text(item.get("title")):
-                    return read_error("a posting has no usable externalPath or no title", status=resp.status)
+                    broken += 1  # skipped; the read becomes partial
+                    continue
                 if path in rows:
-                    return read_error(f"posting {path} is listed twice (the pages wrapped or moved)",
-                                      status=resp.status)
+                    repeated += 1  # the pages moved under the read; skipped, the read becomes partial
+                    continue
                 rows[path] = item
-            if len(rows) >= total:
-                break
-            if not page:
-                return read_error(f"the pages ended with {len(rows)} postings but total is {total}",
-                                  status=resp.status)
+                fresh += 1
+            if len(rows) + broken >= total or not page or (page and not fresh and not broken):
+                break  # the whole total seen, the pages ended, or a page brought nothing new (they wrapped)
             offset += len(page)
             if offset >= LIST_CAP:
                 return read_error("list capped: the pages passed offset 2000 before the total was reached",
@@ -153,9 +166,12 @@ class WorkdayAdapter:
                 return parsed
             page, _, _ = parsed
             resp = got
-        if len(rows) != total:
+        if len(rows) > total:
             return read_error(f"{len(rows)} postings listed but total is {total}", status=resp.status)
-        return _Listing(total, rows, first, got)
+        if total - len(rows) > short_allowed(total):
+            return read_error(f"{len(rows)} usable postings listed but total is {total} ({broken} broken, "
+                              f"{repeated} listed twice)", status=resp.status)
+        return _Listing(total, rows, first, got, broken=broken, repeated=repeated)
 
     def list(self, token: str, validators: Validators) -> ReadResult:
         if not safe_token(self.ats, token):
@@ -171,6 +187,7 @@ class WorkdayAdapter:
                 return read_error(f"list capped: {first.total} postings and no jobFamilyGroup facet to split by",
                                   status=resp.status)
             rows, covered = {}, 0
+            broken = repeated = 0
             for family in ids:
                 part = self._listing(url, {"jobFamilyGroup": [family]})
                 if isinstance(part, ReadResult):
@@ -179,18 +196,24 @@ class WorkdayAdapter:
                     return read_error(f"list capped: family {family} alone reports {part.total} postings",
                                       status=resp.status)
                 covered += part.total
+                broken, repeated = broken + part.broken, repeated + part.repeated
                 rows.update(part.rows)
             # The families' own totals can add up while they overlap, so what counts is the union.
-            if len(rows) < first.total:
+            if first.total - len(rows) > short_allowed(first.total):
                 return read_error(f"list capped: the families cover {len(rows)} distinct postings "
                                   f"({covered} counted) of {first.total}", status=resp.status)
+        else:
+            broken, repeated = first.broken, first.repeated
         today = self._today or datetime.datetime.now(datetime.timezone.utc).date()
         jobs = [JobRef(native_id=path, title=_text(item.get("title")),
                        url=_POSTING.format(tenant=tenant, wd=wd, site=site, path=path),
                        location=_text(item.get("locationsText")), country=None,
                        posted_on=posted_on_from_relative(item.get("postedOn"), today), body=None)
                 for path, item in rows.items()]
-        return finish_list(jobs, resp, validators, use_etag=False)
+        missing = first.total - len(rows)
+        note = (f"{len(rows)} of {first.total} postings read ({broken} broken, {repeated} listed twice, "
+                f"{max(missing - broken, 0)} missing)") if missing > 0 or broken or repeated else ""
+        return finish_list(jobs, resp, validators, use_etag=False, partial_note=note)
 
     @staticmethod
     def _parts(token: str) -> tuple[str, str, str, str]:

@@ -94,15 +94,30 @@ class OracleListTests(unittest.TestCase):
         self.assertEqual((r.result, r.jobs, r.validators), ("empty", (), Validators()))
         self.assertEqual(client.requests, [U0])
 
-    def test_count_mismatch_is_an_error(self):
-        # The total says 4, the pages hold 3 distinct ids: an ok would close the fourth as gone.
+    def test_a_count_one_ahead_is_a_partial_read(self):
+        # The total says 4, the pages hold 3 distinct ids: a whole ok would close the fourth as gone, so the read is a
+        # partial ok (#232): the 3 are kept and nothing is closed.
         p0 = json.loads(P0)
         p0["items"][0]["TotalJobsCount"] = 4
         p1 = json.loads(P1)
         p1["items"][0]["TotalJobsCount"] = 4
         r, _ = read({U0: json_response(p0), U2: json_response(p1), U3: json_response(envelope(4, []))})
+        self.assertEqual((r.result, len(r.jobs), r.partial, r.validators), ("ok", 3, True, Validators()))
+        self.assertIn("3 of 4", r.partial_note)
+
+    def test_a_count_far_ahead_is_an_error(self):
+        r, _ = read({U0: json_response(envelope(400, [row(str(n)) for n in range(200)])),
+                     page_url(200): json_response(envelope(400, [row(str(n)) for n in range(200, 300)])),
+                     page_url(300): json_response(envelope(400, []))})
         self.assertEqual((r.result, r.jobs), ("error", ()))
-        self.assertIn("4", r.error)
+        self.assertIn("400", r.error)
+
+    def test_a_broken_requisition_is_skipped_and_the_read_is_partial(self):
+        broken = dict(row("2"))
+        broken.pop("Title", None)
+        r, _ = read({U0: json_response(envelope(3, [row("1"), broken, row("3")]))})
+        self.assertEqual((r.result, [j.native_id for j in r.jobs], r.partial), ("ok", ["1", "3"], True))
+        self.assertIn("1 broken", r.partial_note)
 
     def test_a_total_below_the_rows_listed_is_an_error(self):
         r, _ = read({U0: json_response(envelope(1, [row("1"), row("2")]))})
@@ -116,10 +131,11 @@ class OracleListTests(unittest.TestCase):
         r, _ = read({U0: json_response(envelope(5, []))})
         self.assertEqual((r.result, r.jobs), ("error", ()))
 
-    def test_a_repeated_page_ends_the_read_as_an_error(self):
-        # Page two answers page one again (offset ignored): no new ids, so stop at once.
+    def test_a_repeated_page_ends_the_read_at_once(self):
+        # Page two answers page one again (offset ignored): no new ids, so stop at once. Two of three is within what a
+        # partial read allows, so the two are kept and nothing is closed (#232).
         r, client = read({U0: P0, U2: P0})
-        self.assertEqual((r.result, r.jobs), ("error", ()))
+        self.assertEqual((r.result, len(r.jobs), r.partial), ("ok", 2, True))
         self.assertEqual(client.requests, [U0, U2])
 
     def test_a_page_that_repeats_only_some_ids_still_counts_each_id_once(self):

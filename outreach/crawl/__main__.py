@@ -99,7 +99,8 @@ def _polite(client: HttpClient | None, cfg):
 def _line(report) -> str:
     """One line for the log: the board counts, then the watched pages."""
     text = (f"read_boards run {report.run_id}: read {report.read} (ok {report.ok}, empty {report.empty}, "
-            f"error {report.error}, unchanged {report.unchanged}), deferred {report.deferred}, "
+            f"error {report.error}, unchanged {report.unchanged}"
+            + (f", {report.partial} of the ok partial" if report.partial else "") + f"), deferred {report.deferred}, "
             f"failed {report.failed}, new {report.new}, closed {report.closed}, {report.seconds:.1f} s")
     if report.switched_off:
         text += f"; switched off {report.switched_off} (their reader is off in config.toml)"

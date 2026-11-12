@@ -60,8 +60,12 @@ def json_body(resp: Response) -> object | ReadResult:
 
 
 def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, *, use_etag: bool = False,
-                fingerprint_ids: Iterable[str] | None = None, board_name: str = "") -> ReadResult:
+                fingerprint_ids: Iterable[str] | None = None, board_name: str = "",
+                partial_note: str = "") -> ReadResult:
     """Turn parsed jobs into the read's result: repeated ids dropped (first wins), then empty, unchanged or ok.
+
+    With a `partial_note` the list is not whole (a few rows broken, repeated or missing): the read is a partial `ok`,
+    never `unchanged` (its ids are no baseline), and an error when nothing usable is left.
 
     An ETag adapter whose 200 carries an `etag` header never reports `unchanged` here: the 200 already says the board
     changed. A fingerprint adapter, and an ETag adapter whose 200 has no `etag` header (some big boards send none),
@@ -74,7 +78,12 @@ def finish_list(jobs: Iterable[JobRef], resp: Response, validators: Validators, 
             seen.add(job.native_id)
             unique.append(job)
     if not unique:
+        if partial_note:
+            return read_error(f"no usable posting: {partial_note}", status=resp.status)
         return ReadResult("empty", (), Validators(), board_name=board_name)
+    if partial_note:
+        return ReadResult("ok", tuple(unique), Validators(), http_status=resp.status, board_name=board_name,
+                          partial=True, partial_note=partial_note)
     fingerprint = ids_fingerprint(list(fingerprint_ids) if fingerprint_ids is not None else seen)
     use_etag = use_etag and bool(resp.headers.get("etag"))
     if not use_etag and fingerprint == validators.ids_fingerprint:

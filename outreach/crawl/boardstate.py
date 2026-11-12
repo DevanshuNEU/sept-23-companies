@@ -78,7 +78,9 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
     """
     streaks = next_streaks(board.last_read, board.empty_streak, board.error_streak, board.streak_since,
                            result.result, now)
-    if result.result == "ok":
+    if result.result == "ok" and result.partial:  # an incomplete list is no baseline: the next read compares in full
+        etag, fingerprint = "", ""
+    elif result.result == "ok":
         etag, fingerprint = result.validators.etag, result.validators.ids_fingerprint
     elif result.result == "empty":
         etag, fingerprint = "", ""

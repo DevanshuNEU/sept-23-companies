@@ -234,6 +234,52 @@ describe('the Jobs page', () => {
     await waitFor(() => expect(new Set(companies())).toEqual(new Set(['Retell AI'])));
   });
 
+  it('the hour windows ask for 1h, 6h and 24h and say so in the headline', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const asked = vi.spyOn(client, 'jobs');
+    const group = screen.getByRole('group', { name: 'Posted within' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['1 hour', '6 hours', '24 hours', '7 days', '30 days', '60 days', '90 days', 'Any time']);
+    await user.click(within(group).getByRole('button', { name: '1 hour' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ window: '1h' })));
+    expect(await screen.findByText(/at your level in the last hour$/)).toBeInTheDocument();
+    await user.click(within(group).getByRole('button', { name: '6 hours' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ window: '6h' })));
+    expect(await screen.findByText(/at your level in the last 6 hours$/)).toBeInTheDocument();
+    for (const r of rows()) expect(r.closest('[aria-labelledby="date-unknown-h"]')).toBeNull();
+  });
+
+  it('the level chips start on Any level, combine, and Any level clears them', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const asked = vi.spyOn(client, 'jobs');
+    const group = screen.getByRole('group', { name: 'Level' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Any level', 'New grad', 'Early career', 'SDE 1', 'SDE 2', 'Entry level', 'Level not stated']);
+    expect(within(group).getByRole('button', { name: 'Any level' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(group).getByRole('button', { name: 'Early career' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ levels: ['early_career'] })));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    await waitFor(() => expect(rows().every((r) => r.textContent?.includes('early career'))).toBe(true));
+    expect(within(group).getByRole('button', { name: 'Any level' })).toHaveAttribute('aria-pressed', 'false');
+    await user.click(within(group).getByRole('button', { name: 'New grad' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ levels: ['new_grad', 'early_career'] })));
+    await waitFor(() => expect(rows().some((r) => r.textContent?.includes('new grad'))).toBe(true));
+    expect(rows().every((r) => /new grad|early career/.test(r.textContent ?? ''))).toBe(true);
+    await user.click(within(group).getByRole('button', { name: 'Early career' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ levels: ['new_grad'] })));
+    await user.click(within(group).getByRole('button', { name: 'Any level' }));
+    await waitFor(() => expect(asked).toHaveBeenLastCalledWith(expect.objectContaining({ levels: [] })));
+    await waitFor(() => expect(rows()).toHaveLength(20));
+  });
+
+  it('an empty list with a level chip on says to clear the level', async () => {
+    const user = userEvent.setup();
+    await open();
+    await user.click(within(screen.getByRole('group', { name: 'Level' })).getByRole('button', { name: 'SDE 1' }));
+    await user.type(search(), 'no such company');
+    expect(await screen.findByText('Widen the window, clear the level, or clear the search.')).toBeInTheDocument();
+  });
+
   it('an empty list says what to widen, naming only what is on', async () => {
     const user = userEvent.setup();
     await open();

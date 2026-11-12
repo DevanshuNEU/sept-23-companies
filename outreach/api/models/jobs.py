@@ -8,7 +8,7 @@ from typing import Literal
 from outreach.api.models.base import Wire, WireRequest
 
 JobView = Literal["your_level", "higher"]
-JobWindow = Literal["7", "30", "60", "90", "any"]
+JobWindow = Literal["1h", "6h", "24h", "7", "30", "60", "90", "any"]
 CheckNowState = Literal["started", "running", "not_live"]
 CheckState = Literal["idle", "queued", "running", "done"]
 JobSize = Literal["any", "small", "big", "unknown"]

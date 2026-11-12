@@ -160,3 +160,32 @@ class CacheTest(JobsCase):
         second = self.get("/api/jobs?view=your_level").content
         self.assertEqual(first, second)
         self.assertEqual(self.app.state.view_cache.computed, 1)
+
+
+class HourWindowAndLevelTest(JobsCase):
+    """#213 on the wire: window 1h, 6h and 24h, and `levels`, a comma list of level chips."""
+
+    def test_hour_windows(self):
+        co = self.company(size=40)
+        # NOW is 15:14 UTC on 2026-11-10.
+        recent = posting(self.conn, co, "Recent", posted_on="2026-11-10", first_seen_at="2026-11-10T14:44:00Z",
+                         last_seen_at="2026-11-10T14:44:00Z", list_at="2026-11-10T14:44:00Z")
+        decision(self.conn, recent, level_tier="new_grad", level_ok=1)
+        older = self.job(co, posted="2026-11-09")
+        self.assertEqual(self.ids(window="1h"), [recent])
+        self.assertEqual(self.ids(window="24h"), [recent])
+        self.assertEqual(self.ids(window="7"), [recent, older])
+
+    def test_levels_keep_the_chosen_chips(self):
+        co = self.company(size=40)
+        ng, s1 = self.job(co, "NG", tier="new_grad"), self.job(co, "S1", tier="swe1")
+        self.job(co, "EC", tier="early_career")
+        self.assertEqual(sorted(self.ids(levels="new_grad,swe1")), sorted([ng, s1]))
+        self.assertEqual(self.ids(levels="swe1"), [s1])
+        self.assertEqual(len(self.ids()), 3)
+
+    def test_a_bad_window_or_level_is_a_400(self):
+        for params in ({"window": "2h"}, {"levels": "senior"}, {"levels": "swe1,"}, {"levels": "SWE1"},
+                       {"levels": "swe1;drop"}):
+            res = self.get("/api/jobs", params=params)
+            self.assertEqual((res.status_code, res.json()["code"]), (400, "bad_request"), params)

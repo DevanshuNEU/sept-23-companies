@@ -11220,7 +11220,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page.",
+        "description": "The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page. `window`\nis days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.",
         "operationId": "jobs",
         "parameters": [
           {
@@ -11244,6 +11244,9 @@
             "schema": {
               "default": "30",
               "enum": [
+                "1h",
+                "6h",
+                "24h",
                 "7",
                 "30",
                 "60",
@@ -11318,6 +11321,24 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "levels",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "pattern": "^(new_grad|early_career|swe1|swe2|entry|not_stated)(,(new_grad|early_career|swe1|swe2|entry|not_stated))*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Levels"
             }
           }
         ],

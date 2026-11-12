@@ -7,7 +7,7 @@
  * 20 are from before list times (their day only), the oldest is 94 days old; and 2 at your level have no date at all,
  * so each tab, window and size has something to show.
  */
-import type { IsoDate, IsoTime, JobRow, JobsParams, JobsView } from '../types';
+import type { IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsView } from '../types';
 
 /** The API's `name_key` in the small: lower case, letters and digits only. A search with none of either finds nothing. */
 const nameKey = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -137,12 +137,24 @@ export function foundJobs(asOf: IsoTime): JobRow[] {
 }
 
 /** The API's job list: the tab, the window (a row with no date is in every one), the size, the contacted filter and the company search, then one page after the cursor. */
+/** A row's level tag to its chip key, as the API splits them (#213). */
+const LEVEL_OF_TAG: Record<string, JobLevel> = {
+  'new grad': 'new_grad', 'early career': 'early_career', 'SDE 1': 'swe1', 'SDE 2': 'swe2', 'entry level': 'entry', 'level not stated': 'not_stated',
+};
+
 export function jobsView(all: JobRow[], higher: ReadonlySet<number>, ages: ReadonlyMap<number, number>, p: JobsParams, asOf: IsoTime, limit = 50): JobsView {
   const key = nameKey(p.q);
-  const days = p.window === 'any' ? Infinity : Number(p.window);
+  const hours = p.window.endsWith('h') ? Number(p.window.slice(0, -1)) : null;
+  const days = hours !== null || p.window === 'any' ? Infinity : Number(p.window);
+  const now = Date.parse(asOf);
+  // As the API: an hour window reads the list time and leaves out Date unknown rows (#213).
+  const inWindow = (r: JobRow) =>
+    hours !== null ? r.listAt !== null && now - Date.parse(r.listAt) <= hours * 3_600_000 : r.listAt === null || (ages.get(r.postingId) ?? Infinity) <= days;
+  const levelOk = (r: JobRow) => !p.levels?.length || p.levels.includes(LEVEL_OF_TAG[r.levelTag] ?? 'not_stated');
   const sizeOk = (r: JobRow) => p.size === 'any' || (p.size === 'unknown' ? r.size === null && !r.big : p.size === 'big' ? r.big : r.size !== null && !r.big);
   const base = all
-    .filter((r) => r.listAt === null || (ages.get(r.postingId) ?? Infinity) <= days)
+    .filter(inWindow)
+    .filter(levelOk)
     .filter(sizeOk)
     .filter((r) => !p.notContacted || r.contactedOn === null)
     .filter((r) => !p.q.trim() || (key !== '' && nameKey(r.companyName).includes(key)));

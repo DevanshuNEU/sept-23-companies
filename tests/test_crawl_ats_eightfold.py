@@ -66,6 +66,15 @@ class EightfoldListTests(unittest.TestCase):
         r, _ = read({url(0): page(1, [pos(8, locations=[], standardizedLocations=["Austin, TX, US"])])})
         self.assertEqual(r.jobs[0].location, "Austin, TX, US")
 
+    def test_every_tenant_host_is_spaced_three_seconds(self):
+        # 1 a second drew 429s and tripped the breaker on the first live reads (#248).
+        from outreach.crawl.config import load_crawl_config
+        from outreach.crawl.polite import bucket_for
+        from outreach.crawl.ats.eightfold import TENANTS
+        cfg = load_crawl_config()
+        for host in [h for h, _ in TENANTS.values()] + ["acme.eightfold.ai"]:
+            self.assertEqual(cfg.host_interval_s[bucket_for(host, cfg)], 3.0, host)
+
     def test_its_posted_date_is_kept_but_never_trusted_for_the_list(self):
         self.assertNotIn("eightfold", DATE_TRUSTED)  # postedTs moves when a job is reposted
 

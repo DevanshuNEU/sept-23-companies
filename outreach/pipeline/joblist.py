@@ -63,7 +63,7 @@ LEVELS = ("new_grad", "early_career", "swe1", "swe2", "entry", "not_stated")
 BIG_OVER = 300  # a company is big above this many people
 BIG_BY_POSTINGS = 50  # a company of unknown size is big above this many open postings read as US
 ENTERPRISE_ATS = ("workday", "oracle_orc")  # an active board on one of these makes a company of unknown size big
-_VIEWS = ("your_level", "higher")
+_VIEWS = ("your_level", "higher", "other")  # a row's group is its index (`grp`)
 _SIZES = ("any", "small", "big", "unknown")
 _TZ = "America/New_York"
 _NY = ZoneInfo(_TZ)
@@ -89,11 +89,14 @@ LISTED_SQL = ("p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' A
               "AND d.eligibility = 'ok' AND d.level_tier <> 'senior' "
               "AND p.company_id NOT IN (SELECT value FROM json_each(:nogo)) "
               "AND p.posting_id NOT IN (SELECT value FROM json_each(:passed))")
+# A software role (#250): what the two level tabs and Check now's new count read. A row stored before 0014 and not yet
+# rebuilt has no role and counts as software, so the list never empties in between.
+SOFTWARE_SQL = "COALESCE(d.role, 'software') = 'software'"
 
 
 @dataclass(frozen=True)
 class JobFilters:
-    view: Literal["your_level", "higher"] = "your_level"
+    view: Literal["your_level", "higher", "other"] = "your_level"
     window_days: int = 30
     size: Literal["any", "small", "big", "unknown"] = "any"
     not_contacted: bool = False
@@ -130,7 +133,7 @@ class JobPage:
     rows: list[JobRow]
     total: int  # postings in the view, under every filter
     next_after: str | None
-    counts: dict[str, int]  # `your_level` and `higher` under every filter but the view
+    counts: dict[str, int]  # `your_level`, `higher` and `other` under every filter but the view
 
 
 def passed_posting_ids(conn: sqlite3.Connection) -> frozenset[int]:
@@ -164,7 +167,7 @@ _SQL = """
 WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
-         d.level_tier, {state} AS state, d.sponsorship, d.us,
+         d.level_tier, {state} AS state, d.sponsorship, d.us, {software} AS software,
          p.list_at, p.posted_at, p.first_seen_at, p.seen_gap_s, rp.first_seen_at AS reposted_from,
          CASE WHEN p.list_at IS NULL THEN 1 ELSE 0 END AS unk, COALESCE(p.list_at, p.first_seen_at) AS at
   FROM posting p
@@ -217,9 +220,9 @@ rows AS (
          c.list_at, c.posted_at, c.first_seen_at, c.seen_gap_s, c.reposted_from, c.unk, c.at,
          c.level_tier, c.state, c.sponsorship,
          co.big,
-         CASE WHEN (c.state = 'fit' OR (c.state = 'uncertain' AND NOT co.big))
-                   AND (c.us = 'yes' OR NOT co.big)
-              THEN 1 ELSE 0 END AS yl,
+         CASE WHEN NOT c.software THEN 2
+              WHEN (c.state = 'fit' OR (c.state = 'uncertain' AND NOT co.big)) AND (c.us = 'yes' OR NOT co.big)
+              THEN 0 ELSE 1 END AS grp,
          CASE WHEN co.size IS NULL THEN (CASE WHEN co.big_guess = 1 THEN :big_rank ELSE :unknown_rank END)
               WHEN co.size <= :big THEN co.size ELSE :big_rank + co.size END AS rank
   FROM cand c JOIN co ON co.cid = c.cid
@@ -230,13 +233,16 @@ rows AS (
                    WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
 )
-""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL).replace("{level_key}", LEVEL_KEY_SQL)
-_COUNT = _SQL + "SELECT COALESCE(SUM(yl), 0) AS yl, COUNT(*) AS n FROM rows"
+""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL).replace("{level_key}", LEVEL_KEY_SQL).replace(
+    "{software}", SOFTWARE_SQL)
+_COUNT = (_SQL + "SELECT COALESCE(SUM(grp = 0), 0) AS g0, COALESCE(SUM(grp = 1), 0) AS g1, "
+          "COALESCE(SUM(grp = 2), 0) AS g2 FROM rows")
 # The page and both counts in one pass: the window functions run over every row of the filters, before the view
 # and the cursor narrow it to the page.
 _PAGE = _SQL + """
-SELECT * FROM (SELECT rows.*, SUM(yl) OVER () AS yl_total, COUNT(*) OVER () AS n_total FROM rows)
-WHERE yl = :yl AND (:has_after = 0 OR unk > :a_unk OR (unk = :a_unk AND (at < :a_at OR (at = :a_at
+SELECT * FROM (SELECT rows.*, SUM(grp = 0) OVER () AS g0, SUM(grp = 1) OVER () AS g1, SUM(grp = 2) OVER () AS g2
+               FROM rows)
+WHERE grp = :grp AND (:has_after = 0 OR unk > :a_unk OR (unk = :a_unk AND (at < :a_at OR (at = :a_at
       AND (rank > :a_rank OR (rank = :a_rank AND posting_id > :a_id))))))
 ORDER BY unk, at DESC, rank, posting_id LIMIT :limit
 """
@@ -344,7 +350,7 @@ def _prepare(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | Non
     canon = canonical_ids(conn)
     contacted = _contacted(conn, canon)
     params = _params(conn, now, today, f, canon, contacted)
-    page = {**params, "yl": int(f.view == "your_level"), "has_after": int(cursor is not None),
+    page = {**params, "grp": _VIEWS.index(f.view), "has_after": int(cursor is not None),
             "a_unk": cursor[0] if cursor else 0, "a_at": cursor[1] if cursor else "",
             "a_rank": cursor[2] if cursor else 0, "a_id": cursor[3] if cursor else 0, "limit": limit + 1}
     return contacted, params, page
@@ -357,11 +363,8 @@ def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, 
     cur = conn.cursor()
     cur.row_factory = sqlite3.Row
     found = cur.execute(_PAGE, page).fetchall()
-    if found:
-        counts = {"your_level": found[0]["yl_total"], "higher": found[0]["n_total"] - found[0]["yl_total"]}
-    else:  # no row in this view or past the last one: the page carries no count, so ask for it
-        counted = cur.execute(_COUNT, params).fetchone()
-        counts = {"your_level": counted["yl"], "higher": counted["n"] - counted["yl"]}
+    counted = found[0] if found else cur.execute(_COUNT, params).fetchone()  # an empty page carries no count
+    counts = {view: counted[f"g{i}"] for i, view in enumerate(_VIEWS)}
     more = len(found) > limit
     rows = [_row(r, contacted) for r in found[:limit]]
     last = found[limit - 1] if more else None

@@ -19,10 +19,10 @@ class JobsCase(ApiCase):
             evidence(self.conn, cid, "size", num_low=size, num_high=size)
         return cid
 
-    def job(self, company, title="Software Engineer", *, posted="2026-11-09", tier="new_grad", ok=1):
+    def job(self, company, title="Software Engineer", *, posted="2026-11-09", tier="new_grad", ok=1, **dec):
         pid = posting(self.conn, company, title, posted_on=posted, first_seen_at=f"{posted}T12:00:00Z",
                       last_seen_at="2026-11-09T12:00:00Z")
-        decision(self.conn, pid, level_tier=tier, level_ok=ok)
+        decision(self.conn, pid, level_tier=tier, level_ok=ok, **dec)
         return pid
 
     def jobs(self, status=200, **params):
@@ -43,7 +43,7 @@ class ListTest(JobsCase):
         body = self.jobs()
         self.assertEqual([r["postingId"] for r in body["rows"]], [new, old])
         self.assertEqual((body["total"], body["nextAfter"], body["asOf"]), (2, None, self.now))
-        self.assertEqual(body["counts"], {"yourLevel": 2, "higher": 1})
+        self.assertEqual(body["counts"], {"yourLevel": 2, "higher": 1, "other": 0})
 
     def test_a_row_is_camel_case_with_every_fact(self):
         co = self.company("Acme", size=40)
@@ -82,6 +82,15 @@ class ListTest(JobsCase):
         self.job(co)
         high = self.job(co, tier="swe2", ok=0)
         self.assertEqual(self.ids(view="higher"), [high])
+
+    def test_view_other_lists_the_other_roles(self):
+        # #250: everything that is not a software role is on Other roles, with its own count.
+        co = self.company(size=40)
+        self.job(co)
+        scientist = self.job(co, "Data Scientist I", role="other")
+        body = self.jobs(view="other")
+        self.assertEqual([r["postingId"] for r in body["rows"]], [scientist])
+        self.assertEqual(body["counts"], {"yourLevel": 1, "higher": 0, "other": 1})
 
     def test_window_any_and_7(self):
         co = self.company(size=40)
@@ -127,7 +136,7 @@ class ListTest(JobsCase):
 
     def test_an_empty_store_is_an_empty_list(self):
         self.assertEqual(self.jobs(), {"asOf": self.now, "rows": [], "total": 0, "nextAfter": None,
-                                       "counts": {"yourLevel": 0, "higher": 0}})
+                                       "counts": {"yourLevel": 0, "higher": 0, "other": 0}})
 
 
 class BadParameterTest(JobsCase):

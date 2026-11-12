@@ -339,7 +339,8 @@ export interface paths {
         };
         /**
          * Jobs
-         * @description The job list: open engineering postings at his level (or the higher levels), newest first, 50 a page. `window`
+         * @description The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a
+         *     page. `window`
          *     is days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.
          */
         get: operations["jobs"];
@@ -2334,6 +2335,8 @@ export interface components {
         JobCounts: {
             /** Higher */
             higher: number;
+            /** Other */
+            other: number;
             /** Yourlevel */
             yourLevel: number;
         };
@@ -5991,7 +5994,7 @@ export interface operations {
     jobs: {
         parameters: {
             query?: {
-                view?: "your_level" | "higher";
+                view?: "your_level" | "higher" | "other";
                 window?: "1h" | "6h" | "24h" | "7" | "30" | "60" | "90" | "any";
                 size?: "any" | "small" | "big" | "unknown";
                 notContacted?: boolean;

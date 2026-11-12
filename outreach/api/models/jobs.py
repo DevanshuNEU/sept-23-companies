@@ -7,7 +7,7 @@ from typing import Literal
 
 from outreach.api.models.base import Wire, WireRequest
 
-JobView = Literal["your_level", "higher"]
+JobView = Literal["your_level", "higher", "other"]  # other: every listed role that is not software (#250)
 JobWindow = Literal["1h", "6h", "24h", "7", "30", "60", "90", "any"]
 CheckNowState = Literal["started", "running", "not_live"]
 CheckState = Literal["idle", "queued", "running", "done"]
@@ -39,6 +39,7 @@ class JobRowWire(Wire):
 class JobCounts(Wire):
     your_level: int
     higher: int
+    other: int
 
 
 class JobsView(Wire):

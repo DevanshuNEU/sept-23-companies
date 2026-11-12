@@ -13,7 +13,7 @@ from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, se
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()  # the tests' scratch copy: the adaptive ramp, 20 up to 100
-FLAT = load_config(SHIPPED_SEND_CONFIG)  # what ships: flat 100 (#9, 2026-11-06)
+FLAT = load_config(SHIPPED_SEND_CONFIG)  # what ships: flat 200 (#9, 2026-11-12)
 NY = ZoneInfo("America/New_York")
 BASE = date(2026, 11, 2)  # a Monday
 STAMP = "2026-11-02T15:00:00Z"
@@ -232,31 +232,37 @@ class RampTest(Base):
 
 
 class FlatLimitTest(Base):
-    """The shipped limit is flat 100 a day (#9, 2026-11-06): no warning lowers it, and a stale lower row lifts."""
+    """The shipped limit is flat 200 a day (#9, 2026-11-12, #227): no warning lowers it, and a stale lower row lifts."""
 
-    def test_the_shipped_config_is_flat_100(self):
-        self.assertEqual((FLAT.ramp_start, FLAT.ramp_floor, FLAT.ramp_ceiling), (100, 100, 100))
+    def test_the_shipped_config_is_flat_200(self):
+        self.assertEqual((FLAT.ramp_start, FLAT.ramp_floor, FLAT.ramp_ceiling), (200, 200, 200))
 
-    def test_a_day_with_no_row_gets_100(self):
-        self.assertEqual(ramp.limit_for(self.db, d(0), FLAT), 100)
+    def test_a_day_with_no_row_gets_200(self):
+        self.assertEqual(ramp.limit_for(self.db, d(0), FLAT), 200)
 
-    def test_a_row_written_at_20_before_the_ruling_still_gets_100(self):
+    def test_a_row_written_at_20_before_the_ruling_still_gets_200(self):
         put_day(self.db, d(0), 20)
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 100)
-        self.assertEqual(ramp.limit_for(self.db, d(1), FLAT), 100)
+        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
+        self.assertEqual(ramp.limit_for(self.db, d(1), FLAT), 200)
 
     def test_a_warning_lowers_nothing(self):
-        put_day(self.db, d(0), 100)
+        put_day(self.db, d(0), 200)
         self.send(ny(0, 10))
         self.note("bounce_warning", ny(0, 11))
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 100)
-        self.assertEqual(ramp.open_day(self.db, ny(1), FLAT).start_limit, 100)
+        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
+        self.assertEqual(ramp.open_day(self.db, ny(1), FLAT).start_limit, 200)
 
     def test_a_hard_block_still_pauses(self):
-        put_day(self.db, d(0), 100)
+        put_day(self.db, d(0), 200)
         self.note("gmail_limit", ny(0, 11))
         self.assertEqual(self.sender()["pause_kind"], "hard_block")
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 100)
+        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
+
+
+    def test_a_row_written_at_100_before_this_ruling_lifts_to_200(self):
+        put_day(self.db, d(0), 100)
+        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
+        self.assertEqual(ramp.limit_for(self.db, d(1), FLAT), 200)
 
 
 class WeekendSendTest(Base):

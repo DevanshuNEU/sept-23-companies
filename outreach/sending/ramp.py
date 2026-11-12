@@ -65,7 +65,7 @@ def limit_for(conn: sqlite3.Connection, d: date, cfg: SendConfig) -> int:
     outcome = prev["outcome"]
     if outcome is None and prev["closed_at"] is None:
         outcome = _close_outcome(conn, date.fromisoformat(prev["day"]), cfg)[0]
-    # A row written under an older, lower floor is lifted to today's floor (flat 100, #9 2026-11-06).
+    # A row written under an older, lower floor is lifted to today's floor (flat 200, #9 2026-11-12).
     level = max(prev["send_limit"], cfg.ramp_floor)
     if outcome == "clean":
         return _step_up(level, cfg)

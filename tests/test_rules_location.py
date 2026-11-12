@@ -99,6 +99,15 @@ class UsStatusTest(unittest.TestCase):
                 self.assertEqual(us_status(loc, None, self.cfg), "no")
         self.assertEqual(us_status("Remote - US or Latin America", None, self.cfg), "yes")
 
+    def test_a_region_beside_north_america_stays_possible(self):
+        # #250 review: "North America" may be the US, so a non-US region next to it never makes the posting "no".
+        for loc in ("Remote - North America or South America", "Remote - Americas (North America, Latin America)",
+                    "Remote: North & South America", "Remote (Americas, incl. Central America)",
+                    "Remote - North America or LATAM"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "unknown")
+        self.assertEqual(us_status("Toronto, Canada", "Canada", self.cfg), "no")
+
     def test_brazilian_and_nearby_cities_read_no(self):
         # Cadence's Application Engineer I came in as a bare "BELO HORIZONTE" and read unknown (2026-10-28).
         for loc in ("BELO HORIZONTE", "Sao Paulo", "S\u00e3o Paulo, Brazil", "Rio de Janeiro", "Curitiba", "Porto Alegre",

@@ -24,7 +24,7 @@ REQUIRED = {
               "body_entry", "master_words", "master_abbreviations", "bachelor_words", "upper_bound", "technologies",
               "phd_words", "phd_cues", "phd_softeners"),
     "location": ("us_marks", "us_state_codes", "us_state_names", "us_cities", "non_us_countries", "non_us_cities",
-                 "shared_city_names", "title_fillers"),
+                 "shared_city_names", "title_fillers", "us_possible"),
     "sponsorship": ("topic", "context", "self_context", "benefit", "non_discrimination", "negation", "negation_near",
                     "clause_verbs", "field_no", "hedge", "negators", "negation_elided", "elided_complete", "continuation",
                     "not_subject", "negation_cued", "negation_cue", "opt", "opt_acronyms", "opt_support", "citizenship",

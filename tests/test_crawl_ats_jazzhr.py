@@ -127,6 +127,20 @@ class JazzListTests(unittest.TestCase):
         r, _ = read({URL: text_response(page)})
         self.assertEqual((r.result, [j.native_id for j in r.jobs]), ("ok", ["AbC1"]))
 
+    def test_the_mobile_copy_of_the_same_jobs_is_fine(self):
+        # The live page (2026-11-12, #157) lists every job twice: the table, then a `jobs_row` div per job.
+        def mobile(job_id, title):
+            return (f'<div class="jobs_row"><div><a class="job_title_link" href="/apply/jobs/details/{job_id}?&">'
+                    f'{title}</a></div><span class="resumator_description"><strong>Location:</strong> Boston</span></div>')
+        page = listing(row("AbC1", href="/apply/jobs/details/AbC1?&"), row("AbC2")).replace(
+            "</table>", "</table>" + mobile("AbC1", "Engineer") + mobile("AbC2", "Engineer"))
+        r, _ = read({URL: text_response(page)})
+        self.assertEqual((r.result, [j.native_id for j in r.jobs]), ("ok", ["AbC1", "AbC2"]))
+        # A job only in the mobile copy was not read from a row: the list may be incomplete.
+        page = listing(row("AbC1")).replace("</table>", "</table>" + mobile("AbC1", "Engineer") + mobile("AbC3", "X"))
+        r, _ = read({URL: text_response(page)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+
     def test_the_listing_container_must_be_an_element_class_or_id(self):
         css = ('<html><head><link rel="stylesheet" href="https://acme.applytojob.com/css/resumator.css"></head>'
                "<body><h1>This page is unavailable</h1></body></html>")
@@ -192,6 +206,21 @@ class JazzBodyTests(unittest.TestCase):
                        [{"@graph": [{"@type": "Organization"}, posting]}],
                        [{"@type": ["Thing", "JobPosting"], "description": "<p>Found</p>"}]):
             self.assertEqual(self.body(text_response(ld_page(*blocks)))[0], "Found", blocks)
+
+    def test_with_no_job_posting_block_the_description_element_is_read(self):
+        # The live page (2026-11-12, #157) has only an Organization block; the text sits in `div.job_description`.
+        page = ('<html><head><script type="application/ld+json">{"@type": "Organization", "name": "Acme"}</script>'
+                '</head><body>'
+                '<div id="job_description_wrapper"><div class="job_description_padder"><div class="job_description">'
+                '<p>Write <b>Rust</b>.</p><div><ul><li>Embedded</li></ul></div></div>'
+                '<div id="how_to_apply"><a class="resumator_button">Apply Now</a></div></div></div></body></html>')
+        self.assertEqual(self.body(text_response(page))[0], "Write Rust.\nEmbedded")
+        empty = page.replace("<p>Write <b>Rust</b>.</p><div><ul><li>Embedded</li></ul></div>", "<p> </p>")
+        self.assertIsNone(self.body(text_response(empty))[0])
+        for bad in (page.replace('class="job_description"', 'class="job_summary"'),
+                    page[:page.index("Embedded")]):  # no element, or one that never closes
+            with self.assertRaises(ValueError):
+                self.body(text_response(bad))
 
     def test_a_malformed_block_is_skipped_when_another_is_good(self):
         page = ('<script type="application/ld+json">{not json</script>'

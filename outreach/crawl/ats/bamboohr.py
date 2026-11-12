@@ -1,134 +1,88 @@
-"""BambooHR: the careers embed widget, posting text from the detail JSON (#21, Task 25).
+"""BambooHR: the public careers JSON (#21, Task 25; list rebuilt for #157 on 2026-11-12).
 
-`{token}.bamboohr.com/jobs/embed2.php` answers an HTML widget: `BambooHR-ATS-Jobs-Item` entries with the position id
-in `bhrPositionID_{id}`, the title in the link and the place in `BambooHR-ATS-Location`. (The `/careers/list` JSON
-that the research table names was retired in 2024; `probe` confirms what a tenant answers before this is trusted.)
+`{token}.bamboohr.com/careers/list` answers `{"meta": {"totalCount": n}, "result": [...]}`: each job its `id`,
+`jobOpeningName`, `location` (`city`, `state`), `atsLocation` (`city`, `state`, `country`) and `isRemote`. The old
+`/jobs/embed2.php` widget now answers JSON too, with no count, so the list is read here. Its robots.txt allows
+everything (checked 2026-11-12).
 
-A 200 is the widget only when an element carries the `BambooHR-ATS-board` root class and that element closes. A login
-page, a challenge page, an error page with some other ATS class or a widget cut off anywhere is `error`; the widget
-with no jobs is `empty` (Review Focus 2). Every element with a `bhrPositionID_` id must be a job item read, or the
-read is `error`: a short list read as `ok` would close real postings.
+A 200 that is not this JSON (a login page, a challenge page, an error) is `error`; `totalCount` 0 with no rows is
+`empty`. Every row must be a job read with an id and a title, and the jobs read must be exactly `totalCount`, or the
+read is `error`: a short list read as `ok` would close real postings. An unknown tenant answers a redirect, which is
+never followed.
 
-There is no ETag and the raw page changes, so the fingerprint is over the ids. `body()` asks the detail endpoint for
-JSON, builds its URL from the token and the id (never from a URL the list returned) and follows no redirect.
+There is no ETag, so the fingerprint is over the ids. `body()` asks `/careers/{id}/detail` for JSON, builds its URL
+from the token and the id (never from a URL the list returned) and follows no redirect; the answer must be the
+opening's own (its share link ends in `/careers/{id}`).
 
 The token becomes a host label, so it must be one: letters, digits and inner hyphens.
 """
 from __future__ import annotations
 
 import re
-from html.parser import HTMLParser
 
-from outreach.crawl.ats._common import fetch_list, finish_list, read_error, safe_token
+from outreach.crawl.ats._common import fetch_list, finish_list, json_body, read_error, safe_token
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
 from outreach.net import HttpClient
 
 __all__ = ["BambooHRAdapter"]
 
-_LIST = "https://{token}.bamboohr.com/jobs/embed2.php"
+_LIST = "https://{token}.bamboohr.com/careers/list"
 _POSTING = "https://{token}.bamboohr.com/careers/{id}"
 _DETAIL = "https://{token}.bamboohr.com/careers/{id}/detail"
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
-_POSITION = re.compile(r"bhrPositionID_([A-Za-z0-9_-]+)")
-_VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"})
+_ACCEPT = {"Accept": "application/json"}
 
 
-def _words(parts: list[str]) -> str:
-    return " ".join("".join(parts).split())
+def _text(value) -> str:
+    return " ".join(value.split()) if isinstance(value, str) else ""
 
 
-class _Widget(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.marker = False
-        self.position_ids = 0  # every element whose id is bhrPositionID_..., whatever its class
-        self.root_seen = False
-        self.rows: list[tuple[str, str, str]] = []  # (id or "", title, location)
-        self._root: tuple[str, int] | None = None
-        self._root_closed = False
-        self._item: list | None = None  # [tag, depth, id, title parts, title done, in link, location parts or None]
-        self._loc: tuple[str, int] | None = None
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        classes = (attrs.get("class") or "").lower().split()
-        if any(c.startswith("bamboohr-ats") for c in classes):
-            self.marker = True
-        if (attrs.get("id") or "").startswith("bhrPositionID_"):
-            self.position_ids += 1
-        if tag in _VOID:
-            return
-        if self._root is None and not self._root_closed and "bamboohr-ats-board" in classes:
-            self._root = (tag, 1)
-            self.root_seen = True
-        elif self._root is not None and tag == self._root[0]:
-            self._root = (tag, self._root[1] + 1)
-        item = self._item
-        if item is None:
-            if "bamboohr-ats-jobs-item" in classes:
-                found = _POSITION.fullmatch(attrs.get("id") or "")
-                self._item = [tag, 1, found.group(1) if found else "", [], False, False, None]
-            return
-        if tag == item[0]:
-            item[1] += 1
-        if tag == "a" and not item[4] and not item[5]:
-            item[5] = True
-        if "bamboohr-ats-location" in classes and self._loc is None:
-            self._loc = (tag, 1)
-            item[6] = []
-        elif self._loc is not None and tag == self._loc[0]:
-            self._loc = (tag, self._loc[1] + 1)
-
-    def handle_data(self, data):
-        item = self._item
-        if item is None:
-            return
-        if item[5]:
-            item[3].append(data)
-        if self._loc is not None:
-            item[6].append(data)
-
-    def handle_endtag(self, tag):
-        if tag in _VOID:
-            return
-        item = self._item
-        if item is not None:
-            if tag == "a" and item[5]:
-                item[5], item[4] = False, True
-            if self._loc is not None and tag == self._loc[0]:
-                depth = self._loc[1] - 1
-                self._loc = (tag, depth) if depth else None
-            if tag == item[0]:
-                item[1] -= 1
-                if item[1] == 0:
-                    self.rows.append((item[2], _words(item[3]), _words(item[6] or [])))
-                    self._item = None
-                    self._loc = None
-        if self._root is not None and tag == self._root[0]:
-            depth = self._root[1] - 1
-            self._root = (tag, depth) if depth else None
-            self._root_closed = self._root is None
-
-    @property
-    def complete(self) -> bool:
-        """The board root was seen and closed, and no item was left open."""
-        return self.root_seen and self._root is None and self._item is None
+def _native_id(value) -> str:
+    if isinstance(value, bool):
+        return ""
+    text = str(value) if isinstance(value, int) else _text(value)
+    return text if _SAFE_ID.fullmatch(text) else ""
 
 
-def _parse(token: str, rows: list[tuple[str, str, str]]) -> list[JobRef] | None:
+def _place(row: dict) -> tuple[str, str | None]:
+    """(location, country): the row's city and state, else the ATS location's; "Remote" when it says so."""
+    loc = row.get("location") if isinstance(row.get("location"), dict) else {}
+    ats = row.get("atsLocation") if isinstance(row.get("atsLocation"), dict) else {}
+    parts = [_text(loc.get("city")), _text(loc.get("state"))]
+    if not any(parts):
+        parts = [_text(ats.get("city")), _text(ats.get("state")) or _text(ats.get("province"))]
+    place = ", ".join(p for p in parts if p)
+    if row.get("isRemote") is True:
+        place = f"Remote, {place}" if place else "Remote"
+    return place, _text(ats.get("country")) or None
+
+
+def _parse(token: str, rows: list) -> list[JobRef] | None:
     jobs = []
-    for native_id, title, location in rows:
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        native_id, title = _native_id(row.get("id")), _text(row.get("jobOpeningName"))
         if not native_id or not title:
             return None
+        location, country = _place(row)
         jobs.append(JobRef(native_id=native_id, title=title, url=_POSTING.format(token=token, id=native_id),
-                           location=location, country=None, posted_on=None, body=None))
+                           location=location, country=country, posted_on=None, body=None))
     return jobs
 
 
 def _valid(token: str) -> bool:
     return safe_token("bamboohr", token) and _LABEL.fullmatch(token) is not None
+
+
+def _is_opening(opening: dict, native_id: str) -> bool:
+    """The detail is this opening's: its `id` when it carries one, else its share link's last path part."""
+    if "id" in opening:
+        return _native_id(opening.get("id")) == native_id
+    link = opening.get("jobOpeningShareUrl")
+    return isinstance(link, str) and link.rstrip("/").rsplit("/careers/", 1)[-1] == native_id
 
 
 class BambooHRAdapter:
@@ -140,23 +94,23 @@ class BambooHRAdapter:
     def list(self, token: str, validators: Validators) -> ReadResult:
         if not _valid(token):
             return read_error(f"{token!r} is not a valid bamboohr token")
-        resp = fetch_list(self.client, _LIST.format(token=token), validators, use_etag=False)
+        resp = fetch_list(self.client, _LIST.format(token=token), validators, headers=_ACCEPT, use_etag=False)
         if isinstance(resp, ReadResult):
             return resp
-        parser = _Widget()
-        parser.feed(resp.text())
-        parser.close()
-        if not parser.marker:
-            return read_error("the 200 answer is not the BambooHR careers widget", status=resp.status)
-        if not parser.complete:
-            return read_error("the careers widget has no closed board root: it is cut off or not the widget",
-                              status=resp.status)
-        if parser.position_ids != len(parser.rows):
-            return read_error("the widget has position elements that are not job items, so the list may be incomplete",
-                              status=resp.status)
-        jobs = _parse(token, parser.rows)
+        data = json_body(resp)
+        if isinstance(data, ReadResult):
+            return data
+        meta = data.get("meta") if isinstance(data, dict) else None
+        total = meta.get("totalCount") if isinstance(meta, dict) else None
+        rows = data.get("result") if isinstance(data, dict) else None
+        if isinstance(total, bool) or not isinstance(total, int) or total < 0 or not isinstance(rows, list):
+            return read_error("the 200 answer is not the BambooHR careers list", status=resp.status)
+        jobs = _parse(token, rows)
         if jobs is None:
             return read_error("a job has no usable id or no title", status=resp.status)
+        if len({j.native_id for j in jobs}) != total:
+            return read_error(f"{len(jobs)} jobs listed but totalCount is {total}, so the list may be incomplete",
+                              status=resp.status)
         return finish_list(jobs, resp, validators, use_etag=False)
 
     def body(self, token: str, job: JobRef) -> str | None:
@@ -164,14 +118,14 @@ class BambooHRAdapter:
         page or JSON without `result.jobOpening.description` raises, so no empty body is stored by mistake."""
         if not _valid(token) or not _SAFE_ID.fullmatch(job.native_id):
             raise ValueError(f"cannot fetch position {job.native_id!r} from {token!r}")
-        resp = self.client.get(_DETAIL.format(token=token, id=job.native_id), {"Accept": "application/json"})
+        resp = self.client.get(_DETAIL.format(token=token, id=job.native_id), _ACCEPT)
         if resp.status != 200:
             raise ValueError(f"HTTP {resp.status} for position {job.native_id}")
         data = resp.json()
         result = data.get("result") if isinstance(data, dict) else None
         opening = result.get("jobOpening") if isinstance(result, dict) else None
         description = opening.get("description") if isinstance(opening, dict) else None
-        if not isinstance(opening, dict) or str(opening.get("id")) != job.native_id:
+        if not isinstance(opening, dict) or not _is_opening(opening, job.native_id):
             raise ValueError(f"the detail answer is not for position {job.native_id}")
         if not isinstance(description, str):
             raise ValueError(f"position {job.native_id} has no description in the detail answer")

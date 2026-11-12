@@ -5,12 +5,14 @@
 only when an element has a `resumator...` class or id (the name in a stylesheet link does not count). A Cloudflare 403, a challenge page and anything else is `error`
 (Review Focus 2), and no User-Agent or header is added to get past one: a blocked board is a Needs-you item.
 
-A page that is cut off (no closing `</html>`, or ends inside a row) is `error`. So is a page where the count of
-`job_title_link` anchors differs from the rows read, or when any link to a detail page, whatever its class, is not a
-job read. So a markup change cannot turn into "no jobs" or a short list.
+A page that is cut off (no closing `</html>`, or ends inside a row) is `error`. So is a page where a `job_title_link`
+anchor names a job no row read, or when any link to a detail page, whatever its class, is not a job read. So a markup
+change cannot turn into "no jobs" or a short list. The page lists each job twice since 2026-11 (the table, then a
+`jobs_row` div per job for small screens): a second anchor to a job a row read is fine (#157).
 
 The raw page changes on every request, so there is no ETag: the fingerprint is over the ids. `body()` reads the
-`application/ld+json` block whose `@type` is `JobPosting`. Its URL is built from the token and the id, and a redirect
+`application/ld+json` block whose `@type` is `JobPosting`, and with none (the page since 2026-11 carries only an
+Organization block) the element whose class is `job_description`, which must close. Its URL is built from the token and the id, and a redirect
 is followed only while it stays on `https://{token}.applytojob.com`.
 
 The token becomes a host label, so it must be one: letters, digits and inner hyphens.
@@ -51,7 +53,7 @@ class _Rows(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.rows: list[tuple[str, str, str]] = []  # (href, title, location)
-        self.links = 0
+        self.link_ids: set[str] = set()  # the detail id of every `job_title_link` anchor, in a row or not
         self.container = False  # an element whose class or id is the listing's `resumator...` name
         self.detail_ids: set[str] = set()  # the id of every <a> that points at a detail page, whatever its class
         self._row: dict | None = None
@@ -88,7 +90,8 @@ class _Rows(HTMLParser):
             self._finish_cell()
             self._row["cell"] = []
         elif tag == "a" and "job_title_link" in (attrs.get("class") or "").split():
-            self.links += 1
+            found = _DETAIL_PATH.fullmatch(_path(attrs.get("href")))
+            self.link_ids.add(found.group(1) if found else "")
             row = self._row
             if row is not None and not row["linked"]:
                 row["linked"], row["in_link"], row["href"] = True, True, (attrs.get("href") or "").strip()
@@ -138,6 +141,49 @@ class _JsonLd(HTMLParser):
         if tag == "script" and self._open is not None:
             self.blocks.append("".join(self._open))
             self._open = None
+
+
+class _Description(HTMLParser):
+    """The markup inside the first element whose class is `job_description` (the page's own copy of the text), and
+    whether that element closed."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: list[str] = []
+        self.closed = False
+        self._open: tuple[str, int] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if self.closed:
+            return
+        if self._open is None:
+            if "job_description" in (dict(attrs).get("class") or "").split():
+                self._open = (tag, 1)
+            return
+        if tag == self._open[0]:
+            self._open = (tag, self._open[1] + 1)
+        self.parts.append(self.get_starttag_text() or "")
+
+    def handle_endtag(self, tag):
+        if self._open is None or self.closed:
+            return
+        if tag == self._open[0]:
+            depth = self._open[1] - 1
+            if depth == 0:
+                self.closed = True
+                return
+            self._open = (tag, depth)
+        self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if self._open is not None and not self.closed:
+            self.parts.append(data)
+
+    def handle_entityref(self, name):
+        self.handle_data(f"&{name};")
+
+    def handle_charref(self, name):
+        self.handle_data(f"&#{name};")
 
 
 def _job_posting(node) -> dict | None:
@@ -199,7 +245,8 @@ class JazzHRAdapter:
             native_id = found.group(1)
             jobs.append(JobRef(native_id=native_id, title=title, url=_DETAIL.format(token=token, id=native_id),
                                location=location, country=None, posted_on=None, body=None))
-        if parser.links != len(parser.rows) or parser.detail_ids != {job.native_id for job in jobs}:
+        read_ids = {job.native_id for job in jobs}
+        if parser.link_ids != read_ids or parser.detail_ids != read_ids:
             return read_error("a job link is not a table row read, so the list may be incomplete", status=resp.status)
         return finish_list(jobs, resp, validators, use_etag=False)
 
@@ -236,4 +283,9 @@ class JazzHRAdapter:
                 if not isinstance(description, str):
                     raise ValueError(f"position {job.native_id} has no description in its JobPosting block")
                 return html_to_text(html.unescape(description)) or None
-        raise ValueError(f"position {job.native_id} has no JobPosting block")
+        found = _Description()
+        found.feed(resp.text())
+        found.close()
+        if found.closed:  # no JobPosting block (the page since 2026-11, #157): the page's own description element
+            return html_to_text("".join(found.parts)) or None
+        raise ValueError(f"position {job.native_id} has no JobPosting block and no closed job_description element")

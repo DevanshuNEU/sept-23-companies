@@ -70,6 +70,7 @@ body_refetch_days = 30
 "myworkdayjobs.com" = 1.0
 "oraclecloud.com" = 1.0
 "amazon.jobs" = 1.0
+"eightfold.ai" = 1.0
 
 # Threads that list boards at once (#158), per ATS; `default` is every ATS not named here (1 to 16 each). Spacing per
 # host and the breaker still hold across all of them, so more threads never mean more requests a second to one host.

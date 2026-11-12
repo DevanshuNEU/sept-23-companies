@@ -389,9 +389,9 @@ class LevelStateTests(unittest.TestCase):
         # a general figure alone over the limit still fails
         r = d("Software Engineer III", "6+ years of experience building backend systems.")
         self.assertEqual((r.level_ok, r.level_state), (False, "reject"))
-        # exactly 3, or none: his level is not clear
+        # exactly 3 is above his level (#212, #9: 2 years or fewer); none: his level is not clear
         self.assertEqual(self.state("Software Engineer III", "3 years of experience in software development."),
-                         "uncertain")
+                         "reject")
         self.assertEqual(self.state("Software Engineer III"), "uncertain")
 
     def test_plain_title_no_years_is_uncertain(self):
@@ -400,7 +400,8 @@ class LevelStateTests(unittest.TestCase):
         self.assertEqual(self.state("Member of Technical Staff"), "uncertain")  # open tier, no years
         self.assertEqual(self.state("Forward Deployed Engineer"), "uncertain")
         self.assertEqual(self.state("Software Engineer II"), "uncertain")  # swe2 with no years
-        self.assertEqual(self.state("Software Engineer", "3+ years of experience in industry."), "uncertain")
+        # #212 (2026-11-12): exactly 3 years is above his level (#9: 2 years or fewer), no longer "level not stated"
+        self.assertEqual(self.state("Software Engineer", "3+ years of experience in industry."), "reject")
         self.assertEqual(self.state("Research Scientist", "Train and evaluate large models."), "uncertain")
 
     def test_fit_by_tier_years_or_entry_wording(self):
@@ -480,3 +481,46 @@ class LevelOkUnchangedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ListNoise212Tests(unittest.TestCase):
+    """#212 (2026-11-12): rows the job list audit and his passes found at his level that #9 says should not be there,
+    and the rows #9 keeps."""
+
+    def test_named_foreign_places_read_as_outside_the_us(self):
+        for location in ("Home-based, Mauritius", "Cape Town", "Bräuhausgasse 37, 1050 Wien", "European Union",
+                         "Bucharest, RO", "Malaga", "Vienna, Austria"):
+            with self.subTest(location=location):
+                self.assertEqual(d("Software Engineer", location=location).us, "no")
+
+    def test_chip_fab_and_it_service_titles_leave_the_tech_lane(self):
+        for title in ("Ocotillo Technology Fabrication Yield Device Engineer", "Experienced Module Integration Engineer",
+                      "R&D Engineer, IC Design", "End User Services Engineer II", "Design Verification Engineer",
+                      "Analyst I, Payments Engineering Operations", "Mobile Building Engineer",
+                      "Physical & Facility Security Engineer", "Security Certification Engineer - Android"):
+            with self.subTest(title=title):
+                self.assertNotEqual(d(title).lane, "engineering")
+
+    def test_a_title_that_names_software_work_stays(self):
+        for title in ("Software Engineer, Yield Analytics", "Software Engineer - Design Verification Tools",
+                      "Software Engineer, Operations Research",
+                      "Developer - Atlassian Process Engineering", "Application Security Engineer",
+                      "Data Scientist"):
+            with self.subTest(title=title):
+                self.assertEqual(d(title).lane, "engineering")
+
+    def test_lead_titles_are_above_his_level(self):
+        for title in ("Engineering Leader", "Team Leader, Engineering", "Software Engineering Technical Leader"):
+            with self.subTest(title=title):
+                self.assertEqual(d(title).level_tier, "senior")
+
+    def test_a_leadership_program_is_an_entry_role(self):
+        for title in ("TRAIL Rising Leaders Program - Software Engineering", "Future Leaders Program, Software Engineer"):
+            with self.subTest(title=title):
+                self.assertNotEqual(d(title).level_tier, "senior")
+
+    def test_three_years_is_above_his_level(self):
+        # #9 level ruling: his level is a role asking 2 years or fewer.
+        two = d("Software Engineer", "We want 2+ years of professional experience building APIs.")
+        three = d("Software Engineer", "We want 3+ years of professional experience building APIs.")
+        self.assertEqual((two.level_state, three.level_state), ("fit", "reject"))

@@ -6,8 +6,11 @@
 [candidate]
 # refresh/eligibility.py:32 (GRAD_MONTH = 2026*12 + 5, he finished his MS in May 2026); #9
 graduated = "2026-05"
-# #9: a posting asking for more than 3 years is out of his band
+# #9: a posting asking for more than 3 years is out of his band (level_ok, the v1 rule, reads this)
 max_years_asked = 3
+# #9 level ruling (2026-11-02): his level is a role asking 2 years or fewer, so for the level state (the job list's
+# your level) a posting asking 3 or more is above it (#212, 2026-11-12: exactly 3 read "level not stated" before)
+max_years_fit = 2
 
 [title]
 # refresh/finalcheck.py:25 ENG (the title must name an engineering word; whole words, so 'engineering' is listed); 'fde' added so a bare "FDE" title reaches its open level
@@ -38,6 +41,8 @@ off_lane = [
   "devrel", "evangelist", "community", "it engineer", "customer engineer", "customer experience",
   "marketing engineer", "growth marketing", "product operations", "revenue operations", "business operations",
   "technical writers", "developer advocates",
+  # #212 (2026-11-12): titles whose other words read as software ("Mobile", "Security", "Research") but are not
+  "building engineer", "facility security", "security certification",
   # #172: he ruled BI is not tech; hard off lane even with a software word ("Python BI Engineer")
   "bi developer", "bi engineer", "bi report", "bi analyst", "power bi", "business intelligence", "report developer",
   "reporting developer", "tableau",
@@ -62,6 +67,9 @@ off_lane_unless_software = [
   "supply chain", "procurement", "logistics", "sourcing", "buyer", "planner", "thermal", "optical", "photonics",
   "laser", "process engineer", "hvac", "chemical", "materials", "data analyst",
   "data annotation", "data center",
+  # #212 (2026-11-12): chip, fab, facilities and IT-service titles he passes, unless the title names software work
+  "fabrication", "yield", "module integration", "ic design", "design verification", "end user services",
+  "engineering operations", "operations research",
 ]
 # #172: a title that names software work is engineering outright; any other engineering title goes to the body scorer
 # below. A bare "developer" or "programmer" is not on this list ("Materials Developer II, Jordan Footwear").
@@ -126,6 +134,8 @@ general_application = [
 senior = [
   "senior", "sr", "staff", "principal", "lead", "head", "director", "architect", "vp", "avp", "vice president",
   "chief", "distinguished", "mid level",
+  # #212: "Engineering Leader", "Team Leader, Engineering" ("lead" does not match "leader")
+  "leader", "leaders",
 ]
 # refresh/finalcheck.py:26 SEN ('manager'); kept apart because a strong entry marker never overrides it
 manager = [
@@ -151,6 +161,10 @@ strong_entry = [
   "less than one years", "less than 2 year", "less than two year", "recent graduated", "recent graduating",
   "recently grad", "recently grads", "recently graduate", "recently graduates", "recently graduating",
   "university grads", "university graduates", "university hires", "college hires", "campus hires",
+  # #212 (2026-11-12): early-career programs named for leadership ("TRAIL Rising Leaders Program - Software
+  # Engineering") are entry roles; "leader" alone is senior
+  "leaders program", "leadership program", "leadership development program", "rising leaders", "emerging leaders",
+  "future leaders",
 ]
 # refresh/finalcheck.py:36-37 NG_T and refresh/crawl_boards.py:26 TITLE_ENTRY (the 20xx forms fold into 'grad')
 new_grad = [
@@ -315,6 +329,8 @@ us_cities = [
 ]
 # refresh/finalcheck.py:69-80 NONUS and refresh/crawl_boards.py:35-36 _NON_US_PLACE (Georgia is left out: state or country)
 non_us_countries = [
+  # #212 (2026-11-12): places from the job list audit and his passes
+  "mauritius", "european union",
   "india", "canada", "united kingdom", "uk", "england", "scotland", "wales", "great britain", "britain", "ireland",
   "germany", "poland", "israel", "singapore", "australia", "japan", "korea", "south korea", "china", "taiwan",
   "mexico", "brazil", "argentina", "colombia", "netherlands", "france", "spain", "sweden", "switzerland", "portugal",
@@ -329,6 +345,8 @@ non_us_countries = [
 ]
 # refresh/finalcheck.py:69-80 NONUS (city names found only outside the US; Tel Aviv, Munich, Toronto, Tbilisi and Bengaluru are the ones the design names)
 non_us_cities = [
+  # #212 (2026-11-12): places from the job list audit and his passes
+  "cape town", "wien", "vienna", "bucharest", "malaga", "málaga",
   "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "noida", "gurgaon", "gurugram", "mumbai", "delhi",
   "kolkata", "ahmedabad", "bengal", "toronto", "vancouver", "montreal", "munich", "krakow", "tel aviv", "tbilisi",
   "sydney", "tokyo", "seoul", "beijing", "shanghai", "shenzhen", "hangzhou", "suzhou", "wuhan", "chengdu", "nanjing",

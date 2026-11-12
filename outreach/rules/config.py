@@ -14,7 +14,7 @@ CONFIG_PATH = Path(__file__).with_name("config.toml")
 # Every section and key a loaded config must have. A missing one raises KeyError at load, naming it, so a typo in
 # the TOML fails loudly instead of quietly turning a rule off.
 REQUIRED = {
-    "candidate": ("graduated", "max_years_asked"),
+    "candidate": ("graduated", "max_years_asked", "max_years_fit"),
     "title": ("engineering", "intern", "off_lane", "general_application", "academic", "senior", "manager", "strong_entry",
               "new_grad", "early_career", "open_level", "level_nouns", "level_qualifiers",
               "off_lane_unless_software", "software_titles", "ambiguous", "ambiguous_margin", "software_words", "physical_words",

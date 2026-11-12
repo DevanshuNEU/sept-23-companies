@@ -17,7 +17,7 @@ ATS_HOSTS = {
     "greenhouse": "greenhouse.io", "lever": "lever.co", "ashby": "ashbyhq.com", "smartrecruiters": "smartrecruiters.com",
     "workday": "myworkdayjobs.com", "workable": "workable.com", "oracle_orc": "oraclecloud.com",
     "rippling": "rippling.com", "breezy": "breezy.hr", "pinpoint": "pinpointhq.com", "teamtailor": "teamtailor.com",
-    "recruitee": "recruitee.com", "bamboohr": "bamboohr.com", "jazzhr": "applytojob.com",
+    "recruitee": "recruitee.com", "bamboohr": "bamboohr.com", "jazzhr": "applytojob.com", "amazon": "amazon.jobs",
 }
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",

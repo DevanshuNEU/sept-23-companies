@@ -26,7 +26,7 @@ GAP_TAG_S = 7200  # the "found after a gap" tag shows when the board had not bee
 # `createdAt`, which runs days to a year early, so it is not trusted. Rippling, BambooHR and JazzHR list no date
 # today; they are here in case they start to.
 DATE_TRUSTED = frozenset({"workable", "workday", "oracle_orc", "breezy", "teamtailor", "recruitee", "rippling",
-                          "bamboohr", "jazzhr", "smartrecruiters", "pinpoint"})
+                          "bamboohr", "jazzhr", "smartrecruiters", "pinpoint", "amazon"})
 
 _NY = ZoneInfo("America/New_York")
 _NOT_ALNUM = re.compile(r"[^a-z0-9]+")

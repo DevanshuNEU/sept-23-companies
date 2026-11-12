@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from outreach.crawl.ats.amazon import AmazonAdapter
 from outreach.crawl.ats.ashby import AshbyAdapter
 from outreach.crawl.ats.bamboohr import BambooHRAdapter
 from outreach.crawl.ats.breezy import BreezyAdapter
@@ -39,6 +40,7 @@ ADAPTERS: dict[str, Callable[[HttpClient], Adapter]] = {
     "recruitee": RecruiteeAdapter,
     "bamboohr": BambooHRAdapter,
     "jazzhr": JazzHRAdapter,
+    "amazon": AmazonAdapter,
 }
 
 

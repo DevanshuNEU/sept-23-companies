@@ -102,17 +102,32 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(plan_diff(load_existing(self.conn, self.board_id), [job("1")], "greenhouse", "acme").gone, ())
 
     def test_hand_closed_posting_stays_closed_when_listed(self):
-        self.sync([job("1"), job("2"), job("3")], T1)
-        for nid, reason in (("1", "hand"), ("2", "page_closed"), ("3", "imported_closed")):
+        self.sync([job("1"), job("2")], T1)
+        for nid, reason in (("1", "hand"), ("2", "page_closed")):
             self.conn.execute("UPDATE posting SET closed_at = ?, close_reason = ? WHERE source_key = ?",
                               (T1, reason, source_key("greenhouse", "acme", nid)))
-        plan, ids = self.sync([job("1", "Renamed"), job("2"), job("3")], T2)
+        plan, ids = self.sync([job("1", "Renamed"), job("2")], T2)
         self.assertEqual((plan.new, plan.changed, plan.present, plan.reopen, plan.gone), ((), (), (), (), ()))
         self.assertEqual(ids, {})
-        for nid in ("1", "2", "3"):
+        for nid in ("1", "2"):
             r = self.row(nid)
             self.assertIsNotNone(r["closed_at"])
             self.assertEqual((r["title"], r["last_seen_at"]), ("Software Engineer", T1))
+
+    def test_a_posting_closed_on_import_reopens_when_listed(self):
+        # The old system's close was its crawler's, so a board listing the job again overrules it (2026-11-12: Amazon
+        # listed 975 jobs the import had closed, among them "Software Development Engineer, Early Career 2027").
+        self.sync([job("1"), job("2")], T1)
+        self.conn.execute("UPDATE posting SET closed_at = ?, close_reason = 'imported_closed' WHERE source_key = ?",
+                          (T1, source_key("greenhouse", "acme", "1")))
+        pid = self.row("1")["posting_id"]
+        plan, ids = self.sync([job("1", "Renamed"), job("2")], T2)
+        self.assertEqual(plan.reopen, (pid,))
+        self.assertIn(pid, plan.present)
+        r = self.row("1")
+        self.assertEqual((r["closed_at"], r["close_reason"], r["title"], r["last_seen_at"]),
+                         (None, None, "Renamed", T2))
+        self.assertEqual(ids["1"], pid)
 
     def test_gone_posting_that_returns_is_reopened(self):
         self.sync([job("1"), job("2")], T1)

@@ -3,7 +3,7 @@
 `plan_diff` is pure: it compares the stored postings of the board with the listed jobs. `write_postings` and
 `close_postings` apply a plan in batches, one transaction per batch, never one across a request. A posting is never
 deleted: a gone one gets `closed_at` and `close_reason`, and if it is listed again later it reopens, unless it was
-closed for a reason the board cannot overrule (by hand, by its page, or on import).
+closed for a reason the board cannot overrule (by hand, or by its page).
 """
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ from outreach.store import atomic
 __all__ = ["source_key", "native_id_of", "Existing", "load_existing", "DiffPlan", "plan_diff", "write_postings",
            "close_postings", "REOPENABLE"]
 
-# Closes the crawler made, which a later listing undoes. Any other close (hand, page_closed, imported_closed) stands.
-REOPENABLE = ("gone_from_board", "board_empty_twice")
+# Closes a crawler made, which a later listing undoes: this one's, and the old system's that the import carried over
+# (`imported_closed`, #242: its board lists the job again, so it is open). A close by hand or by the page stands.
+REOPENABLE = ("gone_from_board", "board_empty_twice", "imported_closed")
 # The write-time recheck: open, or closed by the crawler. REOPENABLE is a fixed tuple of plain words.
 _WRITABLE = "(closed_at IS NULL OR close_reason IN (%s))" % ", ".join(f"'{r}'" for r in REOPENABLE)
 _CLOSE_REASONS = ("gone_from_board", "board_empty_twice", "page_closed", "hand", "imported_closed")
@@ -89,7 +90,7 @@ def plan_diff(existing: dict[str, Existing], jobs: Sequence[JobRef], ats: str, t
             continue
         if e.closed_at is not None:
             if e.close_reason not in REOPENABLE:
-                continue  # closed by hand, by its page or on import: the board listing it does not overrule that
+                continue  # closed by hand or by its page: the board listing it does not overrule that
             reopen.append(e.posting_id)
         present.append(e.posting_id)
         if (e.title, e.location, e.country, e.url) != (job.title, job.location, job.country, job.url):

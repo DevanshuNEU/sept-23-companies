@@ -411,9 +411,10 @@ export interface JobRow {
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
 }
-export interface JobCounts { yourLevel: number; higher: number }
+export interface JobCounts { yourLevel: number; higher: number; other: number }
 export interface JobsView { asOf: IsoTime; rows: JobRow[]; total: number; nextAfter: string | null; counts: JobCounts }
-export type JobsTab = 'your_level' | 'higher';
+/** other: every listed role that is not a software role (#250). */
+export type JobsTab = 'your_level' | 'higher' | 'other';
 export type JobsWindow = '1h' | '6h' | '24h' | '7' | '30' | '60' | '90' | 'any';
 /** A level chip (#213): the key a row's level tag comes from. Several may be on at once; none means any level. */
 export type JobLevel = 'new_grad' | 'early_career' | 'swe1' | 'swe2' | 'entry' | 'not_stated';

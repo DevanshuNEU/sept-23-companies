@@ -182,6 +182,19 @@ describe('the Jobs page', () => {
     expect(higher).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('Other roles holds every listed role that is not software, with its own count (#250)', async () => {
+    const user = userEvent.setup();
+    await open();
+    const others = screen.getByRole('tab', { name: /^Other roles/ });
+    expect(others).toHaveTextContent('3');
+    expect(titles()).not.toContain('Data Scientist I');
+    await user.click(others);
+    expect(await count('3 in other roles in the last 30 days')).toBeInTheDocument();
+    expect(titles()).toEqual(['Data Scientist I', 'Design Engineer', 'DevOps Engineer']);
+    expect(others).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /^Your level/ })).toHaveTextContent('22');
+  });
+
   it('a window chip changes what is asked, and Any time pages 50 at a time', async () => {
     const user = userEvent.setup();
     await open();

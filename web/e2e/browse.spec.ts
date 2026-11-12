@@ -25,6 +25,9 @@ test('Jobs: Knock opens on it; the list, the tabs and filters, then pass and don
   // The other tab, a window chip and a size.
   await page.getByRole('tab', { name: /^Higher levels/ }).click();
   await expect(page.getByText('6 at higher levels in the last 30 days')).toBeVisible();
+  await page.getByRole('tab', { name: /^Other roles/ }).click();
+  await expect(page.getByText('3 in other roles in the last 30 days')).toBeVisible();
+  await expect(jobs.first()).toContainText('Data Scientist I');
   await page.getByRole('tab', { name: /^Your level/ }).click();
   await expect(jobs).toHaveCount(20);
   await page.getByRole('button', { name: '7 days' }).click();

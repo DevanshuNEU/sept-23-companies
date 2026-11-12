@@ -78,7 +78,7 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en
 const sizeLine = (j: JobRow) => (j.size === null ? (j.big ? 'Big company, size not known' : 'Size not known') : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
 const windowText = (w: JobsWindow) =>
   w === 'any' ? '' : w === '1h' ? ' in the last hour' : w.endsWith('h') ? ` in the last ${w.slice(0, -1)} hours` : ` in the last ${w} days`;
-const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
+const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : tab === 'higher' ? 'at higher levels' : 'in other roles');
 
 /**
  * What he has asked for and the server has not heard yet: postings passed, and Reached (#195): the postings he pressed it
@@ -341,7 +341,13 @@ export default function BrowsePage() {
   const total = last ? Math.max(last.total - passed, 0) : undefined;
   const dated = jobs.filter((j) => j.listAt !== null);
   const undated = jobs.filter((j) => j.listAt === null);
-  const counts = last ? { your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0), higher: last.counts.higher - (tab === 'higher' ? passed : 0) } : undefined;
+  const counts = last
+    ? {
+        your_level: last.counts.yourLevel - (tab === 'your_level' ? passed : 0),
+        higher: last.counts.higher - (tab === 'higher' ? passed : 0),
+        other: last.counts.other - (tab === 'other' ? passed : 0),
+      }
+    : undefined;
 
   // A pass taken back (Undo, or it did not go through) puts the row back and puts him back on it. Done while rendering,
   // so the very next key already acts on that row.
@@ -470,6 +476,7 @@ export default function BrowsePage() {
   useHotkeys(bindings);
 
   const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', level: levels.length > 0, notContacted };
+  // An empty tab points to the level tab that has jobs; it never points to Other roles.
   const other: JobsTab = tab === 'your_level' ? 'higher' : 'your_level';
   const otherCount = counts?.[other] ?? 0;
   const headline = total === undefined || stale ? 'Loading the jobs' : `${total.toLocaleString('en-US')} ${levelText(tab)}${windowText(windowDays)}`;
@@ -496,7 +503,7 @@ export default function BrowsePage() {
               setActive(null);
             }}
           >
-            <TabsList aria-label="Level" className="max-sm:min-h-[3.25rem]">
+            <TabsList aria-label="Jobs to show" className="max-sm:min-h-[3.25rem]">
               <TabsTrigger value="your_level" className="gap-1.5 px-3 max-sm:min-h-11">
                 Your level
                 {counts ? <span className="text-xs tabular-nums text-muted-foreground">{counts.your_level.toLocaleString('en-US')}</span> : null}
@@ -504,6 +511,10 @@ export default function BrowsePage() {
               <TabsTrigger value="higher" className="gap-1.5 px-3 max-sm:min-h-11">
                 Higher levels
                 {counts ? <span className="text-xs tabular-nums text-muted-foreground">{counts.higher.toLocaleString('en-US')}</span> : null}
+              </TabsTrigger>
+              <TabsTrigger value="other" className="gap-1.5 px-3 max-sm:min-h-11">
+                Other roles
+                {counts ? <span className="text-xs tabular-nums text-muted-foreground">{counts.other.toLocaleString('en-US')}</span> : null}
               </TabsTrigger>
             </TabsList>
           </Tabs>

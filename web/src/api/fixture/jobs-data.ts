@@ -5,7 +5,8 @@
  * (from the third) only a date, and every fifth (from the fifth) is dated by when Knock first saw it. The newest went
  * up 6 minutes before the sample's clock and the second is a repost; the fifth was found after a 3 day gap; the oldest
  * 20 are from before list times (their day only), the oldest is 94 days old; and 2 at your level have no date at all,
- * so each tab, window and size has something to show.
+ * so each tab, window and size has something to show. Three more are not software roles (#250): they are only on
+ * the Other roles tab.
  */
 import type { IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsView } from '../types';
 
@@ -41,6 +42,8 @@ const dayBefore = (on: IsoDate, days: number): IsoDate => new Date((dayNumber(on
 
 const two = (n: number) => String(n).padStart(2, '0');
 const at = (on: IsoDate, h: number, m: number): IsoTime => `${on}T${two(h)}:${two(m)}:00Z`;
+/** The postings that are not a software role (#250), by id: only the Other roles tab lists them. */
+export const OTHER_ROLE_IDS: ReadonlySet<number> = new Set([9082, 9083, 9084]);
 const OLD_FROM = 60; // rows from here on are from before list times: no seen gap, their day only
 
 /**
@@ -89,6 +92,17 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
     unknown(9080, COMPANIES[9] as Company, 'Software Engineer, Platform', at(dayBefore(today, 1), 14, 0), 'New York, NY'),
     unknown(9081, COMPANIES[1] as Company, 'Software Engineer, New Grad', at(dayBefore(today, 2), 14, 0), 'Remote (US)'),
   );
+  // Not software roles (#250): dated, at his level by their tags, and on the Other roles tab only.
+  (['Data Scientist I', 'Design Engineer', 'DevOps Engineer'] as const).forEach((title, n) => {
+    const id = 9082 + n;
+    const c = COMPANIES[(n * 3) % COMPANIES.length] as Company;
+    const listAt = at(dayBefore(today, 1 + n * 4), 16, 20);
+    ages.set(id, 1 + n * 4);
+    rows.push({
+      postingId: id, title, url: `https://jobs.example/${nameKey(c.name)}/${id}`, location: 'Austin, TX', levelTag: 'early career',
+      listAt, postedAt: listAt, firstSeenAt: listAt, seenGapS: 1800, firstRead: false, repostedFrom: null, ...company(c),
+    });
+  });
   sortJobs(rows);
   return { rows, higher, ages };
 }
@@ -158,13 +172,18 @@ export function jobsView(all: JobRow[], higher: ReadonlySet<number>, ages: Reado
     .filter(sizeOk)
     .filter((r) => !p.notContacted || r.contactedOn === null)
     .filter((r) => !p.q.trim() || (key !== '' && nameKey(r.companyName).includes(key)));
-  const mine = base.filter((r) => higher.has(r.postingId) === (p.view === 'higher'));
+  const group = (r: JobRow) => (OTHER_ROLE_IDS.has(r.postingId) ? 'other' : higher.has(r.postingId) ? 'higher' : 'your_level');
+  const mine = base.filter((r) => group(r) === p.view);
   const at = p.after ? mine.findIndex((r) => String(r.postingId) === p.after) + 1 : 0;
   const page = mine.slice(at, at + limit);
   const last = page[page.length - 1];
   return {
     asOf, rows: page, total: mine.length,
     nextAfter: at + limit < mine.length && last ? String(last.postingId) : null,
-    counts: { yourLevel: base.filter((r) => !higher.has(r.postingId)).length, higher: base.filter((r) => higher.has(r.postingId)).length },
+    counts: {
+      yourLevel: base.filter((r) => group(r) === 'your_level').length,
+      higher: base.filter((r) => group(r) === 'higher').length,
+      other: base.filter((r) => group(r) === 'other').length,
+    },
   };
 }

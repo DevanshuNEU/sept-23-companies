@@ -2,7 +2,7 @@ import { planMethods } from './plan';
 import type { Transport } from './transport';
 import type { JobsView } from '../types';
 
-const VIEW: JobsView = { asOf: '2026-11-10T15:14:00Z', rows: [], total: 0, nextAfter: null, counts: { yourLevel: 0, higher: 0 } };
+const VIEW: JobsView = { asOf: '2026-11-10T15:14:00Z', rows: [], total: 0, nextAfter: null, counts: { yourLevel: 0, higher: 0, other: 0 } };
 
 describe('the job list methods', () => {
   it('reads /api/jobs with the tab, window and size, and leaves out what is off', async () => {

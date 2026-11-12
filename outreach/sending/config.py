@@ -50,6 +50,11 @@ class SendConfig:
     inbound_meta_cap: int
     old_sender_label: str
     prune_noop_after_days: int
+    size_band_up_to: tuple[int, ...]
+    size_band_daily: tuple[int, ...]
+    size_band_gap_minutes: tuple[int, ...]
+    size_band_gap_jitter_minutes: tuple[int, ...]
+    size_guessed_big_band: int
 
 
 # Whole numbers that count things, so zero or less makes no sense.
@@ -138,8 +143,32 @@ def _check(cfg: SendConfig) -> None:
     break_low, break_high = cfg.break_minutes
     if break_low < 0 or break_low > break_high:
         raise ValueError(f"break_minutes must be [low, high] with 0 <= low <= high, not {list(cfg.break_minutes)}")
+    _check_bands(cfg)
     if not cfg.weekdays or any(not 0 <= d <= 6 for d in cfg.weekdays):
         raise ValueError(f"weekdays must be a non-empty list of 0 (Monday) to 6 (Sunday), not {list(cfg.weekdays)}")
+
+
+BAND_KEYS = ("size_band_up_to", "size_band_daily", "size_band_gap_minutes", "size_band_gap_jitter_minutes")
+
+
+def _check_bands(cfg: SendConfig) -> None:
+    """The size bands line up (#229): increasing bounds of at least 1, one more band than bounds in each other
+    column, a daily number of at least 1, gaps of 0 or more, and a guessed-big band that exists."""
+    bounds = cfg.size_band_up_to
+    if any(b < 1 for b in bounds) or any(b <= a for a, b in zip(bounds, bounds[1:])):
+        raise ValueError(f"size_band_up_to must be increasing sizes of at least 1, not {list(bounds)}")
+    bands = len(bounds) + 1
+    for key in BAND_KEYS[1:]:
+        if len(getattr(cfg, key)) != bands:
+            raise ValueError(f"{key} must have {bands} entries (one more than size_band_up_to), "
+                             f"not {list(getattr(cfg, key))}")
+    if any(n < 1 for n in cfg.size_band_daily):
+        raise ValueError(f"size_band_daily must be at least 1 in every band, not {list(cfg.size_band_daily)}")
+    for key in ("size_band_gap_minutes", "size_band_gap_jitter_minutes"):
+        if any(n < 0 for n in getattr(cfg, key)):
+            raise ValueError(f"{key} must be 0 or more in every band, not {list(getattr(cfg, key))}")
+    if not _whole(cfg.size_guessed_big_band) or not 1 <= cfg.size_guessed_big_band <= bands:
+        raise ValueError(f"size_guessed_big_band must be a band from 1 to {bands}, not {cfg.size_guessed_big_band!r}")
 
 
 def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
@@ -158,6 +187,8 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
     values["window_end"] = _time("window_end", raw["window_end"])
     values["weekdays"] = _ints("weekdays", raw["weekdays"])
     values["followup_business_days"] = _ints("followup_business_days", raw["followup_business_days"])
+    for key in BAND_KEYS:
+        values[key] = _ints(key, raw[key])
     holidays = raw["holidays"]
     if not isinstance(holidays, list):
         raise ValueError(f"holidays must be a list of dates, not {holidays!r}")

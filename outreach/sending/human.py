@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Sequence, TypeVar
 
 from outreach.sending.config import SendConfig
+from outreach.sending.pace import CompanyPace, default_pace
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["next_gap_minutes", "mean_gap_minutes", "choose", "day_start_offset", "company_gap", "max_company_gap"]
@@ -57,14 +58,18 @@ def day_start_offset(day: date, cfg: SendConfig) -> timedelta:
     return timedelta(minutes=_fraction("day-start", day.isoformat()) * cfg.day_start_jitter_minutes)
 
 
-def company_gap(company_id: int, last_send: datetime, cfg: SendConfig) -> timedelta:
-    """The wait after a send to this company before the next one: `per_company_gap_minutes` (#9's floor) plus a share
-    of `per_company_gap_jitter_minutes` that depends on the company and that send, so each gap differs."""
+def company_gap(company_id: int, last_send: datetime, cfg: SendConfig, pace: CompanyPace | None = None) -> timedelta:
+    """The wait after a send to this company before the next one: its band's floor (`pace`, else the default band:
+    `per_company_gap_minutes`) plus a share of the band's jitter that depends on the company and that send, so each
+    gap differs (#229)."""
+    pace = pace or default_pace(cfg)
     stamp = last_send.astimezone(timezone.utc).strftime(ISO_FMT)
-    extra = _fraction("company-gap", company_id, stamp) * cfg.per_company_gap_jitter_minutes
-    return timedelta(minutes=cfg.per_company_gap_minutes + extra)
+    extra = _fraction("company-gap", company_id, stamp) * pace.gap_jitter_minutes
+    return timedelta(minutes=pace.gap_minutes + extra)
 
 
 def max_company_gap(cfg: SendConfig) -> timedelta:
-    """The longest `company_gap` can be: how far back the queue must look for a company's last send."""
-    return timedelta(minutes=cfg.per_company_gap_minutes + cfg.per_company_gap_jitter_minutes)
+    """The longest `company_gap` can be in any band: how far back the queue must look for a company's last send."""
+    floors = (cfg.per_company_gap_minutes, *cfg.size_band_gap_minutes)
+    jitters = (cfg.per_company_gap_jitter_minutes, *cfg.size_band_gap_jitter_minutes)
+    return timedelta(minutes=max(f + j for f, j in zip(floors, jitters)))

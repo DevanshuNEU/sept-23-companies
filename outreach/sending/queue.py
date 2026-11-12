@@ -8,15 +8,16 @@ the surviving company.
 """
 import random
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
                                        replied_people, resolve_company)
 from outreach.sending import calendar as cal
-from outreach.sending import human, ramp, signals
+from outreach.sending import human, pace, ramp, signals
 from outreach.sending.config import SendConfig, load_config
+from outreach.sending.pace import CompanyPace
 from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
@@ -52,7 +53,8 @@ REASON_TEXT = {
     "company_paused": "This company is paused. Unpause it to send.",
     "company_held": "This company is held because someone there replied. Release the hold to send.",
     "per_company_limit": "The daily limit for this company is used up. This goes out on the next sending day.",
-    "per_company_gap": "Another email went to this company a little while ago. Waiting out the gap (an hour or more).",
+    "per_company_gap": "Another email went to this company a little while ago. Waiting out its gap (20 minutes to 2 "
+                       "hours, by company size).",
     "recruiter_waits": "A recruiter waits while an email to someone else at this company is still queued.",
     "no_address": "No email address for this person.",
     "no_thread": "This follow-up has no Gmail thread to reply in, so it is not sent. Skip it, or send it as a new "
@@ -209,6 +211,7 @@ class Prepared:
     sent_today: int
     limit: int
     next_send: datetime | None
+    paces: dict[int, CompanyPace] = field(default_factory=dict)  # each queued company's size band (#229)
 
 
 def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None) -> Prepared:
@@ -227,8 +230,10 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: Da
         "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
         "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
     next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]
+    queued = _sorted([_queued(row, companies) for row in rows], cfg)
     return Prepared(
-        queue=_sorted([_queued(row, companies) for row in rows], cfg), stops=_stop_reasons(rows, companies, conn),
+        queue=queued, stops=_stop_reasons(rows, companies, conn),
+        paces=pace.company_paces(conn, {q.company_id for q in queued}, cfg),
         # A follow-up goes only in its touch's Gmail thread; without one it would start a new thread, so it waits.
         no_thread=frozenset(row["message_id"] for row in rows if row["seq"] >= 1 and not row["gmail_thread_id"]),
         # Follow-ups in one thread go out in order (#141): one waits while an earlier one has not gone out, and then
@@ -265,7 +270,8 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
         q, p.stops, gate, p.companies[q.company_id], q.company_id in p.held, now, cfg, today, day_full,
         sends.get(q.company_id, []), day_begins, day_opens, tomorrow, next_send, q.company_id in live_others,
         no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
-        not_before=p.not_before.get(q.message_id))) for q in pending]
+        not_before=p.not_before.get(q.message_id),
+        company_pace=p.paces.get(q.company_id) or pace.default_pace(cfg))) for q in pending]
 
 
 def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: DayState | None,
@@ -289,7 +295,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
             today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime,
             day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
             no_thread: bool = False, behind: bool = False,
-            not_before: date | None = None) -> tuple[str, datetime | None]:
+            not_before: date | None = None, company_pace: CompanyPace | None = None) -> tuple[str, datetime | None]:
+    company_pace = company_pace or pace.default_pace(cfg)
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -316,12 +323,13 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         return "not_business_day", tomorrow
     if day_full:
         return "daily_limit", tomorrow
-    # #9, 2026-10-31: the per-company limit is first emails only; a follow-up neither counts nor waits for it.
-    if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= cfg.per_company_daily:
+    # #9, 2026-10-31: the per-company limit is first emails only; a follow-up neither counts nor waits for it. The
+    # limit and the gap are the company's size band (#229).
+    if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= company_pace.daily:
         return "per_company_limit", tomorrow
     last = max((at for at, _ in sends), default=None)
-    if last is not None and now < last + human.company_gap(q.company_id, last, cfg):
-        return "per_company_gap", last + human.company_gap(q.company_id, last, cfg)
+    if last is not None and now < last + human.company_gap(q.company_id, last, cfg, company_pace):
+        return "per_company_gap", last + human.company_gap(q.company_id, last, cfg, company_pace)
     if not cal.in_window(now, zone, cfg):
         return "window", cal.next_window_start(now, zone, cfg)
     if q.role_kind == "recruiter" and others_queued:

@@ -99,6 +99,7 @@ class Scenario:
     events: tuple[Event, ...] = ()
     held_back: frozenset[int] = frozenset()   # companies `approve count` skips (only named events approve them)
     roles: Mapping[str, str] = field(default_factory=dict)  # person key to role kind (default engineer, manager, founder)
+    sizes: Mapping[int, int] = field(default_factory=dict)  # company index to its size fact (#229); none: no size
 
 
 @dataclass(frozen=True)
@@ -254,6 +255,11 @@ class _Run:
                 company = f"Simco {c:03d}"
                 company_id = self.conn.execute("INSERT INTO company(name, status_at, created_at) VALUES (?, ?, ?)",
                                                (company, STAMP, STAMP)).lastrowid
+                if c in s.sizes:
+                    self.conn.execute(
+                        "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, source_kind, "
+                        "source_ref, recorded_at) VALUES (?, 'size', 'simulated', ?, ?, 'estimate', 'hand', '', ?)",
+                        (company_id, s.sizes[c], s.sizes[c], STAMP))
                 zone = s.zones[c % len(s.zones)]
                 for p in range(s.people_per_company):
                     self._seed_person(company_id, company, c, p, zone)

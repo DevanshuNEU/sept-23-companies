@@ -23,8 +23,8 @@ SCRATCH = True
 
 # The shipped send limit is flat 200 a day (#9, 2026-11-12) and its pacing is human (#9, 2026-11-06). Most sending
 # tests walk the adaptive ramp (20 up to 100, a warning steps down) with exact times, so every default `load_config()`
-# in a test reads a scratch copy with the old ramp (20 to 100), the old 2 minute median gap, no start or company-gap
-# jitter and first-come order.
+# in a test reads a scratch copy with the old ramp (20 to 100), the old 2 minute median gap, the old 3 first emails a
+# day for a company with no size, no start or company-gap jitter and first-come order.
 # `SHIPPED_SEND_CONFIG` is the real file, for the tests that check what ships.
 import pathlib as _pathlib
 from outreach.sending import config as _send_config
@@ -32,9 +32,13 @@ from outreach.sending import config as _send_config
 SHIPPED_SEND_CONFIG = _send_config.DEFAULT_PATH
 _ramp_copy = _pathlib.Path(tempfile.mkdtemp(prefix="outreach-sending-config-test-")) / "config.toml"
 _ramp_text = SHIPPED_SEND_CONFIG.read_text(encoding="utf-8")
-for _old, _new in (("ramp_start = 200", "ramp_start = 20"), ("ramp_floor = 200", "ramp_floor = 20"),
-                   ("ramp_ceiling = 200", "ramp_ceiling = 100"), ("gap_median_minutes = 1.5", "gap_median_minutes = 2.0"),
-                   ("pick_pool = 5", "pick_pool = 1"), ("day_start_jitter_minutes = 25", "day_start_jitter_minutes = 0"),
+for _old, _new in (("ramp_start = 200", "ramp_start = 20"),
+                   ("ramp_floor = 200", "ramp_floor = 20"),
+                   ("ramp_ceiling = 200", "ramp_ceiling = 100"),
+                   ("gap_median_minutes = 1.5", "gap_median_minutes = 2.0"),
+                   ("per_company_daily = 2", "per_company_daily = 3"),  # the old default band (#229 ships 2)
+                   ("pick_pool = 5", "pick_pool = 1"),
+                   ("day_start_jitter_minutes = 25", "day_start_jitter_minutes = 0"),
                    ("per_company_gap_jitter_minutes = 60", "per_company_gap_jitter_minutes = 0")):
     # A line that no longer matches would leave the scratch copy on the shipped value without a word: refuse it.
     assert _ramp_text.count(_old) == 1, f"tests/__init__.py: {_old!r} is not in config.toml once"

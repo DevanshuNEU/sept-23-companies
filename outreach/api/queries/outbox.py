@@ -31,6 +31,7 @@ from outreach.api.queries.outcomes import company_refs, people_by_ids
 from outreach.api.queries.sending import moment, sending_status
 from outreach.drafts.checks import HOOK_DATE
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
+from outreach.sending.pace import company_paces, default_pace
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
 from outreach.sending import proof
@@ -168,6 +169,8 @@ class _Outbox:
         self.queue_order = {mid: n for n, mid in enumerate(self.schedule)}
         self.tz = {q.message_id: q.tz for q in load_queue(conn, cfg)}
         self.sends_today = _company_sends_today(conn, self.companies, now, cfg)
+        # Each company's first emails a day come from its size band (#229), as the sender counts them.
+        self.paces = company_paces(conn, set(self.survivor.values()), cfg)
         self.waiting: dict[int, list[tuple[sqlite3.Row, sqlite3.Row]]] = defaultdict(list)  # survivor: (touch, message)
         for t in self.touches:
             if t["state"] == "open":
@@ -199,7 +202,7 @@ class _Outbox:
                         projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,
                         projected_clock=clock, text=text,
                         company_sent_today=sent,
-                        company_slots_left=max(0, self.cfg.per_company_daily - sent))
+                        company_slots_left=max(0, self.paces.get(survivor, default_pace(self.cfg)).daily - sent))
 
     def _summary(self, group: str, touch, m, company: CompanyRef, checks: list[Check], schedule, next_due) -> str:
         if group == "replied":

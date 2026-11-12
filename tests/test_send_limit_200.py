@@ -1,5 +1,6 @@
 """The 200 a day send limit (#227, #9 2026-11-12): migration 0012 widens `send_day.send_limit` to 0..200 and keeps
-every row, and the shipped pacing fits 200 sends in one business day when the queue has enough companies."""
+every row, and the shipped pacing fits 200 sends in one business day when the queue has enough companies (with
+no size on file, a company takes 2 a day, so 200 needs about 100 or more of them)."""
 import dataclasses
 import sqlite3
 import unittest
@@ -48,9 +49,10 @@ class TwoHundredFitsInADayTest(unittest.TestCase):
         # Exact times and first-come order, so the run is the same every time; the limit and the gaps are the shipped ones.
         cfg = dataclasses.replace(cfg, pick_pool=1, day_start_jitter_minutes=0, per_company_gap_jitter_minutes=0)
         day = cal_days(date(2026, 11, 16), 1, cfg)[0]
-        scenario = Scenario(start=day, days=1, companies=100, people_per_company=3,
+        # 150 companies with no size on file: 2 first emails a day each (the default band, #229), so 300 could go.
+        scenario = Scenario(start=day, days=1, companies=150, people_per_company=3,
                             zones=("America/New_York", "America/Chicago", "America/Los_Angeles"),
-                            events=(Event(ny(day, "07:00"), "approve", {"count": 300}),))
+                            events=(Event(ny(day, "07:00"), "approve", {"count": 450}),))
         result = simulate(scenario, seed=11, cfg=cfg)
         self.addCleanup(result.close)
         (row,) = result.days

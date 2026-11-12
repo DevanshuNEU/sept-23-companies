@@ -33,10 +33,23 @@ weekdays = [0, 1, 2, 3, 4]
 # Dates ("2026-11-26") that are not business days. Empty by default.
 holidays = []
 
-# People per company (#9): at most 3 first emails a day (a follow-up takes no slot, 2026-10-31);
-# every email to a company, follow-ups too, at least 60 minutes apart.
-per_company_daily = 3
+# People per company: a company's band (below) sets its first emails a day and its gap. These three keys are the
+# default band, for a company with no size on file and no sign of being big (#9, 2026-11-12, #229): 2 first emails a
+# day (a follow-up takes no slot, 2026-10-31); every email to it, follow-ups too, 60 minutes plus
+# per_company_gap_jitter_minutes apart.
+per_company_daily = 2
 per_company_gap_minutes = 60
+
+# Company size bands (#9 company size pacing ruling, 2026-11-12, #229). One column per key: band n holds companies of
+# up to size_band_up_to[n] people (the last band, everyone above the last bound). For each band: first emails a day,
+# the gap's floor in minutes and up to how many minutes more (a different amount after each send).
+size_band_up_to = [100, 200, 500, 1000]
+size_band_daily = [2, 4, 5, 8, 15]
+size_band_gap_minutes = [60, 60, 45, 30, 20]
+size_band_gap_jitter_minutes = [60, 30, 30, 20, 15]
+# A company with no size on file that the job list guesses is big (an active Workday or Oracle board, or more than 50
+# open US postings) takes this band (1 is the first): 4, the 501 to 1,000 band.
+size_guessed_big_band = 4
 
 # Human pacing (#9, 2026-11-06; median 1.5 since 2026-11-12, #227). The gap after a send is log-normal around
 # gap_median_minutes (gap_spread is its width), clipped to gap_minutes, and now and then (break_chance) a real break of

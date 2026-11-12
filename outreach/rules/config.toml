@@ -575,6 +575,14 @@ citizenship = [
   # new in #4 (review round 1): the plural forms
   "must be u.s. citizens", "must be u.s citizens", "must be us citizens", "must be united states citizens",
   "must be citizens of the united states",
+  # 2026-11-12 (#234): the export-control "US person" boilerplate (SpaceX, xAI, Muon Space). Its list
+  # "(i) U.S. citizen or national, (ii) ..." breaks "must be a u.s. citizen", so the opening sentence carries it, and the
+  # short form names the US-person categories ("US citizen, lawful permanent resident, refugee, or asylee").
+  "to conform to u.s. government export regulations", "to conform to us government export regulations",
+  "lawful permanent resident, refugee, or asylee", "lawful permanent resident, refugee or asylee",
+  # The "ITAR REQUIREMENTS:" heading those postings carry, and "(ITAR requirement)". Only these words in a row:
+  # "export compliance requirements (ITAR/EAR)" and "ITAR/EAR export control requirements" are skills, not a status.
+  "itar requirements", "itar requirement", "ear/itar requirements", "itar/ear requirements",
 ]
 # new in #4 (final fix wave, item 3): the ways a posting says citizenship is required, one template per wording, with
 # {us} replaced by each of the forms below. Joined to the citizenship list.

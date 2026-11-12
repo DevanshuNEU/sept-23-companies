@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from outreach.drafts.followups import MAX_FOLLOWUPS
 
-HARD_CEILING = 100  # #9; also the send_day.send_limit CHECK
+HARD_CEILING = 200  # #9 (2026-11-12, #227); also the send_day.send_limit CHECK (migration 0012)
 DEFAULT_PATH = Path(__file__).with_name("config.toml")
 
 

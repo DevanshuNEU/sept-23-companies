@@ -8,12 +8,13 @@ from_name = "Devanshu Chicholikar"
 # The sender's day (send_day.day, daily counts) is this zone's date.
 day_tz = "America/New_York"
 
-# Send limit (#9, 2026-11-06): flat 100 a day. Start, floor and ceiling are all 100, so no warning lowers it and no
-# clean day raises it. To bring the adaptive ramp back, set start and floor to 20 (the send_day CHECK is the ceiling).
-ramp_start = 100
+# Send limit (#9, 2026-11-12, #227): flat 200 a day. Start, floor and ceiling are all 200, so no warning lowers it and
+# no clean day raises it. To bring the adaptive ramp back, set start and floor to 20 (the send_day CHECK, 200, is the
+# ceiling).
+ramp_start = 200
 ramp_step = 10
-ramp_ceiling = 100
-ramp_floor = 100
+ramp_ceiling = 200
+ramp_floor = 200
 
 # A day is clean when bounces are under 2% over the last 3 days (#9).
 clean_bounce_rate = 0.02
@@ -37,11 +38,13 @@ holidays = []
 per_company_daily = 3
 per_company_gap_minutes = 60
 
-# Human pacing (#9, 2026-11-06). The gap after a send is log-normal around gap_median_minutes (gap_spread is its
-# width), clipped to gap_minutes, and now and then (break_chance) a real break of break_minutes. Mean about 3 minutes
-# (the sender ticks every 2, so about 4 in practice), so a window day fits 100 sends.
+# Human pacing (#9, 2026-11-06; median 1.5 since 2026-11-12, #227). The gap after a send is log-normal around
+# gap_median_minutes (gap_spread is its width), clipped to gap_minutes, and now and then (break_chance) a real break of
+# break_minutes. The sender ticks every 2 minutes, so a gap lands on the next tick. With recipients across the US
+# zones the window runs about 11 hours on the New York clock, and the simulation sends 200 a day at median 1.5
+# (tests/test_send_limit_200.py); recipients all in one zone fit fewer.
 gap_minutes = [1, 25]
-gap_median_minutes = 2.0
+gap_median_minutes = 1.5
 gap_spread = 0.6
 break_chance = 0.04
 break_minutes = [10, 25]

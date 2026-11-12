@@ -29,7 +29,7 @@ class SendConfigTest(unittest.TestCase):
 
     def test_defaults_are_the_nine_numbers(self):
         cfg = load_config(SHIPPED_SEND_CONFIG)
-        self.assertEqual((cfg.ramp_start, cfg.ramp_step, cfg.ramp_ceiling, cfg.ramp_floor), (100, 10, 100, 100))
+        self.assertEqual((cfg.ramp_start, cfg.ramp_step, cfg.ramp_ceiling, cfg.ramp_floor), (200, 10, 200, 200))
         self.assertEqual((cfg.clean_bounce_rate, cfg.bounce_days), (0.02, 3))
         self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 30), time(16, 30)))
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
@@ -37,12 +37,12 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual(cfg.followup_business_days, (3, 7, 14, 21))
         self.assertEqual(cfg.gap_minutes, (1, 25))
         self.assertEqual((cfg.gap_median_minutes, cfg.gap_spread, cfg.break_chance, cfg.break_minutes),
-                         (2.0, 0.6, 0.04, (10, 25)))
+                         (1.5, 0.6, 0.04, (10, 25)))
         self.assertEqual((cfg.pick_pool, cfg.day_start_jitter_minutes, cfg.per_company_gap_jitter_minutes),
                          (5, 25, 60))
         self.assertEqual(cfg.holidays, ())
         self.assertEqual(cfg.day_tz, "America/New_York")
-        self.assertEqual(HARD_CEILING, 100)
+        self.assertEqual(HARD_CEILING, 200)
 
     def test_every_other_default_matches_the_plan(self):
         cfg = load_config()
@@ -66,14 +66,15 @@ class SendConfigTest(unittest.TestCase):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
         self.assertEqual(cfg.holidays, (date(2026, 11, 26), date(2026, 12, 25)))
 
-    def test_ceiling_above_100_is_refused(self):
-        self.refused("ramp_ceiling", ramp_ceiling="101")
+    def test_ceiling_above_200_is_refused(self):
+        self.refused("ramp_ceiling", ramp_ceiling="201")
+        self.assertEqual(load_config(config_with(ramp_ceiling="200", ramp_start="200")).ramp_ceiling, 200)
 
     def test_ramp_start_and_floor_must_sit_inside_the_ramp(self):
         self.refused("ramp_start", ramp_start="10")
-        self.refused("ramp_start", ramp_start="110", ramp_ceiling="100")
+        self.refused("ramp_start", ramp_start="110", ramp_ceiling="100", ramp_floor="100")
         self.refused("ramp_floor", ramp_floor="0")
-        self.refused("ramp_floor", ramp_floor="110")
+        self.refused("ramp_floor", ramp_floor="210")
         self.assertEqual(load_config(config_with(ramp_floor="10")).ramp_floor, 10)
 
     def test_five_follow_ups_are_refused(self):

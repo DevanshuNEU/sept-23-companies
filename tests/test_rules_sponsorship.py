@@ -570,3 +570,53 @@ class CitizenshipTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExportControlUSPersonTest(unittest.TestCase):
+    """ITAR and EAR "US person" boilerplate (#234, 2026-11-12): the standard export-control wording SpaceX,
+    xAI and Muon Space use, and the list of US-person categories, are a citizenship-style requirement (hidden by the
+    visa ruling). Experience with ITAR work, or a company that only complies with export rules, is not."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = load_config()
+
+    REQUIRED = (
+        # SpaceX and xAI as the board sends it: the heading on its own line, then the sentence.
+        "ITAR REQUIREMENTS:\n\nTo conform to U.S. Government export regulations, applicant must be a (i) U.S. citizen or "
+        "national, (ii) U.S. lawful, permanent resident (aka green card holder), (iii) Refugee under 8 U.S.C. § 1157, "
+        "or (iv) Asylee under 8 U.S.C. § 1158, or be eligible to obtain the required authorizations from the U.S. "
+        "Department of State. Learn more about the ITAR here.\n\nSpaceX is an Equal Opportunity Employer.",
+        "To conform to U.S. Government export regulations, applicant must be a (i) U.S. citizen or national, (ii) U.S. "
+        "lawful, permanent resident.",
+        "ITAR REQUIREMENTS: To conform to U.S. Government export regulations, applicant must be a (i) U.S. citizen or "
+        "national, (ii) U.S. lawful, permanent resident (aka green card holder), (iii) Refugee under 8 U.S.C. § 1157, "
+        "or (iv) Asylee under 8 U.S.C. § 1158, or be eligible to obtain the required authorizations from the U.S. "
+        "Department of State.",
+        "ITAR/EAR Requirements This position requires access to export controlled information. To conform to U.S. "
+        "Government export regulations applicable to that information, applicant must either be (A) a U.S. person, "
+        "defined as a (i) U.S. citizen or national, (ii) U.S. lawful permanent resident.",
+        "Willingness to travel.\n- US citizen, lawful permanent resident, refugee, or asylee (ITAR requirement)\n\nBonus "
+        "Points\n- Experience with DAQ systems.",
+    )
+    NOT_REQUIRED = (
+        "Direct experience leading engineering work governed by International Traffic in Arms Regulations (ITAR) and "
+        "Export Administration Regulations (EAR), with cleared and uncleared staff on the same team.",
+        "This role is not subject to U.S. Government export regulations.",
+        "We comply with U.S. Government export regulations and train every engineer on them.",
+        "Knowledge of export compliance requirements (ITAR/EAR).",
+        "Familiarity with ITAR/EAR export control requirements.",
+        "Ensure compliance with export control (ITAR/EAR) requirements in all customer data exchanges.",
+    )
+
+    def test_the_export_control_boilerplate_is_a_requirement(self):
+        for body in self.REQUIRED:
+            with self.subTest(body=body[:60]):
+                required, quote = citizenship_required(body, self.cfg)
+                self.assertTrue(required)
+                self.assertNotEqual(quote, "")
+
+    def test_experience_with_itar_or_plain_compliance_is_not(self):
+        for body in self.NOT_REQUIRED:
+            with self.subTest(body=body[:60]):
+                self.assertEqual(citizenship_required(body, self.cfg), (False, ""))

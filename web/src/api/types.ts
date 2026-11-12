@@ -414,10 +414,12 @@ export interface JobRow {
 export interface JobCounts { yourLevel: number; higher: number }
 export interface JobsView { asOf: IsoTime; rows: JobRow[]; total: number; nextAfter: string | null; counts: JobCounts }
 export type JobsTab = 'your_level' | 'higher';
-export type JobsWindow = '7' | '30' | '60' | '90' | 'any';
+export type JobsWindow = '1h' | '6h' | '24h' | '7' | '30' | '60' | '90' | 'any';
+/** A level chip (#213): the key a row's level tag comes from. Several may be on at once; none means any level. */
+export type JobLevel = 'new_grad' | 'early_career' | 'swe1' | 'swe2' | 'entry' | 'not_stated';
 export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
 /** What the job list asks for: a tab, a window in days, a size, the contacted filter, a company search and the cursor (`after`, opaque; none for the first page). */
-export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; after?: string | null; limit?: number }
+export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; levels?: readonly JobLevel[]; after?: string | null; limit?: number }
 /** Pass: the posting is hidden; the company is untouched. */
 export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
 /**

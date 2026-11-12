@@ -57,6 +57,9 @@ __all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "ap
            "WINDOWS", "BIG_OVER", "BIG_BY_POSTINGS", "ENTERPRISE_ATS", "STATE_SQL", "LISTED_SQL", "listed_params"]
 
 WINDOWS = (7, 30, 60, 90, 0)  # days back from today, 0 for any
+WINDOW_HOURS = (1, 6, 24)  # hours back from now (#213); a Date unknown row is in none of them
+# The level chips (#213), by the key a row's level tag comes from (`level_key`): several may be on at once.
+LEVELS = ("new_grad", "early_career", "swe1", "swe2", "entry", "not_stated")
 BIG_OVER = 300  # a company is big above this many people
 BIG_BY_POSTINGS = 50  # a company of unknown size is big above this many open postings read as US
 ENTERPRISE_ATS = ("workday", "oracle_orc")  # an active board on one of these makes a company of unknown size big
@@ -75,6 +78,11 @@ _PASS_REASON = "role"
 # A decision's level state, with the v1 job list rule for a row the 0007 rebuild has not reached (alerts use it too).
 STATE_SQL = ("COALESCE(d.level_state, CASE WHEN d.level_ok = 1 THEN 'fit' "
              "WHEN d.level_tier IN ('not_stated', 'open') THEN 'uncertain' ELSE 'reject' END)")
+# A row's level chip key (#213), over the `cand` row `c`: the same split as `_level_tag`, so a chip keeps exactly the
+# rows whose tag it names. Uncertain is "level not stated" whatever the tier; a fit with no level tier is "entry level".
+LEVEL_KEY_SQL = ("(CASE WHEN c.state = 'uncertain' THEN 'not_stated' "
+                 "WHEN c.level_tier IN ('not_stated', 'open') THEN (CASE WHEN c.state = 'fit' THEN 'entry' "
+                 "ELSE 'not_stated' END) ELSE c.level_tier END)")
 # Listed at all (the first rule above), over `p` (the posting) and `d` (its current decision). `:nogo` and `:passed`
 # are JSON lists of ids (`listed_params`). The list's one predicate: Check now's new count reads it too (#194).
 LISTED_SQL = ("p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' AND d.citizenship = 0 "
@@ -90,6 +98,8 @@ class JobFilters:
     size: Literal["any", "small", "big", "unknown"] = "any"
     not_contacted: bool = False
     q: str = ""
+    window_hours: int = 0  # one of WINDOW_HOURS, with window_days 0; 0: the day window decides
+    levels: frozenset[str] = frozenset()  # keys of LEVELS; empty: any level
 
 
 @dataclass(frozen=True)
@@ -213,12 +223,14 @@ rows AS (
          CASE WHEN co.size IS NULL THEN (CASE WHEN co.big_guess = 1 THEN :big_rank ELSE :unknown_rank END)
               WHEN co.size <= :big THEN co.size ELSE :big_rank + co.size END AS rank
   FROM cand c JOIN co ON co.cid = c.cid
-  WHERE (c.unk = 1 OR c.list_at >= :cutoff) AND (:q = '' OR lower(co.name) LIKE :like ESCAPE '\\')
+  WHERE ((c.unk = 1 AND :hour_window = 0) OR c.list_at >= :cutoff)
+    AND (:q = '' OR lower(co.name) LIKE :like ESCAPE '\\')
+    AND (:any_level = 1 OR {level_key} IN (SELECT value FROM json_each(:levels)))
     AND CASE :size WHEN 'small' THEN co.size <= :big WHEN 'big' THEN co.big
                    WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
 )
-""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL)
+""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL).replace("{level_key}", LEVEL_KEY_SQL)
 _COUNT = _SQL + "SELECT COALESCE(SUM(yl), 0) AS yl, COUNT(*) AS n FROM rows"
 # The page and both counts in one pass: the window functions run over every row of the filters, before the view
 # and the cursor narrow it to the page.
@@ -267,6 +279,12 @@ def _check(f: JobFilters, limit: int) -> None:
         raise ValueError(f"view must be one of {_VIEWS}, got {f.view!r}")
     if f.window_days not in WINDOWS:
         raise ValueError(f"window_days must be one of {WINDOWS}, got {f.window_days!r}")
+    if f.window_hours and (f.window_hours not in WINDOW_HOURS or f.window_days):
+        raise ValueError(f"window_hours must be one of {WINDOW_HOURS} with window_days 0, got {f.window_hours!r} "
+                         f"and {f.window_days!r}")
+    unknown = sorted(set(f.levels) - set(LEVELS))
+    if unknown:
+        raise ValueError(f"levels must be among {LEVELS}, got {unknown}")
     if f.size not in _SIZES:
         raise ValueError(f"size must be one of {_SIZES}, got {f.size!r}")
     if limit < 1:
@@ -285,9 +303,13 @@ def listed_params(conn: sqlite3.Connection, canon: dict[int, int] | None = None)
     return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(hidden))}
 
 
-def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[int, int],
+def _params(conn: sqlite3.Connection, now: str, today: date, f: JobFilters, canon: dict[int, int],
             contacted: dict[int, date]) -> dict:
-    cutoff = _ny_midnight(today - timedelta(days=f.window_days)) if f.window_days else ""
+    if f.window_hours:
+        moment = datetime.strptime(iso_utc(now), ISO_FMT).replace(tzinfo=timezone.utc)
+        cutoff = (moment - timedelta(hours=f.window_hours)).strftime(ISO_FMT)
+    else:
+        cutoff = _ny_midnight(today - timedelta(days=f.window_days)) if f.window_days else ""
     return {
         "canon": json.dumps({str(src): dst for src, dst in canon.items() if src != dst}),
         **listed_params(conn, canon),
@@ -295,6 +317,8 @@ def _params(conn: sqlite3.Connection, today: date, f: JobFilters, canon: dict[in
         "unknown_rank": _UNKNOWN_RANK, "big_rank": _BIG_RANK, "cutoff": cutoff,
         "q": f.q.strip(), "like": _like(f.q), "size": f.size, "not_contacted": int(f.not_contacted),
         "contacted": json.dumps(sorted(contacted)),
+        "hour_window": int(bool(f.window_hours)), "any_level": int(not f.levels),
+        "levels": json.dumps(sorted(f.levels)),
     }
 
 
@@ -319,7 +343,7 @@ def _prepare(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | Non
     today = _today(now)
     canon = canonical_ids(conn)
     contacted = _contacted(conn, canon)
-    params = _params(conn, today, f, canon, contacted)
+    params = _params(conn, now, today, f, canon, contacted)
     page = {**params, "yl": int(f.view == "your_level"), "has_after": int(cursor is not None),
             "a_unk": cursor[0] if cursor else 0, "a_at": cursor[1] if cursor else "",
             "a_rank": cursor[2] if cursor else 0, "a_id": cursor[3] if cursor else 0, "limit": limit + 1}

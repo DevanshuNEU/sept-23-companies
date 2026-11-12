@@ -32,7 +32,7 @@ export const planMethods = (t: Transport): LiveMethods => ({
   browse: (p) =>
     getJson(t, '/api/plan/browse', { query: { q: p.q || undefined, levelRole: p.levelRole ? 'true' : undefined, visaOk: p.visaOk ? 'true' : undefined, unworked: p.unworked ? 'true' : undefined, after: p.after || undefined, limit: p.limit } }),
   jobs: (p) =>
-    getJson(t, '/api/jobs', { query: { view: p.view, window: p.window, size: p.size, notContacted: p.notContacted ? 'true' : undefined, q: p.q || undefined, after: p.after || undefined, limit: p.limit } }),
+    getJson(t, '/api/jobs', { query: { view: p.view, window: p.window, size: p.size, notContacted: p.notContacted ? 'true' : undefined, q: p.q || undefined, levels: p.levels?.length ? [...p.levels].sort().join(',') : undefined, after: p.after || undefined, limit: p.limit } }),
   passJob: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/pass', {}, o, { params: { posting_id: postingId } }),
   markApplied: (postingId, o) => sendJson(t, 'post', '/api/jobs/{posting_id}/applied', {}, o, { params: { posting_id: postingId } }),
   applied: () => getJson(t, '/api/applied'),

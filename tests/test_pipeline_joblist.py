@@ -780,3 +780,71 @@ class ScaleTests(JobListCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HourWindowAndLevelTests(JobListCase):
+    """#213: "posted in the last hour, 6 hours, 24 hours" windows and level chips (multi-select)."""
+
+    def test_hour_windows_read_the_list_time_and_leave_out_date_unknown_rows(self):
+        co = self.company(size=40)
+        # NOW is 15:00 UTC on 2026-11-03.
+        half_hour = self.job(co, "A", posted="2026-11-03", seen="2026-11-03T14:30:00Z", list_at="2026-11-03T14:30:00Z")
+        five_hours = self.job(co, "B", posted="2026-11-03", seen="2026-11-03T10:00:00Z", list_at="2026-11-03T10:00:00Z")
+        a_day = self.job(co, "C", posted="2026-11-02", seen="2026-11-02T16:00:00Z", list_at="2026-11-02T16:00:00Z")
+        old = self.job(co, "D", posted="2026-11-01", seen="2026-11-01T12:00:00Z", list_at="2026-11-01T12:00:00Z")
+        unknown = self.job(co, "E", posted=None, list_at=None)
+        self.assertEqual(self.ids(window_days=0, window_hours=1), [half_hour])
+        self.assertEqual(self.ids(window_days=0, window_hours=6), [half_hour, five_hours])
+        self.assertEqual(self.ids(window_days=0, window_hours=24), [half_hour, five_hours, a_day])
+        self.assertEqual(self.ids(window_days=7), [half_hour, five_hours, a_day, old, unknown])
+
+    def test_the_hour_edge_is_inclusive(self):
+        co = self.company(size=40)
+        edge = self.job(co, posted="2026-11-03", seen="2026-11-03T14:00:00Z", list_at="2026-11-03T14:00:00Z")
+        self.assertEqual(self.ids(window_days=0, window_hours=1), [edge])
+
+    def test_a_bad_hour_window_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.ids(window_days=0, window_hours=2)
+        with self.assertRaises(ValueError):
+            self.ids(window_days=7, window_hours=1)  # one window at a time
+
+    def levels_fixture(self):
+        co = self.company(size=40)
+        return {
+            "new_grad": self.job(co, "NG", tier="new_grad"),
+            "early_career": self.job(co, "EC", tier="early_career"),
+            "swe1": self.job(co, "S1", tier="swe1"),
+            "swe2": self.job(co, "S2", tier="swe2", ok=1, level_state="fit"),
+            "entry": self.job(co, "EN", tier="not_stated", ok=1, level_state="fit"),
+            "not_stated": self.job(co, "NS", tier="not_stated", ok=0, level_state="uncertain"),
+        }
+
+    def test_each_level_chip_keeps_its_rows(self):
+        rows = self.levels_fixture()
+        for key, pid in rows.items():
+            self.assertEqual(self.ids(levels=frozenset({key})), [pid], key)
+
+    def test_chips_combine_and_the_counts_follow(self):
+        rows = self.levels_fixture()
+        page = self.run_query(levels=frozenset({"swe1", "swe2"}))
+        self.assertEqual(sorted(r.posting_id for r in page.rows), sorted([rows["swe1"], rows["swe2"]]))
+        self.assertEqual(page.counts, {"your_level": 2, "higher": 0})
+        self.assertEqual(self.run_query().counts["your_level"], 6)
+
+    def test_an_uncertain_row_counts_as_level_not_stated_whatever_its_tier(self):
+        co = self.company(size=40)
+        pid = self.job(co, tier="swe2", ok=0, level_state="uncertain")
+        self.assertEqual(self.ids(levels=frozenset({"not_stated"})), [pid])
+        self.assertEqual(self.ids(levels=frozenset({"swe2"})), [])
+
+    def test_the_higher_tab_filters_by_level_too(self):
+        co = self.company(size=40)
+        sde2 = self.job(co, "Higher S2", tier="swe2", ok=0, level_state="reject")
+        plain = self.job(co, "Higher NS", tier="not_stated", ok=0, level_state="reject")
+        self.assertEqual(self.ids(view="higher", levels=frozenset({"swe2"})), [sde2])
+        self.assertEqual(self.ids(view="higher", levels=frozenset({"not_stated"})), [plain])
+
+    def test_an_unknown_level_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.ids(levels=frozenset({"senior"}))

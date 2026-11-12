@@ -9,6 +9,7 @@ import {
   usePageClient,
   type Id,
   type IsoTime,
+  type JobLevel,
   type JobRow,
   type JobsParams,
   type JobsSize,
@@ -40,11 +41,23 @@ const TYPING_MS = 180;
 const PAGE = 50;
 
 const WINDOWS: { value: JobsWindow; label: string }[] = [
+  { value: '1h', label: '1 hour' },
+  { value: '6h', label: '6 hours' },
+  { value: '24h', label: '24 hours' },
   { value: '7', label: '7 days' },
   { value: '30', label: '30 days' },
   { value: '60', label: '60 days' },
   { value: '90', label: '90 days' },
   { value: 'any', label: 'Any time' },
+];
+/** The level chips (#213), in the order a new grad reads them. Several can be on; none is any level. */
+const LEVELS: { value: JobLevel; label: string }[] = [
+  { value: 'new_grad', label: 'New grad' },
+  { value: 'early_career', label: 'Early career' },
+  { value: 'swe1', label: 'SDE 1' },
+  { value: 'swe2', label: 'SDE 2' },
+  { value: 'entry', label: 'Entry level' },
+  { value: 'not_stated', label: 'Level not stated' },
 ];
 const SIZES: { value: JobsSize; label: string; hint: string }[] = [
   { value: 'any', label: 'Any size', hint: 'Every company' },
@@ -63,7 +76,8 @@ const CHIP = 'h-8 px-3 text-xs max-sm:h-11';
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 const sizeLine = (j: JobRow) => (j.size === null ? (j.big ? 'Big company, size not known' : 'Size not known') : `${j.big ? 'Big company, ' : ''}${plural(j.size, 'person', 'people')}`);
-const windowText = (w: JobsWindow) => (w === 'any' ? '' : ` in the last ${w} days`);
+const windowText = (w: JobsWindow) =>
+  w === 'any' ? '' : w === '1h' ? ' in the last hour' : w.endsWith('h') ? ` in the last ${w.slice(0, -1)} hours` : ` in the last ${w} days`;
 const levelText = (tab: JobsTab) => (tab === 'your_level' ? 'at your level' : 'at higher levels');
 
 /**
@@ -75,9 +89,10 @@ interface Marks { hidden: Id[]; done: Id[]; reached: Id[] }
 const NO_MARKS: Marks = { hidden: [], done: [], reached: [] };
 
 /** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
-function whatToWiden(on: { window: boolean; q: boolean; size: boolean; notContacted: boolean }): string {
+function whatToWiden(on: { window: boolean; q: boolean; size: boolean; level: boolean; notContacted: boolean }): string {
   const steps = [
     on.window ? 'widen the window' : null,
+    on.level ? 'clear the level' : null,
     on.q ? 'clear the search' : null,
     on.size ? 'clear the size' : null,
     on.notContacted ? 'turn off Not contacted yet' : null,
@@ -261,6 +276,10 @@ export default function BrowsePage() {
   const [windowDays, setWindowDays] = useState<JobsWindow>('30');
   const [size, setSize] = useState<JobsSize>('any');
   const [notContacted, setNotContacted] = useState(false);
+  const [levels, setLevels] = useState<readonly JobLevel[]>([]);
+  /** A level chip turns on or off; the order stays the chips' order, so the same choice is the same ask. */
+  const toggleLevel = (l: JobLevel) =>
+    setLevels((on) => LEVELS.map((x) => x.value).filter((v) => (v === l ? !on.includes(v) : on.includes(v))));
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Id | null>(null);
@@ -291,7 +310,7 @@ export default function BrowsePage() {
     return () => clearTimeout(id);
   }, [text]);
 
-  const params: Omit<JobsParams, 'after'> = { view: tab, window: windowDays, size, notContacted, q, limit: PAGE };
+  const params: Omit<JobsParams, 'after'> = { view: tab, window: windowDays, size, notContacted, q, levels, limit: PAGE };
   const query = useInfiniteQuery({
     queryKey: queryKeys.jobs(params),
     queryFn: ({ pageParam }) => client.jobs({ ...params, after: pageParam }),
@@ -450,7 +469,7 @@ export default function BrowsePage() {
   ];
   useHotkeys(bindings);
 
-  const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', notContacted };
+  const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', level: levels.length > 0, notContacted };
   const other: JobsTab = tab === 'your_level' ? 'higher' : 'your_level';
   const otherCount = counts?.[other] ?? 0;
   const headline = total === undefined || stale ? 'Loading the jobs' : `${total.toLocaleString('en-US')} ${levelText(tab)}${windowText(windowDays)}`;
@@ -524,6 +543,16 @@ export default function BrowsePage() {
           <Button type="button" variant={notContacted ? 'secondary' : 'outline'} size="sm" aria-pressed={notContacted} title="Hide companies you have already contacted" className={CHIP} onClick={() => setNotContacted((v) => !v)}>
             Not contacted yet
           </Button>
+        </div>
+        <div role="group" aria-label="Level" className="flex flex-wrap gap-1.5">
+          <Button type="button" variant={levels.length === 0 ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.length === 0} className={CHIP} onClick={() => setLevels([])}>
+            Any level
+          </Button>
+          {LEVELS.map((l) => (
+            <Button key={l.value} type="button" variant={levels.includes(l.value) ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.includes(l.value)} className={CHIP} onClick={() => toggleLevel(l.value)}>
+              {l.label}
+            </Button>
+          ))}
         </div>
       </header>
 

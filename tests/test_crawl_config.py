@@ -124,7 +124,7 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual((cfg.tick_budget_s, cfg.top_companies), (1500, 300))
         self.assertEqual((cfg.watch_interval_s, cfg.watch_per_tick, cfg.watch_min_text_chars), (604800, 40, 200))
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
-        self.assertEqual(len(cfg.host_interval_s), 15)  # amazon.jobs joined 2026-11-12
+        self.assertEqual(len(cfg.host_interval_s), 16)  # amazon.jobs and eightfold.ai joined 2026-11-12
 
     def test_rates(self):
         hosts = load_crawl_config().host_interval_s

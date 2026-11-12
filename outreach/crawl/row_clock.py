@@ -24,7 +24,7 @@ REPOST_DAYS = 120  # a posting with the title of one closed this recently is a r
 GAP_TAG_S = 7200  # the "found after a gap" tag shows when the board had not been read for longer than this
 # The ATSs whose date-only `posted_on` is honest. Greenhouse and Ashby give `posted_at`; Lever's date comes from
 # `createdAt`, which runs days to a year early, so it is not trusted. Rippling, BambooHR and JazzHR list no date
-# today; they are here in case they start to.
+# today; they are here in case they start to. Eightfold is not: its `postedTs` moves when a job is reposted (#246).
 DATE_TRUSTED = frozenset({"workable", "workday", "oracle_orc", "breezy", "teamtailor", "recruitee", "rippling",
                           "bamboohr", "jazzhr", "smartrecruiters", "pinpoint", "amazon"})
 

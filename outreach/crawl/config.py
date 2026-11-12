@@ -18,6 +18,7 @@ ATS_HOSTS = {
     "workday": "myworkdayjobs.com", "workable": "workable.com", "oracle_orc": "oraclecloud.com",
     "rippling": "rippling.com", "breezy": "breezy.hr", "pinpoint": "pinpointhq.com", "teamtailor": "teamtailor.com",
     "recruitee": "recruitee.com", "bamboohr": "bamboohr.com", "jazzhr": "applytojob.com", "amazon": "amazon.jobs",
+    "eightfold": "eightfold.ai",  # a tenant on its own host (careers.micron.com) is its own bucket
 }
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",

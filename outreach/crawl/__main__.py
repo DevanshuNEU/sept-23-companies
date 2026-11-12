@@ -125,6 +125,12 @@ def _line(report) -> str:
         text += f"; feed: {f['new']} new of {f['seen']}" if f["changed"] else "; feed: unchanged"
     if report.feed_error:
         text += f"; feed failed: {report.feed_error}"
+    if report.feed_boards is not None:
+        b = report.feed_boards
+        text += (f"; feed boards: added {b['promoted']}, no US engineering {b['rejected']}, dead {b['dead']}, "
+                 f"errors {b['errors']}, left {b['left']}")
+    if report.feed_boards_error:
+        text += f"; feed boards failed: {report.feed_boards_error}"
     if report.alarm_error:
         text += f"; alarm check failed: {report.alarm_error}"
     if report.check_runs:

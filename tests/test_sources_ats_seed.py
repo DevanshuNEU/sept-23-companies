@@ -472,7 +472,8 @@ class SeedRunTest(unittest.TestCase):
 
 class SeedConfigTest(unittest.TestCase):
     def test_shipped_values(self):
-        self.assertEqual(load_seed_config(), SeedConfig(enabled=True, weekly_limit=3000, retry_days=30))
+        self.assertEqual(load_seed_config(), SeedConfig(enabled=True, weekly_limit=3000, retry_days=30,
+                                                         feed_per_tick=10))
 
     def test_bad_values_are_refused(self):
         folder = Path(tempfile.mkdtemp(prefix="outreach-seed-cfg-"))

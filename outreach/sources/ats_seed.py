@@ -75,6 +75,7 @@ class SeedConfig:
     enabled: bool
     weekly_limit: int
     retry_days: int
+    feed_per_tick: int = 10  # boards the Simplify feed names gated at most each crawl tick (#239); 0 is off
 
     def __post_init__(self):
         if not isinstance(self.enabled, bool):
@@ -83,14 +84,18 @@ class SeedConfig:
             value = getattr(self, key)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(f"{key} must be a whole number of at least 1, got {value!r}")
+        value = self.feed_per_tick
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"feed_per_tick must be a whole number of at least 0, got {value!r}")
 
 
 def load_seed_config(path: Path = CONFIG_PATH) -> SeedConfig:
     data = tomllib.loads(Path(path).read_bytes().decode("utf-8"))
-    for key in ("enabled", "weekly_limit", "retry_days"):
+    for key in ("enabled", "weekly_limit", "retry_days", "feed_per_tick"):
         if key not in data:
             raise KeyError(f"{key} is missing from {Path(path).name}")
-    return SeedConfig(enabled=data["enabled"], weekly_limit=data["weekly_limit"], retry_days=data["retry_days"])
+    return SeedConfig(enabled=data["enabled"], weekly_limit=data["weekly_limit"], retry_days=data["retry_days"],
+                      feed_per_tick=data["feed_per_tick"])
 
 
 @dataclass(frozen=True)
@@ -220,7 +225,7 @@ def _name_owners(conn: sqlite3.Connection) -> dict[str, dict[int, str]]:
 
 
 def _promote(conn: sqlite3.Connection, row: _Row, verdict: Gate, now: str, owners: dict[str, dict[int, str]],
-             key_rows: Counter) -> bool:
+             key_rows: Counter, source: tuple[str, str] = (_SOURCE, _SOURCE_VERSION)) -> bool:
     """The board, its company and the verdict, as one unit. Returns whether the board was added.
 
     The row's stapply name key decides the company, as find-boards guards a stapply hit. A key some closed company
@@ -230,7 +235,9 @@ def _promote(conn: sqlite3.Connection, row: _Row, verdict: Gate, now: str, owner
     the list does; a company it makes from this board gets `found_by` `import` (no name guess). The `owners` were read
     before the gating, so a company the seed makes never takes a later row of its name: that row goes through
     identity, which raises its weak-name merge item. When `add_board` adds nothing (the board is someone else's by
-    now), the unit is undone and the row is recorded `known`."""
+    now), the unit is undone and the row is recorded `known`. `source` is the (name, version) the company is
+    credited to: stapply's for the lists, the feed's for the boards the Simplify feed names (#239)."""
+    source_name, source_version = source
     ref = BoardRef(row.ats, row.token)
     ats_key = f"{row.ats}:{row.token}"
     key = board_match_key(row.name)
@@ -243,17 +250,17 @@ def _promote(conn: sqlite3.Connection, row: _Row, verdict: Gate, now: str, owner
     try:
         with transaction(conn):
             conn.execute("INSERT INTO source(source_name, version) VALUES (?, ?) "
-                         "ON CONFLICT(source_name) DO NOTHING", (_SOURCE, _SOURCE_VERSION))
+                         "ON CONFLICT(source_name) DO NOTHING", (source_name, source_version))
             if joined is not None:
                 company_id, found_by = joined, "stapply_name"
                 conn.execute(
                     "INSERT INTO company_source(company_id, source_name, source_ref, first_seen_at, last_seen_at) "
-                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING", (company_id, _SOURCE, ats_key, now, now))
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING", (company_id, source_name, ats_key, now, now))
             else:
                 name = verdict.board_name.strip() or row.name or row.token
-                evidence = (EvidenceDraft("domain", row.domain, "estimate", _SOURCE, row.url),) if row.domain else ()
+                evidence = (EvidenceDraft("domain", row.domain, "estimate", source_name, row.url),) if row.domain else ()
                 res = resolve_candidate(conn, Candidate(name=name, domain=row.domain, keys={"ats": ats_key},
-                                                        evidence=evidence, source_ref=ats_key), source_name=_SOURCE)
+                                                        evidence=evidence, source_ref=ats_key), source_name=source_name)
                 company_id, found_by = res.company_id, "import" if res.created else "stapply_name"
             if add_board(conn, company_id, ref, via="ats_seed", matched_on="name" if joined is not None else "gate",
                          found_by=found_by, actor="source", now=now) != "added":
@@ -336,7 +343,9 @@ def _start_line(ats: tuple[str, ...], rows: list[_Row], known: list, due: list[_
 
 def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], known: list[tuple[_Row, int | None]],
                due: list[_Row], *, now: str, ats: tuple[str, ...], limit: int | None,
-               workers: Mapping[str, int] | None) -> SeedReport:
+               workers: Mapping[str, int] | None, source: tuple[str, str] = (_SOURCE, _SOURCE_VERSION),
+               event_kind: str = EVENT_KIND, should_stop: Callable[[], bool] = lambda: False,
+               as_is: bool = False) -> SeedReport:
     with transaction(conn):
         for row, board_id in known:
             if row.gate_result not in ("promoted", "known"):
@@ -344,15 +353,18 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
     gating = due if limit is None else due[:limit]
     counts = {"promoted": 0, "no_us_engineering": 0, "dead": 0, "error": 0, "known": len(known)}
     left = len(due) - len(gating)
+    yielded = 0
     tripped: set[str] = set()
     owners: dict[str, dict[int, str]] | None = None  # read at the first promotion, then never added to
     key_rows = Counter(board_match_key(r.name) for r in rows)  # how many rows of these lists carry each name key
-    polite = client if isinstance(client, PoliteClient) else PoliteClient(client, load_crawl_config())
+    # The tick hands in its own client (#239), already polite and refusing the buckets it tripped: never wrap it twice.
+    polite = client if as_is or isinstance(client, PoliteClient) else PoliteClient(client, load_crawl_config())
     rules_cfg = default_config()
     listed = fanout.list_boards(gating, lambda row: (adapter_for(row.ats, polite), None), lambda row: True,
-                                workers=workers, should_stop=lambda: False, clock=time.monotonic)
+                                workers=workers, should_stop=should_stop, clock=time.monotonic)
     with contextlib.closing(listed):  # a raise stops the workers now
         for item in listed:
+            yielded += 1
             if item.result is None:  # the breaker refused it (or no adapter reads the ATS): not gated this run
                 left += 1
                 if item.tripped:
@@ -362,17 +374,18 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
             if verdict.result == "promoted":
                 if owners is None:
                     owners = _name_owners(conn)
-                counts["promoted" if _promote(conn, item.board, verdict, now, owners, key_rows) else "known"] += 1
+                counts["promoted" if _promote(conn, item.board, verdict, now, owners, key_rows, source) else "known"] += 1
                 continue
             counts[verdict.result] += 1
             count = None if verdict.result == "error" else verdict.open_us_engineering
             with transaction(conn):
                 _verdict(conn, item.board, now, verdict.result, count, None)
+    left += len(gating) - yielded  # rows `should_stop` never let start
     report = SeedReport(read=len(rows), promoted=counts["promoted"], rejected=counts["no_us_engineering"],
                         dead=counts["dead"], errors=counts["error"], known=counts["known"], left=left,
                         tripped=tuple(sorted(tripped)))
     with transaction(conn):
-        append_event(conn, entity="source", kind=EVENT_KIND, actor="source", at=now,
+        append_event(conn, entity="source", kind=event_kind, actor="source", at=now,
                      detail={**asdict(report), "limit": limit, "ats": list(ats)})
     return report
 

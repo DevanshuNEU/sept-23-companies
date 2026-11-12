@@ -119,6 +119,10 @@ class TickReport:
     probe_error: str = ""
     feed: dict[str, int] | None = None  # the SimplifyJobs feed poll (#153): changed (0 or 1), seen, new; None if not run
     feed_error: str = ""
+    # The boards the feed names that the store lacked, gated after the poll (#239): the seed report's counts; None if
+    # not run (feed off, nothing due, budget spent) or failed (`feed_boards_error`).
+    feed_boards: dict[str, int] | None = None
+    feed_boards_error: str = ""
     alarm_error: str = ""  # the pipeline alarm check or its notice failed (#153); the tick itself did not
     alerted: int = 0  # the postings the new-job notice announced this tick (#156)
     alert_error: str = ""  # the new-job alert failed (#156); the tick itself did not
@@ -554,6 +558,29 @@ def _feed_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, c
     return {"changed": int(result.changed), "seen": result.seen, "new": result.new}, ""
 
 
+def _feed_boards_step(conn: sqlite3.Connection, run: _Pass, cfg: CrawlConfig, now_fn, clock, started: float
+                      ) -> tuple[dict[str, int] | None, str]:
+    """The boards the SimplifyJobs feed names that the store has no row for (#239), gated after the feed poll through
+    the tick's client, at most `feed_per_tick` (`ats_seed.toml`) and only on the ATSs the crawler reads. Skipped when
+    the feed is off, the pass stopped or the budget is spent; the budget is asked again before each board. Whatever it
+    raises is returned as text and never touches the board reads."""
+    if run.stopped or clock() - started >= cfg.tick_budget_s:
+        return None, ""
+    from outreach.sources.feed_seed import run_feed_seed  # the sources build on the crawler: import at use
+    try:
+        if not load_pipeline_config().simplify.enabled:
+            return None, ""
+        report = run_feed_seed(conn, run.client(), now=now_fn(), ats=reading_ats(cfg),
+                               should_stop=lambda: run.stopped or clock() - started >= cfg.tick_budget_s)
+    except Exception as e:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        return None, describe_error(e)
+    if report is None:
+        return None, ""
+    return {k: v for k, v in asdict(report).items() if k not in ("read", "tripped")}, ""
+
+
 def _alarm_step(conn: sqlite3.Connection, cfg: CrawlConfig, now_fn, notifier: Notifier) -> str:
     """The pipeline alarms (#153), after the feed step: at most one Mac notice a New York day, naming the first alarm
     and how many more there are. A failure here is not the tick's: it is returned as text (`alarm_error`)."""
@@ -589,7 +616,8 @@ def _add_passes(conn: sqlite3.Connection, report: TickReport) -> None:
     each pass's counts (null when it did not run) and its error text, and the Check now runs the tick made."""
     passes = {"probe": asdict(report.probe) if report.probe is not None else None, "probe_error": report.probe_error,
               "watch": asdict(report.watch) if report.watch is not None else None, "watch_error": report.watch_error,
-              "feed": report.feed, "feed_error": report.feed_error, "alarm_error": report.alarm_error,
+              "feed": report.feed, "feed_error": report.feed_error, "feed_boards": report.feed_boards,
+              "feed_boards_error": report.feed_boards_error, "alarm_error": report.alarm_error,
               "alerted": report.alerted, "alert_error": report.alert_error, "check_runs": list(report.check_runs),
               "check_error": report.check_error}
     with atomic(conn, "tick_summary"):
@@ -610,7 +638,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
              notifier: Notifier = _no_notice, workers: Mapping[str, int] | None = None) -> TickReport:
     """One tick: the ruleset check, a Check now when one waits (#194), the due boards (at most `limit or
     cfg.boards_per_tick`, within the budget), then the daily slug probe (Task 26a, `probe`), then the watched-page pass
-    (Task 14), then the SimplifyJobs feed poll (#153, `feed`), then another Check now when a request came in meanwhile,
+    (Task 14), then the SimplifyJobs feed poll (#153, `feed`) and the gate of the boards it names that the store lacks
+    (#239, `feed_boards`), then another Check now when a request came in meanwhile,
     all through the same client and breaker; the watch pass is its own `watch_pages` run, and each check its own
     `read_boards` run (`check_all.run_pending_check`, listed in `check_runs`). A failed probe, watch, feed or check
     pass is reported in `probe_error`, `watch_error`, `feed_error` or `check_error` and leaves the board reads as they
@@ -665,6 +694,8 @@ def run_tick(conn: sqlite3.Connection, client: HttpClient, *, cfg: CrawlConfig |
             report = replace(report, watch_error=describe_error(e))
         feed, feed_error = _feed_step(conn, run, cfg, now_fn, clock, started)
         report = replace(report, feed=feed, feed_error=feed_error)
+        feed_boards, feed_boards_error = _feed_boards_step(conn, run, cfg, now_fn, clock, started)
+        report = replace(report, feed_boards=feed_boards, feed_boards_error=feed_boards_error)
         check()  # a request that came in while the tick ran
         report = replace(report, check_runs=tuple(check_runs), check_error="; ".join(check_errors))
         report = replace(report, alarm_error=_alarm_step(conn, cfg, now_fn, notifier))

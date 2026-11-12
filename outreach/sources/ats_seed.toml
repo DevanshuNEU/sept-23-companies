@@ -8,3 +8,6 @@
 enabled = true  # false: run-due never tops the seed up (seed-ats by hand still runs)
 weekly_limit = 3000  # boards gated at most by one weekly top-up
 retry_days = 30  # a board that failed its gate (no US engineering role, or dead) is read again after this many days
+# The crawl tick (#239) gates at most this many of the boards the SimplifyJobs new grad feed names that Knock has no
+# board for, after its feed poll, the same way; 0 switches that off.
+feed_per_tick = 10

@@ -240,6 +240,9 @@ class TickFeedTests(unittest.TestCase):
         patch = mock.patch.object(tick, "probe_slugs", return_value=ProbeReport(0, 0, 0, 0, 0, 0))
         patch.start()
         self.addCleanup(patch.stop)
+        boards = mock.patch("outreach.sources.feed_seed.run_feed_seed", return_value=None)  # #239's business
+        boards.start()
+        self.addCleanup(boards.stop)
         self.conn = fresh_store()
         self.addCleanup(self.conn.close)
         self.cfg = dataclasses.replace(load_crawl_config(), detail_per_read=0)

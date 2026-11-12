@@ -33,6 +33,9 @@ _WORKDAY_HOST = re.compile(r"(?P<tenant>[a-z0-9-]+)\.(?P<wd>wd[0-9]+)\.myworkday
 _WORKDAY_SITE_HOST = re.compile(r"(?P<wd>wd[0-9]+)\.myworkdaysite\.com")
 _ICIMS_HOST = re.compile(r"[a-z0-9.-]+\.icims\.com")
 _JAZZHR_HOST = re.compile(r"(?P<token>[a-z0-9][a-z0-9-]*)\.applytojob\.com")
+_ORACLE_HOST = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.oraclecloud\.com")
+_AMAZON_HOST = re.compile(r"(?:www\.)?amazon\.jobs")
+_AMAZON_TOKEN = "amazon"  # the one Amazon board, US software development (#237)
 
 
 def _segments(path: str) -> list[str]:
@@ -87,6 +90,32 @@ def _workday(host: Mapping[str, str], segments: list[str]) -> BoardKey | None:
     return _key("workday", f"{tenant}.{wd}/{site}", "/" + "/".join(rest))
 
 
+def _oracle(host: str, segments: list[str]) -> BoardKey | None:
+    """`/hcmUI/CandidateExperience/<locale>/sites/<site>[/job/<id> | /requisitions/preview/<id>]` (#244)."""
+    if [s.lower() for s in segments[:2]] != ["hcmui", "candidateexperience"]:
+        return None
+    rest = _skip_locale(segments[2:])
+    if rest[:1] != ["sites"] or len(rest) < 2:
+        return None
+    site, tail = rest[1], rest[2:]
+    if tail[:1] == ["job"]:
+        native = _id(tail, 1)
+    elif tail[:2] == ["requisitions", "preview"]:
+        native = _id(tail, 2)
+    else:
+        native = None
+    return _key("oracle_orc", f"{host}/{site}", native)
+
+
+def _amazon(segments: list[str]) -> BoardKey | None:
+    """`/<locale>/jobs/<id>/<slug>`, on the one Amazon board (#244)."""
+    rest = _skip_locale(segments)
+    if rest[:1] != ["jobs"]:
+        return None
+    native = _id(rest, 1, _DIGITS)
+    return _key("amazon", _AMAZON_TOKEN, native) if native else None
+
+
 def _jazzhr(token: str, segments: list[str]) -> BoardKey | None:
     # The crawler's own link is /apply/jobs/details/<id>; the apply button's is /apply/<id>/<slug>.
     if segments[:3] == ["apply", "jobs", "details"]:
@@ -136,6 +165,10 @@ def board_key(url: str) -> BoardKey | None:
         found = _workday(m, segments)
     elif m := _WORKDAY_SITE_HOST.fullmatch(host):
         found = _workday({"tenant": "", "wd": m["wd"]}, segments)
+    elif _ORACLE_HOST.fullmatch(host):
+        found = _oracle(host, segments)
+    elif _AMAZON_HOST.fullmatch(host):
+        found = _amazon(segments)
     else:
         found = None
     if found is not None:

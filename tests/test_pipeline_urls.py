@@ -42,6 +42,21 @@ class BoardKeyTest(unittest.TestCase):
             "https://careers-acme.icims.com/jobs/2210/login": ("icims", "careers-acme.icims.com", "2210"),
             "https://acme.applytojob.com/apply/AbC123xYz/Software-Engineer": ("jazzhr", "acme", "AbC123xYz"),
             "https://acme.applytojob.com/apply/jobs/details/AbC123xYz": ("jazzhr", "acme", "AbC123xYz"),
+            # #244: the Oracle and Amazon links the SimplifyJobs feed carries.
+            "https://eihu.fa.us8.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/job/2617897":
+                ("oracle_orc", "eihu.fa.us8.oraclecloud.com/CX", "2617897"),
+            "https://FA-EXTU-SaasFaProd1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en-US/sites/CX_1/job/4237/apply":
+                ("oracle_orc", "fa-extu-saasfaprod1.fa.ocs.oraclecloud.com/CX_1", "4237"),
+            "https://edel.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2001/requisitions/preview/24668":
+                ("oracle_orc", "edel.fa.us2.oraclecloud.com/CX_2001", "24668"),
+            "https://iawmqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/careers/job/R271283":
+                ("oracle_orc", "iawmqy.fa.ocs.oraclecloud.com/careers", "R271283"),
+            "https://hdjq.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1":
+                ("oracle_orc", "hdjq.fa.us2.oraclecloud.com/CX_1", None),
+            "https://amazon.jobs/en/jobs/10583340/software-development-engineer-early-career-2027-us":
+                ("amazon", "amazon", "10583340"),
+            "https://www.amazon.jobs/en-gb/jobs/10412948/software-dev-engineer": ("amazon", "amazon", "10412948"),
+            "https://www.amazon.jobs/jobs/10412948": ("amazon", "amazon", "10412948"),
         }
         for url, (ats, token, native_id) in cases.items():
             with self.subTest(url=url):
@@ -63,6 +78,9 @@ class BoardKeyTest(unittest.TestCase):
                     "https://www.linkedin.com/jobs/view/123", "", "   ", "not a url", "mailto:a@b.co",
                     "ftp://jobs.lever.co/acme/x", "https://jobs.lever.co/", "https://jobs.lever.co/bad%20token",
                     "https://boards.greenhouse.io/embed/job_app", "https://evil-icims.com/jobs/1",
+                    "https://evil-oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/job/1",
+                    "https://acme.fa.us2.oraclecloud.com/hcmUI/other/sites/CX/job/1", "https://amazon.jobs/en/teams/x",
+                    "https://amazon.jobs.evil.com/en/jobs/1", "https://www.amazon.jobs/en/jobs/abc",
                     "https://notmyworkdayjobs.com/x/job/y", "https://jobs.lever.co.evil.com/acme/1"):
             with self.subTest(url=url):
                 self.assertIsNone(board_key(url))

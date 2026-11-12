@@ -80,6 +80,7 @@ class ReadOutcome:
     tripped: str | None = None
     body_requests: int = 0
     body_ms: int = 0
+    partial: bool = False  # an ok read whose list was not whole (#232): it closed nothing
 
 
 def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, run_id: int, now: str,
@@ -117,20 +118,22 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
 
     if plan is not None:
         # Phase 3: new and listed postings; then each changed field or body with its decision, as one unit.
+        # A partial read (a few rows broken or missing) never closes anything: what it did not list may still be open.
+        gone = () if result.partial else plan.gone
         ids = write_postings(conn, board, DiffPlan(plan.new, (), plan.present, plan.reopen, ()), now,
-                             batch_rows=cfg.batch_rows, seen_gap_s=seen_gap_s(board, now), closing=plan.gone)
+                             batch_rows=cfg.batch_rows, seen_gap_s=seen_gap_s(board, now), closing=gone)
         listed_with_body = {ids[j.native_id] for j in result.jobs if j.body and j.native_id in ids}
         texts = {ids[nid]: text for nid, text in body_updates if nid in ids}
         decided += _apply_changes(conn, board, plan.changed, texts, now, cfg, rules_cfg, combiner)
         new, changed, reopened, bodies = len(plan.new), len(plan.changed), len(plan.reopen), len(texts)
         changed_ids = [pid for pid, _ in plan.changed]
-        any_change = bool(plan.new or plan.changed or plan.reopen or plan.gone or texts)
+        any_change = bool(plan.new or plan.changed or plan.reopen or gone or texts)
 
         # Phase 4: the new postings with no list body, and any a crash left undecided.
         decided += _decide(conn, _undecided(conn, board), cfg, rules_cfg, combiner)
 
         # Phase 5a: a posting the ok read no longer lists is gone.
-        closed = close_postings(conn, plan.gone, "gone_from_board", now, batch_rows=cfg.batch_rows)
+        closed = close_postings(conn, gone, "gone_from_board", now, batch_rows=cfg.batch_rows)
 
     # Phase 5b: the second empty read in a row closes every open posting. The streaks come from the same BoardRow
     # write_board_state uses below, so the two can never disagree.
@@ -170,7 +173,7 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
                       next_read_at=next_read_at, interval_s=interval_s, bucket=bucket)
     return ReadOutcome(board_id=board.board_id, result=result.result, new=new, changed=changed, reopened=reopened,
                        closed=closed, decided=decided, bodies=bodies, interval_s=interval_s, tripped=tripped,
-                       body_requests=body_requests, body_ms=body_ms)
+                       body_requests=body_requests, body_ms=body_ms, partial=result.partial)
 
 
 def seen_gap_s(board: BoardRow, now: str) -> int | None:

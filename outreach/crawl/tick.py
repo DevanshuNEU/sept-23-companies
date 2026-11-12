@@ -105,6 +105,7 @@ class TickReport:
     empty: int = 0
     error: int = 0
     unchanged: int = 0
+    partial: int = 0  # of the ok reads, those whose list was not whole (#232): they stored what they got, closed nothing
     deferred: int = 0
     failed: int = 0
     new: int = 0
@@ -253,8 +254,8 @@ class _Pass:
         self.rules_cfg, self.combiner, self.now_fn, self.run_id = rules_cfg, combiner, now_fn, run_id
         self.clock = clock
         self.by_ats: dict[str, dict[str, int]] = {}
-        self.counts = {k: 0 for k in ("read", "ok", "empty", "error", "unchanged", "deferred", "failed", "new",
-                                      "closed")}
+        self.counts = {k: 0 for k in ("read", "ok", "empty", "error", "unchanged", "partial", "deferred", "failed",
+                                      "new", "closed")}
         self.down: set[str] = set()  # buckets the tick will not send to again
         self.seen: set[str] = set()
         self.error_run: dict[str, int] = {}  # error reads in a row per bucket that the breaker does not count
@@ -388,6 +389,7 @@ class _Pass:
             return
         self.counts["read"] += 1
         self.counts[out.result] += 1
+        self.counts["partial"] += int(out.partial)
         self.counts["new"] += out.new
         self.counts["closed"] += out.closed
         self._profile(board.ats, body_requests=adapter.body_requests, body_ms=out.body_ms,

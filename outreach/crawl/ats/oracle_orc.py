@@ -5,15 +5,19 @@ The token is `host/siteNumber` (`acme.fa.us2.oraclecloud.com/CX_1001`); the site
 `{"items": [{"TotalJobsCount": n, "requisitionList": [...]}]}`. Oracle ignores a top-level `limit` and `offset`, so both
 live inside the finder.
 
-A list that may be incomplete is `error`, never `ok` (Review Focus 1): the distinct ids collected must equal
-`TotalJobsCount` (not a sum of the pages' sizes), and every loop is bounded: a huge total is refused, the pages are
-capped, and a page that brings no new id ends the read. The list carries no ETag, so `unchanged` is the id fingerprint.
+A list that may be incomplete is `error` or a partial `ok`, never a whole `ok` (Review Focus 1): the distinct ids
+collected are checked against `TotalJobsCount` (not a sum of the pages' sizes), and every loop is bounded: a huge total
+is refused, the pages are capped, and a page that brings no new id ends the read. A list that comes up at most
+`short_allowed` short (a broken requisition skipped, or Oracle's count one or two ahead of its pages) is a partial
+`ok` (#232): what it listed is stored and nothing is closed. The list carries no ETag, so `unchanged` is the id
+fingerprint.
 """
 from __future__ import annotations
 
 import re
 
 from outreach.crawl.ats._common import d10, fetch_list, finish_list, json_body, read_error, safe_token
+from outreach.crawl.ats.workday import short_allowed
 from outreach.crawl.base import JobRef, ReadResult, Validators
 from outreach.crawl.text import html_to_text
 from outreach.net import HttpClient, Response
@@ -92,7 +96,7 @@ class OracleAdapter:
         host, site = parts
         jobs: dict[str, JobRef] = {}
         total = -1
-        rows_read = 0
+        rows_read = broken = 0
         resp: Response | None = None
         for _ in range(_MAX_PAGES):
             # Later pages carry no validator: a 304 here is not a reading of the board, and none is ever sent.
@@ -113,18 +117,21 @@ class OracleAdapter:
             for item in listed:
                 job = _parse(host, site, item)
                 if job is None:
-                    return read_error("a requisition has no usable Id or no Title", status=resp.status)
+                    broken += 1  # skipped; the read becomes partial
+                    continue
                 jobs.setdefault(job.native_id, job)
             rows_read += len(listed)
-            if len(jobs) >= total:
+            if len(jobs) + broken >= total:
                 break
-            if len(jobs) == before:
-                return read_error(f"a page brought no new posting: {len(jobs)} listed but TotalJobsCount is {total}",
-                                  status=resp.status)
-        if resp is None or len(jobs) != total:
+            if len(jobs) == before and not broken:
+                break  # a page brought no new posting: the pages ended or wrapped; the count check below decides
+        if resp is None or len(jobs) > total or total - len(jobs) > short_allowed(total):
             return read_error(f"{len(jobs)} distinct postings listed but TotalJobsCount is {total}",
                               status=resp.status if resp else None)
-        return finish_list(jobs.values(), resp, validators)
+        missing = total - len(jobs)
+        note = (f"{len(jobs)} of {total} postings read ({broken} broken, {max(missing - broken, 0)} missing)"
+                if missing or broken else "")
+        return finish_list(jobs.values(), resp, validators, partial_note=note)
 
     def body(self, token: str, job: JobRef) -> str | None:
         """The posting's text, or None when it has none. A failed request or a wrong shape raises, so the caller

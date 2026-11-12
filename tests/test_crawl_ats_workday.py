@@ -190,15 +190,24 @@ class WorkdayTests(unittest.TestCase):
         r, _ = read({LIST_KEY: route})
         self.assertEqual((r.result, len(r.jobs)), ("ok", 2600))
 
-    def test_overlapping_families_that_sum_to_the_total_are_an_error(self):
-        # A holds 0-999 and B holds 980-1979: the totals add up to 2000 but the union is 1980, so 20 are missing.
+    def test_overlapping_families_a_little_short_are_a_partial_read(self):
+        # A holds 0-999 and B holds 980-1979: the totals add up to 2000 but the union is 1980, so 20 are missing, within
+        # the 2% a partial read allows (#232): the 1980 are kept and nothing will be closed.
         pool = [posting(n) for n in range(1980)]
         groups = {None: pool + [posting(n, 'X') for n in range(20)], ENG: pool[:1000], SALES: pool[980:]}
         route = tenant(groups, facets=fx("workday_capped.json")["facets"])
         r, _ = read({LIST_KEY: route})
+        self.assertEqual((r.result, len(r.jobs), r.partial, r.validators), ("ok", 1980, True, Validators()))
+        self.assertIn("1980 of 2000", r.partial_note)
+
+    def test_overlapping_families_far_short_are_an_error(self):
+        pool = [posting(n) for n in range(1900)]
+        groups = {None: pool + [posting(n, 'X') for n in range(100)], ENG: pool[:1000], SALES: pool[900:]}
+        route = tenant(groups, facets=fx("workday_capped.json")["facets"])
+        r, _ = read({LIST_KEY: route})
         self.assertEqual((r.result, r.jobs, r.validators), ("error", (), Validators()))
         self.assertIn("capped", r.error)
-        self.assertIn("1980", r.error)
+        self.assertIn("1900", r.error)
 
     def test_families_that_do_not_cover_the_total_are_an_error(self):
         # Postings with no family would be missing: 5 listed in the families, 2000 in the tenant.
@@ -319,27 +328,61 @@ class WorkdayTests(unittest.TestCase):
         r, _ = read({LIST_KEY: FetchError("network", "down")})
         self.assertEqual((r.result, r.http_status), ("error", None))
 
-    def test_a_path_the_body_fetch_would_refuse_makes_the_read_an_error(self):
+    def assert_partial_without(self, r, skipped_index, label):
+        """A partial ok read (#232) of the fixture list that kept every posting but the broken one at `skipped_index`."""
+        self.assertEqual((r.result, r.partial, r.validators), ("ok", True, Validators()), label)
+        kept = [p for i, p in enumerate(PATHS) if i != skipped_index]
+        self.assertEqual([j.native_id for j in r.jobs], kept, label)
+        self.assertIn("1 broken", r.partial_note, label)
+
+    def test_a_path_the_body_fetch_would_refuse_is_skipped_and_the_read_is_partial(self):
         for path in ("/job/x y", "/job/../../admin", "//evil.com/x", "/job/x?y=1", "/"):
             data = json.loads(LIST)
             data["jobPostings"][1]["externalPath"] = path
             r, _ = read({LIST_KEY: json_response(data)})
-            self.assertEqual((r.result, r.jobs), ("error", ()), path)
+            self.assert_partial_without(r, 1, path)
+            self.assertNotIn(path, [j.native_id for j in r.jobs])
 
-    def test_posting_without_path_or_title_is_error(self):
+    def test_a_posting_without_path_or_title_is_skipped_and_the_read_is_partial(self):
         for key in ("externalPath", "title"):
             data = json.loads(LIST)
             del data["jobPostings"][1][key]
             r, _ = read({LIST_KEY: json_response(data)})
-            self.assertEqual((r.result, r.jobs), ("error", ()), key)
+            self.assert_partial_without(r, 1, key)
         data = json.loads(LIST)
         data["jobPostings"][0]["externalPath"] = "job/no-leading-slash"
         r, _ = read({LIST_KEY: json_response(data)})
-        self.assertEqual(r.result, "error")
+        self.assert_partial_without(r, 0, "no leading slash")
         data = json.loads(LIST)
         data["jobPostings"][0] = "nope"
         r, _ = read({LIST_KEY: json_response(data)})
-        self.assertEqual(r.result, "error")
+        self.assert_partial_without(r, 0, "not an object")
+
+    def test_a_list_of_only_broken_postings_is_an_error(self):
+        data = json.loads(LIST)
+        for row in data["jobPostings"]:
+            del row["title"]
+        r, _ = read({LIST_KEY: json_response(data)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+
+    def test_a_posting_listed_twice_when_the_pages_move_is_skipped_and_the_read_is_partial(self):
+        rows = [posting(n) for n in range(45)]
+        pages = [rows[0:20], rows[19:39], rows[39:45]]  # the second page starts one back: row 19 comes twice
+        calls = iter(pages)
+
+        def route(method, url, headers, body):
+            page = next(calls)
+            return json_response({"total": 45 if json.loads(body)["offset"] == 0 else 0, "jobPostings": page})
+        r, _ = read({LIST_KEY: route})
+        self.assertEqual((r.result, r.partial, len(r.jobs)), ("ok", True, 45))
+        self.assertIn("1 listed twice", r.partial_note)
+
+    def test_a_partial_read_is_never_unchanged(self):
+        data = json.loads(LIST)
+        del data["jobPostings"][2]["title"]
+        kept = PATHS[:2]
+        r, _ = read({LIST_KEY: json_response(data)}, validators=Validators(ids_fingerprint=ids_fingerprint(kept)))
+        self.assertEqual((r.result, r.partial), ("ok", True))
 
     def test_odd_optional_fields_do_not_break_the_read(self):
         data = json.loads(LIST)

@@ -1124,3 +1124,58 @@ class ListTimeReadTests(IngestTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PartialReadTests(IngestTestCase):
+    """A partial ok read (#232): a few rows broken or missing. What it listed is stored, nothing is closed, and the
+    board keeps no baseline, so the next read compares in full."""
+
+    def adapter(self, *results):
+        adapter = DetailAdapter(self.conn, results)
+        adapter.ats = "greenhouse"
+        return adapter
+
+    def test_a_partial_read_adds_new_postings_and_closes_none(self):
+        first = [detail_job("A", "Software Engineer", "2026-10-20"), detail_job("B", "Data Engineer", "2026-10-20")]
+        self.read(None, adapter=self.adapter(detail_ok(first)))
+        self.assertEqual(self.open_postings(), 2)
+        partial = ReadResult("ok", (detail_job("A", "Software Engineer", "2026-10-20"),
+                                    detail_job("C", "Backend Engineer", "2026-10-21")),
+                             Validators(), partial=True, partial_note="2 of 3 postings read (1 broken, 0 missing)")
+        out = self.read(None, at(1), adapter=self.adapter(partial))
+        self.assertEqual((out.result, out.new, out.closed), ("ok", 1, 0))
+        self.assertIsNone(self.posting("B")["closed_at"])  # not listed this time, but a partial read closes nothing
+        self.assertIsNotNone(self.posting("C"))
+        self.assertEqual(self.open_postings(), 3)
+        board = self.board()
+        self.assertEqual((board["last_read"], board["error_streak"], board["etag"], board["ids_fingerprint"]),
+                         ("ok", 0, "", ""))
+
+    def test_a_whole_read_after_a_partial_one_closes_what_is_gone(self):
+        first = [detail_job("A", "Software Engineer", "2026-10-20"), detail_job("B", "Data Engineer", "2026-10-20")]
+        self.read(None, adapter=self.adapter(detail_ok(first)))
+        partial = ReadResult("ok", (first[0],), Validators(), partial=True, partial_note="1 of 2 postings read")
+        self.read(None, at(1), adapter=self.adapter(partial))
+        out = self.read(None, at(2), adapter=self.adapter(detail_ok([first[0]])))
+        self.assertEqual(out.closed, 1)
+        self.assertEqual(self.posting("B")["close_reason"], "gone_from_board")
+
+    def test_a_partial_read_is_a_good_read_for_the_streaks(self):
+        first = [detail_job("A", "Software Engineer", "2026-10-20")]
+        self.read(None, adapter=self.adapter(detail_ok(first)))
+        self.read(status_response(500), at(1))
+        self.assertEqual(self.board()["error_streak"], 1)
+        partial = ReadResult("ok", tuple(first), Validators(), partial=True, partial_note="1 of 2 postings read")
+        self.read(None, at(2), adapter=self.adapter(partial))
+        self.assertEqual((self.board()["last_read"], self.board()["error_streak"]), ("ok", 0))
+
+
+class PartialResultShapeTests(unittest.TestCase):
+    def test_only_an_ok_read_with_a_note_is_partial(self):
+        job = detail_job("A", "Software Engineer", "2026-10-20")
+        with self.assertRaises(ValueError):
+            ReadResult("error", (), Validators(), error="x", partial=True, partial_note="n")
+        with self.assertRaises(ValueError):
+            ReadResult("ok", (job,), Validators(), partial=True)
+        with self.assertRaises(ValueError):
+            ReadResult("ok", (job,), Validators(), partial_note="n")

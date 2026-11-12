@@ -385,6 +385,8 @@ non_us_countries = [
   "bangladesh", "sri lanka", "nepal", "indonesia", "malaysia", "thailand", "new zealand", "chile", "peru",
   "costa rica", "uruguay", "guatemala", "serbia", "croatia", "bulgaria", "slovakia", "hong kong", "macau", "emea",
   "apac", "latam", "europe",
+  # #250 (2026-11-12): regions a posting names instead of a country ("Latin America" was listed)
+  "latin america", "south america", "central america", "caribbean", "middle east", "asia pacific", "nordics",
   # #4 follow-up 2026-10-23: a title can name one ("Software Engineer II (Venezuela)")
   "venezuela",
 ]

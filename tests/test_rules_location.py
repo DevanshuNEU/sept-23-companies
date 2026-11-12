@@ -91,6 +91,14 @@ class UsStatusTest(unittest.TestCase):
             with self.subTest(title=title, location=loc, country=country):
                 self.assertEqual(us_status(loc, country, self.cfg, title=title), expected)
 
+    def test_non_us_regions_read_no(self):
+        # #250: CodeRoad's Professional Services Engineer was placed in "Latin America" and listed (2026-11-12).
+        for loc in ("Latin America", "South America", "Remote - Latin America", "Central America", "Caribbean",
+                    "Middle East", "Asia Pacific", "Nordics"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "no")
+        self.assertEqual(us_status("Remote - US or Latin America", None, self.cfg), "yes")
+
     def test_brazilian_and_nearby_cities_read_no(self):
         # Cadence's Application Engineer I came in as a bare "BELO HORIZONTE" and read unknown (2026-10-28).
         for loc in ("BELO HORIZONTE", "Sao Paulo", "S\u00e3o Paulo, Brazil", "Rio de Janeiro", "Curitiba", "Porto Alegre",

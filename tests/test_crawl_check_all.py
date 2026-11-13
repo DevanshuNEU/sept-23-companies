@@ -166,8 +166,8 @@ class TickRunsCheckTests(CheckCase):
         self.read_before(self.board("quiet"), 3 * 3600, next_in=86400)
         self.request()
         self.tick({gh("quiet"): ok()})
-        self.clock.t += 3600
-        self.tick({}, now_fn=lambda: at(3600))
+        self.clock.t += 600  # inside the board's 15 minute wait (#251), so the next tick reads nothing
+        self.tick({}, now_fn=lambda: at(600))
         self.assertEqual(len(self.check_runs()), 1)
 
     def test_a_failed_check_is_reported_ends_its_progress_and_the_tick_goes_on(self):

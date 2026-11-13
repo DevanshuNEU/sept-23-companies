@@ -32,7 +32,7 @@ from datetime import datetime
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.bodies import BODY_LANES, fetch_bodies, missing_body_ids, refetch_body_ids, save_body, stored_sha
 from outreach.crawl.boardstate import BoardRow, load_board, write_board_state
-from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, low_yield, next_interval_s
+from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, low_yield, next_interval_s, tier_wait_s
 from outreach.crawl.config import CrawlConfig
 from outreach.crawl.decisions import decide_postings
 from outreach.crawl.polite import HostTripped
@@ -164,7 +164,10 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         # A big board with few US engineering jobs waits at least a day (#152). Only the next read moves: the stored
         # interval stays the normal one, so the board returns to its rhythm the day it stops being low yield. An empty
         # read keeps the normal wait: its postings are still open, and the second empty read closes them.
-        wait_s = interval_s
+        # Speed tiers (#251): a one-request board waits 15 minutes, 2 hours or a day by what it lists. Only the next
+        # read moves, as with the low-yield day below.
+        tier = tier_wait_s(conn, board, now, cfg) if result.result in ("ok", "unchanged") else None
+        wait_s = interval_s if tier is None else tier
         if result.result in ("ok", "unchanged") and low_yield(conn, board.board_id, now, cfg):
             wait_s = max(interval_s, cfg.big_board.interval_s)
         next_read_at = add_seconds(now, wait_s)

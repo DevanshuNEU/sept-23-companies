@@ -111,7 +111,7 @@ interval_s = 86400
 # still apply. Boards on other ATSs keep floor_s to ceiling_s until their newest-first reads land.
 [tiers]
 hot_s = 900
-warm_s = 7200
+warm_s = 3600  # 1 hour (2026-11-13, his call after the sanity check; was 2 hours)
 dead_s = 86400
 hot_days = 90
 dead_days = 90

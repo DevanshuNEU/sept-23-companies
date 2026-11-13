@@ -391,6 +391,11 @@ class LogSentTest(BridgeCase):
         self.assertEqual(err["code"], "bad_input")
 
     def test_backdated_within_three_days_and_a_request_taken_back_can_be_logged_again(self):
+        # `log_touch` stamps created_at from the real clock, and the guard refuses a touch recorded more than 5 days
+        # after it was sent, so the test pins the clock to NOW (it failed from 2026-11-13 on the real date).
+        patch = mock.patch("outreach.store.writes.utcnow", return_value=NOW)
+        patch.start()
+        self.addCleanup(patch.stop)
         first = self.log(person_id=self.lin, note_text=NOTE, at="2026-11-08T14:00:00Z")["results"][0]
         self.assertEqual(first["sent_on"], "2026-11-08")
         # Taken back on the LinkedIn page: the touch is undone and the log gets an undo row (`undo_step`).

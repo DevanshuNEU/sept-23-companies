@@ -17,6 +17,8 @@ enabled = true
 known = [
   "Raydar", "True Talent Solutions Partners", "Pragmatike", "DistantJob", "OnHires", "Lavendo", "Bee Genius",
   "CodeRoad",
+  # 2026-11-13, his call: recruiting platforms that post for clients
+  "Clera", "Weekday AI",
 ]
 # Only words that name a staffing business outright: "placement" or "search partners" also name product companies
 # (Placements.io), so they are left out.

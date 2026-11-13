@@ -99,6 +99,12 @@ class UsStatusTest(unittest.TestCase):
                 self.assertEqual(us_status(loc, None, self.cfg), "no")
         self.assertEqual(us_status("Remote - US or Latin America", None, self.cfg), "yes")
 
+    def test_chinese_cities_read_no(self):
+        # 2026-11-13 sanity check: Thoughtworks' "TW Xi'an" was listed.
+        for loc in ("TW Xi'an", "Xian", "Tianjin", "Dalian"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "no")
+
     def test_accented_places_fold(self):
         # #257: "IC3 - Infra Engineer - NetSecOps" in "México" was listed; an accent never hides a place.
         for loc in ("México", "Montréal", "Zürich", "Kraków"):

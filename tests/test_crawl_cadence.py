@@ -419,7 +419,7 @@ class TierTests(StoreTestCase):
             with self.subTest(dec=dec):
                 b = self.board(self.company())
                 self.job(b, 5, **dec)
-                self.assertEqual(self.tiered(b), 7200)
+                self.assertEqual(self.tiered(b), 3600)
 
     def test_nothing_new_for_90_days_is_dead(self):
         b = self.board(self.company())
@@ -428,7 +428,7 @@ class TierTests(StoreTestCase):
 
     def test_a_new_board_with_no_postings_is_warm(self):
         b = self.board(self.company(), ats="lever")
-        self.assertEqual(self.tiered(b), 7200)
+        self.assertEqual(self.tiered(b), 3600)
 
     def test_a_hot_workday_board_waits_15_minutes_and_the_rest_keep_their_rhythm(self):
         # #251 part 2: Workday and Oracle have head reads, so a hot board is checked every 15 minutes.
@@ -442,7 +442,7 @@ class TierTests(StoreTestCase):
 
     def test_the_tier_settings(self):
         self.assertEqual((CFG.tiers.hot_s, CFG.tiers.warm_s, CFG.tiers.dead_s, CFG.tiers.hot_days,
-                          CFG.tiers.dead_days), (900, 7200, 86400, 90, 90))
+                          CFG.tiers.dead_days), (900, 3600, 86400, 90, 90))  # warm 1 hour (#251, 2026-11-13)
         self.assertIn("greenhouse", CFG.tiers.ats)
         self.assertNotIn("workday", CFG.tiers.ats)
         self.assertEqual(CFG.tiers.head_ats, ("workday", "oracle_orc"))

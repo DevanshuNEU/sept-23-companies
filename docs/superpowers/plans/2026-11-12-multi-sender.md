@@ -17,7 +17,7 @@
 - Every test runs on scratch settings (`tests/__init__.py`); no test calls Gmail, Mail.app or `osascript`. Mail.app is reached only through an injected runner that tests replace.
 - Accounts: `devanshurajesh@gmail.com` (id 1, kind `gmail`, lane none, reads only), `devanshuchi9@gmail.com` (kind `gmail`, lane `general`, start 15, step 3, floor 15, ceiling 40), `chicholikar.d@northeastern.edu` (kind `mailapp`, Mail.app account `Exchange`, lane `sponsor`, start 15, step 3, floor 15, ceiling 60). Display name on every account: `Devanshu Chicholikar`.
 - Window: weekdays 08:00 to 15:00 recipient local time. Holidays: 2026-11-26, 2026-11-27, 2026-12-24, 2026-12-25, 2026-12-31, 2027-01-01.
-- Spread gap: `minutes_left / sends_left * U(0.6, 1.4)`, clipped to `[2, 45]` minutes; breaks and the pick from the first 5 stay.
+- Spread gap: `minutes_left / (sends_left + 1) * U(0.6, 1.4)`, clipped to `[2, 45]` minutes; breaks and the pick from the first 5 stay.
 - Follow-ups: `followup_business_days = [7]`; follow-ups count toward the account's day.
 - Hard pause of one account at 2% or more of its last 100 first emails bounced, once 30 are sent.
 - `send_day.send_limit` CHECK stays `BETWEEN 0 AND 200`; `HARD_CEILING = 200` stays.
@@ -201,7 +201,7 @@ config.toml gets three `[[account]]` blocks with the Global Constraints values (
 **Interfaces:**
 - Produces: `human.spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: SendConfig) -> float` (minutes). `minutes_left` is computed by the caller (Task A7) as minutes from now to the latest window close, in New York time, among that account's ready recipients today. `sends_left <= 0` returns the high clip.
 
-- [ ] **Step 1: Failing tests:** `test_spread_gap_formula` (minutes_left 420, sends_left 15, rng fixed so factor 1.0: 28.0); `test_spread_gap_clipped` (low 2, high 45); and in the simulation, `test_fifteen_spread_across_window`: one account at 15, recipients split ET and PT, one simulated Monday; assert 15 sent, the first after 08:00 ET, no more than 5 before 10:00 ET, the last after 13:00 ET.
+- [ ] **Step 1: Failing tests:** `test_spread_gap_formula` (minutes_left 420, sends_left 15, rng fixed so factor 1.0: 26.25); `test_spread_gap_clipped` (low 2, high 45); and in the simulation, `test_fifteen_spread_across_window`: one account at 15, recipients split ET and PT, one simulated Monday; assert 15 sent, the first after 08:00 ET, no more than 5 before 10:00 ET, the last after 13:00 ET.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement; the break chance and the pick pool are unchanged. **Step 4:** PASS. **Step 5:** Commit `sending: spread each account's day across the window`.
 
 ### Task A7: Queue and pick per account

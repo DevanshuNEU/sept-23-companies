@@ -380,9 +380,17 @@ def first_only(verdicts: list[Verdict]) -> list[Verdict]:
 
 
 def pick(verdicts: list[Verdict], queue: list[Queued], rng: random.Random | None = None,
-         pool: int = 1) -> Queued | None:
+         pool: int = 1, *, now: datetime | None = None, cfg: SendConfig | None = None) -> Queued | None:
     """A message whose verdict is `ready`, or None. With no `rng` it is the first in queue order; with one it is any
     of the first `pool` ready messages, so the order is not strictly first come, first served (`human.choose`)."""
     ready = {v.message_id for v in verdicts if v.reason == "ready"}
     candidates = [q for q in queue if q.message_id in ready]
+    if now is not None and cfg is not None:
+        # Earliest window close first (absolute time, today's date), then queue order: a New York recipient goes
+        # before a Los Angeles one, so nobody is stranded when their window closes. sorted() is stable.
+        today = cal.ny_date(now.astimezone(timezone.utc), cfg)
+
+        def close(q: Queued) -> datetime:
+            return _local(today, cfg.window_end, cal.recipient_zone(q.tz) or ZoneInfo(cfg.day_tz))
+        candidates = sorted(candidates, key=close)
     return human.choose(candidates, rng, pool) if rng is not None else (candidates[0] if candidates else None)

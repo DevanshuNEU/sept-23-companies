@@ -27,14 +27,14 @@ T = TypeVar("T")
 
 def spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: SendConfig) -> float:
     """Minutes until the account's next send: now and then a break, otherwise the minutes left in its window over the
-    sends it has left today, times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's
+    sends it has left today plus one (the gaps still to come, so the last send lands before the close, not on it), times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's
     sends spread across the window. No sends left gives the high clip."""
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
     if rng.random() < cfg.break_chance:
         return rng.uniform(*cfg.break_minutes)
-    return min(max(minutes_left / sends_left * rng.uniform(*cfg.spread_jitter), low), high)
+    return min(max(minutes_left / (sends_left + 1) * rng.uniform(*cfg.spread_jitter), low), high)
 
 
 def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig) -> float:
@@ -43,7 +43,7 @@ def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig) 
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
-    return min(max(minutes_left / sends_left * sum(cfg.spread_jitter) / 2, low), high)
+    return min(max(minutes_left / (sends_left + 1) * sum(cfg.spread_jitter) / 2, low), high)
 
 
 def choose(candidates: Sequence[T], rng: random.Random, pool: int) -> T | None:

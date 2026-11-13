@@ -55,7 +55,7 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual(len(rows), 10)
         warn = rows[D[4]]  # Thursday 2026-11-05: a policy bounce at 11:00
         self.assertEqual((warn.outcome, warn.effective_limit), ("warning", 40))
-        self.assertGreaterEqual(warn.sent, 30)
+        self.assertEqual(warn.sent, 40)
         self.assertEqual([e["kind"] for e in events(self.r, "policy_rejection")], ["policy_rejection"])
         block = rows[D[8]]  # Wednesday 2026-11-11: Gmail answers 429 at 13:00
         self.assertEqual(block.outcome, "hard_block")
@@ -73,10 +73,11 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual(paused, 0, "the scripted resume cleared the pause")
         for n, row in enumerate(self.r.days, start=1):
             if n not in (4, 8):
-                # Spread pacing runs a day on to the last window close, and the recipients whose window has closed
-                # cannot take the rest: a day is full only while every zone still has someone queued late in it.
+                # Earliest-close-first picking and the (sends_left + 1) divisor keep days full: nine of the ten days reach
+                # 100%. Day 1 (20) sends 18: the random pick from the first 5 left two New York and five London
+                # recipients behind when their windows closed, and the day ended before the queue ran out.
                 self.assertLessEqual(row.sent, row.start_limit, f"day {n} ({row.day})")
-                self.assertGreaterEqual(row.sent, 0.75 * row.start_limit, f"day {n} ({row.day}) is mostly full")
+                self.assertGreaterEqual(row.sent, 0.9 * row.start_limit, f"day {n} ({row.day}) is nearly full")
                 self.assertEqual(row.outcome, "clean", f"day {n}")
 
     def test_two_weeks_per_company_spacing(self):

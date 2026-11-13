@@ -1,4 +1,5 @@
 import dataclasses
+import random
 import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -109,6 +110,19 @@ class HumanPacingTest(Base):
         ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(4)]
         found = list(self.verdicts_at().values())
         self.assertEqual(queue.pick(found, queue.load_queue(self.db)).message_id, ids[0])
+
+    def test_pick_takes_the_earliest_window_close_first(self):
+        # Approved first, a Los Angeles recipient; second, a New York one. At 14:50 ET both are ready, and New York
+        # closes at 15:00 ET while Los Angeles closes at 18:00 ET, so the New York one goes with a pool of one.
+        _, la = self.approve(company=seed_company(self.db, "LA"), tz="America/Los_Angeles")
+        _, ny_id = self.approve(company=seed_company(self.db, "NYC"), tz="America/New_York")
+        now = ny(2, 14, 50)
+        verdicts = self.verdicts_at(now)
+        self.assertEqual({v.reason for v in verdicts.values()}, {"ready"})
+        items = queue.load_queue(self.db)
+        self.assertEqual(queue.pick(list(verdicts.values()), items).message_id, la)  # no order given: queue order
+        picked = queue.pick(list(verdicts.values()), items, random.Random(1), 1, now=now, cfg=CFG)
+        self.assertEqual(picked.message_id, ny_id)
 
     def test_pick_with_an_rng_varies_inside_the_pool(self):
         import random

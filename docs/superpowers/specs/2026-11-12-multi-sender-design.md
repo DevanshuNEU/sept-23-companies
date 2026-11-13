@@ -46,9 +46,11 @@ Mail.app cannot set a header. Mail.app is used only where there is no API Knock 
 - Weekdays, **08:00 to 15:00 recipient local time** (replaces 08:30 to 16:30). Holidays: 2026-11-26, 2026-11-27,
   2026-12-24, 2026-12-25, 2026-12-31, 2027-01-01.
 - **Spread pacing per account** (replaces the fixed 1.5 minute median): after each send, the gap is the minutes left
-  until the latest window close among that account's ready messages, divided by the sends it has left today, times a
+  until the latest window close among that account's ready messages, divided by the sends it has left today plus one (so
+  the last send lands before the close), times a
   random factor from 0.6 to 1.4, clipped to 2 to 45 minutes. With 15 a day this is about one email every 25 to 40
-  minutes; with 60, about every 8. The breaks and the pick from the first 5 ready messages stay.
+  minutes; with 60, about every 8. The breaks and the pick from the first 5 ready messages stay, but the ready messages are ordered by recipient window
+  close first (earliest close first, then queue order), so New York recipients go before Los Angeles ones.
 - Company size bands (2026-11-12, #229) stay as they are and count across all accounts (one account per company makes
   that automatic).
 

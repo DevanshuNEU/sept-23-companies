@@ -24,7 +24,7 @@ class MiddleRng:
 
 class SpreadGapTest(unittest.TestCase):
     def test_spread_gap_formula(self):
-        self.assertEqual(human.spread_gap(420, 15, MiddleRng(), CFG), 28.0)
+        self.assertEqual(human.spread_gap(420, 15, MiddleRng(), CFG), 26.25)
 
     def test_spread_gap_clipped(self):
         low, high = CFG.spread_gap_minutes
@@ -39,7 +39,7 @@ class SpreadGapTest(unittest.TestCase):
         rng = random.Random(1)
         gaps = [human.spread_gap(420, 15, rng, dataclasses.replace(CFG, break_chance=0.0001)) for _ in range(3000)]
         low, high = CFG.spread_jitter
-        self.assertTrue(all(28 * low - 1e-9 <= g <= 28 * high + 1e-9 for g in gaps if g < 40))
+        self.assertTrue(all(26.25 * low - 1e-9 <= g <= 26.25 * high + 1e-9 for g in gaps if g < 40))
         self.assertGreater(len({round(g) for g in gaps}), 10)
 
     def test_same_seed_same_gaps(self):
@@ -56,7 +56,7 @@ class SpreadGapTest(unittest.TestCase):
             self.assertTrue(low <= human.spread_gap(420, 15, random.Random(seed), always) <= high)
 
     def test_the_expected_gap_is_the_formula_at_factor_one(self):
-        self.assertEqual(human.expected_gap_minutes(420, 15, CFG), 28.0)
+        self.assertEqual(human.expected_gap_minutes(420, 15, CFG), 26.25)
         self.assertEqual(human.expected_gap_minutes(10, 15, CFG), CFG.spread_gap_minutes[0])
         self.assertEqual(human.expected_gap_minutes(420, 0, CFG), CFG.spread_gap_minutes[1])
 

@@ -30,7 +30,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
                                        resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
-from outreach.sending import human, proof
+from outreach.sending import accounts, human, proof
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import plan_followups
 from outreach.sending.gmail import new_message_id
@@ -87,14 +87,14 @@ def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
     is no longer open, a reply from the person on any channel, or a paused sender). The queue already checked
     these; this closes the gap between the pick and the claim, so a person who said stop a second ago is never
     sent to."""
-    row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id "
+    row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, COALESCE(t.account_id, 1) AS account_id, m.seq, p.person_id, p.company_id "
                        "FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                        "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (message_id,)).fetchone()
     if row is None or row["touch_state"] != "open":
         return False
     if row["seq"] >= 1 and not row["gmail_thread_id"]:
         return False  # a follow-up with no thread would go out as a new thread (an imported touch can lack one)
-    if conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"]:
+    if accounts.pause_of(conn, row["account_id"]) is not None:  # his pause, or this account's hard block
         return False
     companies = company_map(conn)
     survivor = resolve_company(companies, row["company_id"])[-1]

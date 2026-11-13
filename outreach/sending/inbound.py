@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from outreach.drafts.followups import canonical_company
 from outreach.sending import calendar as cal
-from outreach.sending import signals
+from outreach.sending import accounts, signals
 from outreach.sending.claim import PLACEHOLDER_DOMAIN
 from outreach.sending.classify import Inbound, classify, match_unthreaded
 from outreach.sending.config import SendConfig
@@ -313,6 +313,17 @@ def _no_go_the_bounced(conn: sqlite3.Connection, touch_id: int, meta: MessageMet
                          "text": f"No-go: {note.lower().rstrip('.')}."})
 
 
+def _signal_account(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int | None) -> accounts.AccountRow:
+    """The account a signal belongs to: the touch's own account (a touch with none is account 1's), else the one
+    account the tick runs until the per-account loop lands."""
+    if touch_id is not None:
+        row = conn.execute("SELECT account_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
+        found = accounts.by_id(conn, cfg, row["account_id"] if row is not None else None)
+        if found is not None:
+            return found
+    return accounts.primary(conn, cfg)
+
+
 def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, found: Inbound, received: str,
                   stamp: str, *, now: datetime, cfg: SendConfig, notify: Notifier) -> None:
     detail = {"touch_id": touch_id, "gmail_message_id": meta.gmail_message_id, "dsn_class": found.dsn_class}
@@ -323,22 +334,27 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
                      detail=detail)
     stop_touch_messages(conn, touch_id, reason="bounced", now=stamp)
     _no_go_the_bounced(conn, touch_id, meta, stamp)
-    signal = {"at": received, "cfg": cfg, "notify": notify, "now": now}
+    account = _signal_account(conn, cfg, touch_id)
+    signal = {"at": received, "cfg": cfg, "notify": notify, "now": now, "account": account}
     if found.dsn_class == "policy":
         note_signal(conn, "policy_rejection", detail=detail, key=f"policy_rejection:{meta.gmail_message_id}",
                     **signal)
     day = cal.ny_date(signals.as_datetime(received), cfg)
-    rate = signals.bounce_rate_3d(conn, day, cfg)
+    rate = signals.bounce_rate_3d(conn, account.account_id, day, cfg)
     if signals.bounce_rate_warns(rate, cfg):
-        note_signal(conn, "bounce_warning", detail={**detail, "rate": rate}, key=f"bounce_warning:{day.isoformat()}",
-                    **signal)
+        note_signal(conn, "bounce_warning", detail={**detail, "rate": rate},
+                    key=signals.day_key("bounce_warning", account.account_id, day), **signal)
+    bounced, sent = signals.bounce_rate_last_100(conn, account.account_id)
+    if signals.bounce_rate_hard(bounced, sent):
+        note_signal(conn, "bounce_rate_hard", detail={**detail, "bounced": bounced, "sent": sent},
+                    key=signals.day_key("bounce_rate_hard", account.account_id, day), **signal)
 
 
 def _limit_notice(conn: sqlite3.Connection, touch_id: int | None, meta: MessageMeta, received: str, *,
                   now: datetime, cfg: SendConfig, notify: Notifier) -> None:
     """Gmail refused to send for his account's limit: a hard block, whatever thread the notice is in."""
     note_signal(conn, "gmail_limit", at=received, key=f"gmail_limit:dsn:{meta.gmail_message_id}", cfg=cfg,
-                notify=notify, now=now,
+                notify=notify, now=now, account=_signal_account(conn, cfg, touch_id),
                 detail={"touch_id": touch_id, "gmail_message_id": meta.gmail_message_id, "source": "dsn"})
 
 
@@ -429,13 +445,14 @@ def observe_stop_tags(conn: sqlite3.Connection, *, now: datetime, cfg: SendConfi
             if conn.execute("SELECT 1 FROM event WHERE idempotency_key = ?", (key,)).fetchone():
                 continue
             note_signal(conn, "stop_reply", at=stamp, detail={"touch_id": touch_id}, key=key, cfg=cfg, notify=notify,
-                        now=now)
+                        now=now, account=_signal_account(conn, cfg, touch_id))
             new, last = new + 1, touch_id
         if new:
             tags = signals.stop_tags_in(conn, now, cfg.stop_replies_days)
             if tags >= cfg.stop_replies_hard:
                 note_signal(conn, "stop_replies_hard", at=stamp, detail={"tags": tags, "touch_id": last},
-                            key=f"stop_replies_hard:{last}", cfg=cfg, notify=notify, now=now)
+                            key=f"stop_replies_hard:{last}", cfg=cfg, notify=notify, now=now,
+                            account=_signal_account(conn, cfg, last))
     return new
 
 

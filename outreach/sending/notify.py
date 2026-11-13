@@ -35,12 +35,14 @@ def mac_notifier(title: str, text: str) -> None:
 
 
 def notify_once(conn: Connection, notifier: Notifier, kind: str, day: date, title: str, text: str, *,
-                at: str) -> bool:
+                at: str, account_id: int | None = None) -> bool:
     """Call `notifier` unless this kind was already announced for this New York day (the event key
     `notify:<kind>:<day>`). Returns True when it was called. A notifier that raises is recorded as not delivered
     and the error is not passed on, so the caller's transaction (the pause) still commits. `at` is the moment of
-    the notice, as canonical UTC text, so the event never reads the real clock for it."""
-    key = f"notify:{kind}:{day.isoformat()}"
+    the notice, as canonical UTC text, so the event never reads the real clock for it. An account-scoped kind
+    passes `account_id`: the key is `notify:<kind>:<account_id>:<day>`, so one account's notice never swallows
+    another's."""
+    key = f"notify:{kind}:{day.isoformat()}" if account_id is None else f"notify:{kind}:{account_id}:{day.isoformat()}"
     if conn.execute("SELECT 1 FROM event WHERE idempotency_key = ?", (key,)).fetchone():
         return False
     delivered, error = True, ""
@@ -48,7 +50,7 @@ def notify_once(conn: Connection, notifier: Notifier, kind: str, day: date, titl
         notifier(title, text)
     except Exception as err:  # a notice is best effort; the pause it reports is not
         delivered, error = False, f"{type(err).__name__}: {err}"[:200]
-    append_event(conn, entity="sender", entity_id=1, kind="notified", actor="sender",
+    append_event(conn, entity="sender", entity_id=account_id or 1, kind="notified", actor="sender",
                  detail={"kind": kind, "day": day.isoformat(), "title": title, "delivered": delivered,
                          "error": error},
                  at=at, idempotency_key=key)

@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending import calendar as cal
-from outreach.sending import projection, proof, queue, ramp, signals
-from outreach.sending.config import SendConfig
+from outreach.sending import accounts, projection, proof, queue, ramp, signals
+from outreach.sending.config import AccountConfig, SendConfig
 from outreach.sending.queue import REASON_TEXT, STOP_REASONS, Verdict
 from outreach.store.timefmt import ISO_FMT
 
@@ -61,8 +61,9 @@ def _gate(conn: sqlite3.Connection, old_sender_loaded: bool, *, ignore_pause: bo
     """The reason the whole tick would give for sending nothing, in the tick's own order. A fresh store's
     `unknown` sign-in is not a block: the first tick finds out. `ignore_pause` leaves his pause out, to ask what
     would block the sender once he resumes."""
-    row = conn.execute("SELECT paused, auth_state FROM sender WHERE sender_id = 1").fetchone()
-    if row["paused"] and not ignore_pause:
+    row = conn.execute("SELECT auth_state FROM sender WHERE sender_id = 1").fetchone()
+    # Account 1 is the one account the tick runs until the per-account loop lands: his pause or its hard block.
+    if accounts.pause_of(conn, 1) is not None and not ignore_pause:
         return "sender_paused"
     if row["auth_state"] in ("signed_out", "wrong_account"):
         return "signed_out"
@@ -86,7 +87,7 @@ def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
     """The tick's verdict for every approved message, by message id, in queue order: the reason it waits (or
     `ready`) and, for a wait that ends by itself, when. While Gmail is unproven and no email is claimed yet, only
     the first email keeps its own verdict, as in the tick (the marker proof, `proof`)."""
-    day = ramp.today_state(conn, now, cfg)
+    day = ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg)
     gate = _gate(conn, old_sender_loaded)
     found = queue.verdicts(conn, now, cfg, day=day, gate=gate)
     if gate is None and proof.phase(conn) == proof.FIRST_SEND:
@@ -99,20 +100,21 @@ def queue_projection(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     """When each approved message is expected to send (`projection.project`), and whether the sender is paused.
     A pause is not a reason to show nothing: the projection runs as if he resumed now. A sign-in problem, the old
     sender and an unproven Gmail marker (the first email goes alone) are: the queue's own sentence says what is wrong, so nothing is projected."""
-    paused = bool(conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"])
+    paused = accounts.pause_of(conn, accounts.primary(conn, cfg).account_id) is not None
     if _gate(conn, old_sender_loaded, ignore_pause=True) is not None or proof.phase(conn) == proof.FIRST_SEND:
         return {}, paused
-    prepared = queue.prepare(conn, now, cfg, day=ramp.today_state(conn, now, cfg))
+    prepared = queue.prepare(conn, now, cfg, day=ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg))
     return projection.project(prepared, now, cfg), paused
 
 
-def _state(row: sqlite3.Row, now: datetime, cfg: SendConfig, old_sender_loaded: bool) -> tuple[str, str]:
+def _state(row: sqlite3.Row, pause: accounts.Pause | None, now: datetime, cfg: SendConfig,
+           old_sender_loaded: bool) -> tuple[str, str]:
     """The state a person should be told, and the reason line that goes with it. A pause or a sign-in problem wins
     (it needs an action), then the old sender, then a day off, then the hours (read on the New York clock)."""
-    if row["paused"] and row["pause_kind"] == "hard_block":
-        return "paused_hard_block", row["paused_reason"]
-    if row["paused"]:
-        return "paused_by_you", row["paused_reason"]
+    if pause is not None and pause.kind == "hard_block":
+        return "paused_hard_block", pause.reason
+    if pause is not None:
+        return "paused_by_you", pause.reason
     if row["auth_state"] in ("signed_out", "wrong_account"):
         return "signed_out", row["auth_error"]
     if old_sender_loaded:
@@ -125,16 +127,16 @@ def _state(row: sqlite3.Row, now: datetime, cfg: SendConfig, old_sender_loaded: 
     return "running", ""
 
 
-def _levels(cfg: SendConfig) -> tuple[int, ...]:
-    return tuple(range(cfg.ramp_floor, cfg.ramp_ceiling + 1, cfg.ramp_step))
+def _levels(acct: AccountConfig) -> tuple[int, ...]:
+    return tuple(range(acct.ramp_floor, acct.ramp_ceiling + 1, acct.ramp_step))
 
 
-def _gmail_message(conn: sqlite3.Connection, today: str) -> tuple[int, str | None]:
+def _gmail_message(conn: sqlite3.Connection, account_id: int, today: str) -> tuple[int, str | None]:
     """How many Gmail limit or policy signals belong to today, and a plain line for the newest."""
     rows = conn.execute(
         "SELECT kind, json_extract(detail, '$.error_kind') AS error_kind, json_extract(detail, '$.status') AS status "
-        "FROM event WHERE entity = 'sender' AND kind IN ('gmail_limit', 'gmail_policy') "
-        "AND json_extract(detail, '$.day') = ? ORDER BY event_id DESC", (today,)).fetchall()
+        "FROM event WHERE entity = 'sender' AND entity_id = ? AND kind IN ('gmail_limit', 'gmail_policy') "
+        "AND json_extract(detail, '$.day') = ? ORDER BY event_id DESC", (account_id, today)).fetchall()
     if not rows:
         return 0, None
     newest = rows[0]
@@ -144,17 +146,18 @@ def _gmail_message(conn: sqlite3.Connection, today: str) -> tuple[int, str | Non
     return len(rows), f"{text} ({extra})" if extra else text
 
 
-def _last_step_down(conn: sqlite3.Connection) -> tuple[str, str] | None:
-    row = conn.execute("SELECT day, outcome, outcome_note FROM send_day WHERE outcome IN ('warning', 'hard_block') "
-                       "ORDER BY day DESC LIMIT 1").fetchone()
+def _last_step_down(conn: sqlite3.Connection, account_id: int) -> tuple[str, str] | None:
+    row = conn.execute("SELECT day, outcome, outcome_note FROM send_day WHERE account_id = ? "
+                       "AND outcome IN ('warning', 'hard_block') ORDER BY day DESC LIMIT 1", (account_id,)).fetchone()
     if row is None:
         return None
     if row["outcome_note"]:
         return row["day"], row["outcome_note"]
     kinds = signals.WARNING_KINDS + signals.HARD_KINDS
     event = conn.execute(
-        f"SELECT kind FROM event WHERE entity = 'sender' AND kind IN ({','.join('?' * len(kinds))}) "
-        "AND json_extract(detail, '$.day') = ? ORDER BY event_id DESC LIMIT 1", (*kinds, row["day"])).fetchone()
+        f"SELECT kind FROM event WHERE entity = 'sender' AND entity_id = ? AND kind IN ({','.join('?' * len(kinds))}) "
+        "AND json_extract(detail, '$.day') = ? ORDER BY event_id DESC LIMIT 1",
+        (account_id, *kinds, row["day"])).fetchone()
     return row["day"], event["kind"] if event is not None else row["outcome"]
 
 
@@ -193,22 +196,27 @@ def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     else what `limit_for` will give it (the first tick has not run yet), and 0 on a day the sender does not run."""
     sender = conn.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
     today = cal.ny_date(now, cfg)
-    state, reason = _state(sender, now, cfg, old_sender_loaded)
-    row = conn.execute("SELECT send_limit FROM send_day WHERE day = ?", (today.isoformat(),)).fetchone()
-    start = row["send_limit"] if row is not None else ramp.limit_for(conn, today, cfg)
-    levels = _levels(cfg)
+    account = accounts.primary(conn, cfg)  # one account until the per-account loop lands
+    acct = account.cfg
+    pause = accounts.pause_of(conn, account.account_id)
+    state, reason = _state(sender, pause, now, cfg, old_sender_loaded)
+    row = conn.execute("SELECT send_limit FROM send_day WHERE account_id = ? AND day = ?",
+                       (account.account_id, today.isoformat())).fetchone()
+    start = row["send_limit"] if row is not None else ramp.limit_for(conn, account, today, cfg)
+    levels = _levels(acct)
     level = max((i for i, value in enumerate(levels, start=1) if value <= start), default=1)
-    errors, gmail_message = _gmail_message(conn, today.isoformat())
+    errors, gmail_message = _gmail_message(conn, account.account_id, today.isoformat())
     schedule = queue_schedule(conn, now, cfg, old_sender_loaded=old_sender_loaded)
     queued = {q.message_id: q for q in queue.load_queue(conn, cfg)}
     next_send, none_reason = _next_send(schedule, queued, now, proof.phase(conn))
     return SendingSnapshot(
-        state=state, paused_reason=reason, paused_at=sender["paused_at"] if sender["paused"] else None,
-        gmail_message=gmail_message, sent_today=signals.counted_sends_on(conn, today, cfg),
-        limit_today=ramp.effective_limit(conn, today, cfg) if cal.is_business_day(today, cfg) else 0,
+        state=state, paused_reason=reason, paused_at=pause.at if pause is not None else None,
+        gmail_message=gmail_message, sent_today=signals.counted_sends_on(conn, account.account_id, today, cfg),
+        limit_today=ramp.effective_limit(conn, account, today, cfg) if cal.is_business_day(today, cfg) else 0,
         start_limit=start, ramp_level=level, ramp_levels=levels,
-        next_limit_if_clean=min(start + cfg.ramp_step, cfg.ramp_ceiling), last_step_down=_last_step_down(conn),
-        bounce_rate_3d=signals.bounce_rate_3d(conn, today, cfg), gmail_errors_today=errors,
+        next_limit_if_clean=min(start + acct.ramp_step, acct.ramp_ceiling),
+        last_step_down=_last_step_down(conn, account.account_id),
+        bounce_rate_3d=signals.bounce_rate_3d(conn, account.account_id, today, cfg), gmail_errors_today=errors,
         stop_replies_today=_stop_replies(conn, today, cfg),
         imported_unverified=conn.execute(
             "SELECT COUNT(*) FROM event WHERE entity = 'message' AND kind = 'import_not_in_sent'").fetchone()[0],

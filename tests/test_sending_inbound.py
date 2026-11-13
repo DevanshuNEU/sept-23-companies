@@ -115,6 +115,10 @@ class Base(unittest.TestCase):
     def sender(self):
         return self.db.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
 
+    def account_row(self):
+        """Account 1's own row: where a hard block lands (sender row 1 stays his button)."""
+        return self.db.execute("SELECT * FROM sender_account WHERE account_id = 1").fetchone()
+
     def approve_followup(self, touch_id, subject):
         """Stands in for #13's draft and his click on the planned follow-up."""
         mid = self.planned(touch_id)[0]["message_id"]
@@ -350,7 +354,7 @@ class BounceTest(Base):
         self.assertEqual(self.planned(touch_id), [])
         stopped = self.events("touch", "skipped_by_sender", touch_id)
         self.assertEqual(json.loads(stopped[0]["detail"])["reason"], "bounced")
-        self.assertEqual(signals.bounce_rate_3d(self.db, self.clock().date(), CFG), 1.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, self.clock().date(), CFG), 1.0)
         self.assertEqual(len(self.events("touch", "bounced", touch_id)), 1)
 
     def test_bounce_leaves_no_follow_up_sendable(self):
@@ -422,8 +426,9 @@ class BounceTest(Base):
         self.assertIsNone(self.touch(touch_id)["bounced_at"])
         self.assertEqual(len(self.planned(touch_id)), 1)
         self.assertEqual(len(self.events("sender", "gmail_limit")), 1)
-        sender = self.sender()
+        sender = self.account_row()
         self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
+        self.assertEqual(self.sender()["paused"], 0)
         self.assertEqual([(r["kind"], r["dsn_class"]) for r in self.inbound_rows()], [("bounce", "limit")])
 
     def test_an_unmatched_limit_notice_still_pauses(self):
@@ -437,7 +442,7 @@ class BounceTest(Base):
             inbound.apply_inbound(self.db, read, account=CFG.from_address, now=self.clock(), cfg=CFG,
                                   notify=self.notify)
         self.assertEqual(len(self.events("sender", "gmail_limit")), 1)
-        self.assertEqual(self.sender()["pause_kind"], "hard_block")
+        self.assertEqual(self.account_row()["pause_kind"], "hard_block")
 
 
 class BounceNoGoTest(Base):
@@ -513,8 +518,8 @@ class BounceNoGoTest(Base):
         self.gmail.deliver_bounce(sent, dsn="blocked")
         self.sync()
         today = self.clock().date()
-        self.assertEqual(signals.sends_on(self.db, today, CFG), 2)  # the bounce rate still sees both
-        self.assertEqual(signals.counted_sends_on(self.db, today, CFG), 1)
+        self.assertEqual(signals.sends_on(self.db, 1, today, CFG), 2)  # the bounce rate still sees both
+        self.assertEqual(signals.counted_sends_on(self.db, 1, today, CFG), 1)
         self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 1)
 
 
@@ -545,7 +550,7 @@ class StopTagTest(Base):
         self.tag(second, self.clock(), on="outreach_touch")
         self.assertEqual(self.observe(), 1)
         self.assertEqual(len(self.events("sender", "stop_replies_hard")), 1)
-        sender = self.sender()
+        sender = self.account_row()
         self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
 
     def test_stop_tag_seen_twice_counts_once(self):

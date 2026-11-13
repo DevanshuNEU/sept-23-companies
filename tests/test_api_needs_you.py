@@ -11,6 +11,7 @@ from outreach.drafts.followups import company_map, held_survivors, no_go_sets
 from outreach.review.fixes import LOCKED
 from outreach.review.triggers import sweep_needs_you
 from outreach.rules import rebuild
+from outreach.sending import accounts as _accounts
 from outreach.sending import queue, ramp
 from outreach.sending.config import load_config
 from outreach.store import start_job
@@ -657,7 +658,7 @@ class NeedsYou(ApiCase):
 
     def verdict_of(self, message_id: int) -> str:
         cfg = load_config()
-        day = ramp.open_day(self.conn, MON, cfg)
+        day = ramp.open_day(self.conn, _accounts.primary(self.conn, cfg), MON, cfg)
         return {v.message_id: v.reason for v in queue.verdicts(self.conn, MON, cfg, day=day, gate=None)}[message_id]
 
     def test_merging_away_a_paused_company_is_refused_so_its_mail_stays_paused(self):

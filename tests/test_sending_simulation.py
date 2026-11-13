@@ -202,7 +202,7 @@ class StopRulesTest(unittest.TestCase):
             "SELECT kind FROM event WHERE entity = 'sender' ORDER BY event_id")]
 
     def paused(self, result):
-        return result.conn.execute("SELECT paused, pause_kind FROM sender WHERE sender_id = 1").fetchone()
+        return result.conn.execute("SELECT paused, pause_kind FROM sender_account WHERE account_id = 1").fetchone()
 
     def after(self, result, at: datetime) -> list:
         return [s for s in result.sends if s.at >= at]
@@ -212,9 +212,12 @@ class StopRulesTest(unittest.TestCase):
         r = self.run_scenario(short(2, [morning(1, 40), morning(2, 40), Event(ny(D[2], "11:00"), "bounce", {"nth": 0}),
                                         Event(ny(D[2], "11:00"), "bounce", {"nth": 1})]))
         self.assertIn("bounce_warning", self.kinds(r))
-        self.assertEqual(self.paused(r)["paused"], 0)
+        # 2 bounces in the account's first 80 emails is 2.5%, past the hard rule (2% once 30 are sent): the account
+        # pauses on its own row (multi-sender design, per-account stops).
+        self.assertIn("bounce_rate_hard", self.kinds(r))
+        self.assertEqual(tuple(self.paused(r)), (1, "hard_block"))
         day = r.days[1]
-        self.assertEqual((day.outcome, day.effective_limit), ("warning", 20))
+        self.assertEqual((day.outcome, day.effective_limit), ("hard_block", 20))
         self.assertEqual(self.after(r, ny(D[2], "11:04")), [], "the day is already past its lowered limit")
 
     def test_a_high_bounce_rate_never_pauses(self):

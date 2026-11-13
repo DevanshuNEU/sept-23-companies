@@ -9,15 +9,16 @@ import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from outreach.sending import accounts as _accounts
 from outreach.sending import proof, queue, ramp
 from outreach.sending.config import load_config
 from outreach.sending.status import SendingSnapshot, queue_schedule, sending_snapshot
 from outreach.store.writes import append_event
-from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_message, seed_sent
+from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_message, seed_sent, with_ramp
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()
-LOW = dataclasses.replace(CFG, ramp_floor=1)  # a floor of 1 lets a test set a day's limit as low as it likes
+LOW = with_ramp(CFG, ramp_floor=1)  # a floor of 1 lets a test set a day's limit as low as it likes
 NY = ZoneInfo("America/New_York")
 MON_DAY = date(2026, 11, 2)
 
@@ -65,7 +66,7 @@ class Base(unittest.TestCase):
 
     def signal(self, kind: str, at: datetime, *, detail=None) -> None:
         self.keys += 1
-        ramp.note_signal(self.db, kind, at=iso(at), detail=detail or {}, key=f"{kind}:{self.keys}", cfg=CFG,
+        ramp.note_signal(self.db, kind, account=_accounts.primary(self.db, CFG), at=iso(at), detail=detail or {}, key=f"{kind}:{self.keys}", cfg=CFG,
                          notify=lambda title, text: None, now=at)
 
     def snap(self, now=MON, **kw) -> SendingSnapshot:
@@ -150,8 +151,8 @@ class RampTest(Base):
         put_day(self.db, "2026-10-30", 40, outcome="clean", closed=True)  # Friday: today has no row yet
         s = self.snap()
         self.assertEqual((s.start_limit, s.limit_today), (50, 50))
-        self.assertEqual(s.limit_today, ramp.effective_limit(self.db, MON_DAY, CFG))
-        self.assertEqual(s.start_limit, ramp.limit_for(self.db, MON_DAY, CFG))
+        self.assertEqual(s.limit_today, ramp.effective_limit(self.db, _accounts.primary(self.db, CFG), MON_DAY, CFG))
+        self.assertEqual(s.start_limit, ramp.limit_for(self.db, _accounts.primary(self.db, CFG), MON_DAY, CFG))
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM send_day WHERE day = ?",
                                          (MON_DAY.isoformat(),)).fetchone()[0], 0)
 
@@ -294,7 +295,7 @@ class ScheduleTest(Base):
         self.prove()
         self.approve()
         self.approve(tz="America/Los_Angeles")
-        day = ramp.open_day(self.db, MON, CFG)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), MON, CFG)
         theirs = {v.message_id: v for v in queue.verdicts(self.db, MON, CFG, day=day, gate=None)}
         self.assertEqual(self.schedule(), theirs)
 

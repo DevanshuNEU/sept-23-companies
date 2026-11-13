@@ -125,6 +125,10 @@ class Base(unittest.TestCase):
     def sender(self) -> sqlite3.Row:
         return self.db.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
 
+    def account_row(self) -> sqlite3.Row:
+        """Account 1's own row: where a hard block lands (sender row 1 stays his button)."""
+        return self.db.execute("SELECT * FROM sender_account WHERE account_id = 1").fetchone()
+
     def touch_of(self, mid: int) -> sqlite3.Row:
         return self.db.execute("SELECT t.* FROM touch t JOIN message m ON m.touch_id = t.touch_id "
                                "WHERE m.message_id = ?", (mid,)).fetchone()
@@ -151,6 +155,8 @@ class Base(unittest.TestCase):
         """A test seed standing in for his resume click."""
         self.db.execute("UPDATE sender SET paused = 0, pause_kind = NULL, paused_reason = '', paused_at = NULL "
                         "WHERE sender_id = 1")
+        self.db.execute("UPDATE sender_account SET paused = 0, pause_kind = NULL, paused_reason = '', "
+                        "paused_at = NULL")
 
 
 class SendingTest(Base):
@@ -317,7 +323,7 @@ class GateTest(Base):
         mid = self.approve()
         self.gmail.fail_next_send(GmailError("rate_limit", 429, "Too many requests"))
         self.tick()
-        row = self.sender()
+        row = self.account_row()
         self.assertEqual((row["paused"], row["pause_kind"]), (1, "hard_block"))
         self.assertEqual(len(self.events("gmail_limit")), 1)
         self.assertEqual(len(self.notices), 1)
@@ -630,7 +636,7 @@ class FirstSendTest(Base):
     def fill_the_day(self) -> None:
         """Today's limit (20 on a fresh store) is used up by emails that went out some other way."""
         company = seed_company(self.db, "Busy Co")
-        for i in range(CFG.ramp_start):
+        for i in range(CFG.accounts[0].ramp_start):
             seed_sent(self.db, seed_email_person(self.db, company, f"B{i}", f"b{i}@busy.example"),
                       at=self.clock() - timedelta(minutes=20))
 
@@ -1024,10 +1030,10 @@ class SignalTest(Base):
                 self.tick()
                 self.clock.advance(minutes=2)
         self.assertEqual(self.notices, [])
-        self.assertEqual(self.sender()["paused"], 0)
+        self.assertEqual(self.account_row()["paused"], 0)
         self.tick()
         self.assertEqual(len(self.notices), 1)
-        self.assertEqual(self.sender()["paused"], 1)
+        self.assertEqual(self.account_row()["paused"], 1)
         self.clock.advance(minutes=2)
         self.tick()
         self.assertEqual(len(self.notices), 1)

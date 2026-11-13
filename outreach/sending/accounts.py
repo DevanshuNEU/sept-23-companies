@@ -89,3 +89,67 @@ def pin(conn: sqlite3.Connection, company_id: int, account_id: int, by: Literal[
                  actor="rules" if by == "rule" else "devanshu", at=now,
                  detail={"account_id": account_id, "by": by,
                          "previous_account_id": prev["account_id"] if prev else None})
+
+
+def primary(conn: sqlite3.Connection, cfg: SendConfig) -> AccountRow:
+    """Read only: the row of `cfg.from_address`, the one account the tick runs until the per-account loop lands.
+    Falls back to account id 1 (where every send day is written until then) when the address has no row yet."""
+    acct = cfg.account(cfg.from_address)
+    row = conn.execute("SELECT * FROM sender_account WHERE address = ?", (acct.address,)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT * FROM sender_account WHERE account_id = 1").fetchone()
+    if row is None:
+        return AccountRow(account_id=1, cfg=acct, paused=False, auth_state="unknown", next_send_at=None, revision=1)
+    return AccountRow(account_id=row["account_id"], cfg=acct, paused=bool(row["paused"]),
+                      auth_state=row["auth_state"], next_send_at=row["next_send_at"], revision=row["revision"])
+
+
+def by_id(conn: sqlite3.Connection, cfg: SendConfig, account_id: int | None) -> AccountRow | None:
+    """Read only: the row of `account_id` (None counts as account 1, a touch sent before accounts existed), or None
+    when it has no row or its address is not in the config."""
+    row = conn.execute("SELECT * FROM sender_account WHERE account_id = ?",
+                       (1 if account_id is None else account_id,)).fetchone()
+    if row is None:
+        return None
+    for acct in cfg.accounts:
+        if acct.address.lower() == row["address"].lower():
+            return AccountRow(account_id=row["account_id"], cfg=acct, paused=bool(row["paused"]),
+                              auth_state=row["auth_state"], next_send_at=row["next_send_at"],
+                              revision=row["revision"])
+    return None
+
+
+@dataclass(frozen=True)
+class Pause:
+    kind: str  # 'by_you' (sender row 1) or 'hard_block'
+    reason: str
+    at: str | None
+    own: bool  # True when the account's own row holds it, False when it is sender row 1
+
+
+def pause_of(conn: sqlite3.Connection, account_id: int) -> Pause | None:
+    """Read only: why this account may not send, or None. Sender row 1 (his button, or an old hard block) pauses
+    every account; an account's own row holds its hard block."""
+    row = conn.execute("SELECT paused, pause_kind, paused_reason, paused_at FROM sender WHERE sender_id = 1").fetchone()
+    if row["paused"]:
+        return Pause(row["pause_kind"] or "by_you", row["paused_reason"], row["paused_at"], own=False)
+    own = conn.execute("SELECT paused, pause_kind, paused_reason, paused_at FROM sender_account "
+                       "WHERE account_id = ?", (account_id,)).fetchone()
+    if own is not None and own["paused"]:
+        return Pause(own["pause_kind"], own["paused_reason"], own["paused_at"], own=True)
+    return None
+
+
+def hard_pause(conn: sqlite3.Connection, account_id: int, reason: str, now: str) -> bool:
+    """Hard-block this account's own row. False (nothing written) when it is already paused."""
+    return conn.execute(
+        "UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, paused_at = ?, "
+        "updated_at = ?, revision = revision + 1 WHERE account_id = ? AND paused = 0",
+        (reason, now, now, account_id)).rowcount > 0
+
+
+def clear_hard_blocks(conn: sqlite3.Connection, now: str) -> int:
+    """Lift every account's hard block (his click). Returns how many rows were cleared."""
+    return conn.execute(
+        "UPDATE sender_account SET paused = 0, pause_kind = NULL, paused_reason = '', paused_at = NULL, "
+        "updated_at = ?, revision = revision + 1 WHERE paused = 1", (now,)).rowcount

@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 from outreach.install import install
 from outreach.sending import calendar as cal
-from outreach.sending import ramp, signals
+from outreach.sending import accounts, ramp, signals
 from outreach.sending.config import SendConfig, load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
@@ -368,6 +368,7 @@ class _Run:
         with transaction(self.conn):
             self.conn.execute("UPDATE sender SET paused = 0, pause_kind = NULL, paused_reason = '', paused_at = NULL, "
                               "updated_at = ?, revision = revision + 1 WHERE sender_id = 1", (stamp,))
+            accounts.clear_hard_blocks(self.conn, stamp)
 
     def _do_tag(self, args: Mapping) -> None:
         info, _ = self._target(args, "tag")
@@ -446,11 +447,13 @@ class _Run:
 
     def day_rows(self) -> tuple[DayRow, ...]:
         rows = []
+        account = accounts.primary(self.conn, self.cfg)
         for day in self.days:
-            row = self.conn.execute("SELECT send_limit, outcome FROM send_day WHERE day = ?", (day.isoformat(),)).fetchone()
+            row = self.conn.execute("SELECT send_limit, outcome FROM send_day WHERE account_id = ? AND day = ?",
+                                    (account.account_id, day.isoformat())).fetchone()
             rows.append(DayRow(day=day, start_limit=row["send_limit"] if row else 0,
-                               effective_limit=ramp.effective_limit(self.conn, day, self.cfg),
-                               sent=signals.sends_on(self.conn, day, self.cfg),
+                               effective_limit=ramp.effective_limit(self.conn, account, day, self.cfg),
+                               sent=signals.sends_on(self.conn, account.account_id, day, self.cfg),
                                outcome=row["outcome"] if row else None))
         return tuple(rows)
 

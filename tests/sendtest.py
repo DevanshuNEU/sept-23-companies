@@ -3,13 +3,15 @@
 `seed_message` stands in for #13 (a draft) and for Devanshu's click (approval): it is test seeding, never product
 code. Every helper writes the smallest valid rows and takes moments as aware datetimes or canonical UTC text.
 """
+import dataclasses
 import itertools
 import sqlite3
 from datetime import date, datetime, timezone
 
+from outreach.sending import accounts as _accounts
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["MON", "UTC", "iso", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day",
+__all__ = ["MON", "UTC", "iso", "with_ramp", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day",
            "prove", "settle_and_send"]
 
 UTC = timezone.utc
@@ -28,6 +30,14 @@ def iso(at: datetime | str) -> str:
             raise ValueError("a naive datetime is ambiguous; pass an aware one")
         return at.astimezone(UTC).strftime(ISO_FMT)
     return iso_utc(at)
+
+
+def with_ramp(cfg, address: str | None = None, **numbers):
+    """`cfg` with ramp numbers (`ramp_start`, `ramp_step`, `ramp_floor`, `ramp_ceiling`) set on the account at
+    `address`, or on every account when `address` is None. The ramp lives on each account, not on the config."""
+    accounts = tuple(dataclasses.replace(a, **numbers) if address is None or a.address == address else a
+                     for a in cfg.accounts)
+    return dataclasses.replace(cfg, accounts=accounts)
 
 
 def seed_email_person(conn: sqlite3.Connection, company_id: int, name: str, email: str, *,
@@ -72,12 +82,14 @@ def seed_message(conn: sqlite3.Connection, person_id: int, *, state: str = "appr
 
 
 def seed_sent(conn: sqlite3.Connection, person_id: int, *, at: datetime | str, seq: int = 0,
-              rfc: str | None = None, thread: str | None = None) -> int:
+              rfc: str | None = None, thread: str | None = None, account_id: int | None = None) -> int:
     """A message already sent at `at` (the touch is created when missing; a first email also fills the touch's
     first_sent_at, first_rfc_id and gmail_thread_id). Returns the message id."""
     n = next(_counter)
     when = iso(at)
     touch_id = _touch_for(conn, person_id)
+    if account_id is not None:
+        conn.execute("UPDATE touch SET account_id = ? WHERE touch_id = ?", (account_id, touch_id))
     rfc = rfc or f"<seed.{n}@sendtest.local>"
     row = conn.execute("SELECT first_sent_at, gmail_thread_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
     if seq == 0:
@@ -135,7 +147,7 @@ def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | 
     with transaction(conn):
         claim.reconcile(conn, found, now=iso(now), cfg=cfg, rng=rng)
         claim.requeue_failed(conn, now=iso(now), cfg=cfg)
-        day = ramp.open_day(conn, now, cfg)
+        day = ramp.open_day(conn, _accounts.primary(conn, cfg), now, cfg)
     picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg))
     if picked is None:
         return None

@@ -5,11 +5,11 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 from zoneinfo import ZoneInfo
 
-from outreach.sending import notify, ramp, signals
+from outreach.sending import accounts, notify, ramp, signals
 from outreach.sending.config import load_config
 from outreach.store.writes import log_touch
 from tests import SHIPPED_SEND_CONFIG, flat_200
-from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_sent
+from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_sent, with_ramp
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()  # the tests' scratch copy: the adaptive ramp, 20 up to 100
@@ -37,6 +37,7 @@ class Base(unittest.TestCase):
         self.people = 0
         self.notices = []
         self.keys = 0
+        self.acct = accounts.primary(self.db, CFG)
 
     def notifier(self, title, text):
         self.notices.append((title, text))
@@ -53,7 +54,7 @@ class Base(unittest.TestCase):
 
     def note(self, kind, at, *, now=None, key=None):
         self.keys += 1
-        ramp.note_signal(self.db, kind, at=iso(at), detail={}, key=key or f"{kind}:{self.keys}", cfg=CFG,
+        ramp.note_signal(self.db, kind, account=self.acct, at=iso(at), detail={}, key=key or f"{kind}:{self.keys}", cfg=CFG,
                          notify=self.notifier, now=now or at)
 
     def row(self, day):
@@ -62,6 +63,9 @@ class Base(unittest.TestCase):
     def sender(self):
         return self.db.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
 
+    def account_row(self, account_id=1):
+        return self.db.execute("SELECT * FROM sender_account WHERE account_id = ?", (account_id,)).fetchone()
+
     def events(self, kind):
         return self.db.execute("SELECT * FROM event WHERE entity = 'sender' AND kind = ? ORDER BY event_id",
                                (kind,)).fetchall()
@@ -69,7 +73,7 @@ class Base(unittest.TestCase):
 
 class RampTest(Base):
     def test_first_day_starts_at_20(self):
-        state = ramp.open_day(self.db, MON, CFG)
+        state = ramp.open_day(self.db, self.acct, MON, CFG)
         self.assertEqual(state, ramp.DayState(day=d(0), start_limit=20, effective_limit=20, sent=0, outcome=None,
                                               closed=False))
         self.assertEqual(self.row(d(0))["send_limit"], 20)
@@ -77,29 +81,29 @@ class RampTest(Base):
     def test_clean_days_rise_by_10_to_100_and_stop(self):
         starts = []
         for n in (0, 1, 2, 3, 4, 7, 8, 9, 10, 11):
-            starts.append(ramp.open_day(self.db, ny(n), CFG).start_limit)
+            starts.append(ramp.open_day(self.db, self.acct, ny(n), CFG).start_limit)
             self.send(ny(n, 10))
         self.assertEqual(starts, [20, 30, 40, 50, 60, 70, 80, 90, 100, 100])
 
     def test_ramp_stops_at_100(self):
         put_day(self.db, d(0), 100, outcome="clean", closed=True)
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 100)
-        self.assertEqual(ramp.limit_for(self.db, d(2), CFG), 100)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 100)
+        self.assertEqual(ramp.limit_for(self.db, self.acct, d(2), CFG), 100)
 
     def test_warning_today_lowers_the_effective_limit_at_once(self):
         put_day(self.db, d(0), 50)
         self.note("policy_rejection", ny(0, 11))
-        self.assertEqual(ramp.effective_limit(self.db, d(0), CFG), 40)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(0), CFG), 40)
         self.assertEqual(self.row(d(0))["outcome"], "warning")
         self.assertEqual(self.row(d(0))["send_limit"], 50)
-        state = ramp.today_state(self.db, ny(0, 12), CFG)
+        state = ramp.today_state(self.db, self.acct, ny(0, 12), CFG)
         self.assertEqual((state.start_limit, state.effective_limit, state.outcome), (50, 40, "warning"))
 
     def test_warning_day_does_not_rise(self):
         put_day(self.db, d(0), 50)
         self.send(ny(0, 10))
         self.note("policy_rejection", ny(0, 11))
-        state = ramp.open_day(self.db, ny(1), CFG)
+        state = ramp.open_day(self.db, self.acct, ny(1), CFG)
         self.assertEqual(state.start_limit, 40)
         closed = self.row(d(0))
         self.assertEqual(closed["outcome"], "warning")
@@ -109,18 +113,18 @@ class RampTest(Base):
         put_day(self.db, d(0), 50)
         self.note("policy_rejection", ny(0, 11))
         self.note("stop_reply", ny(0, 12))
-        self.assertEqual(ramp.effective_limit(self.db, d(0), CFG), 40)
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 40)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(0), CFG), 40)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 40)
 
     def test_floor_is_20(self):
         put_day(self.db, d(0), 20)
         self.note("bounce_warning", ny(0, 11))
-        self.assertEqual(ramp.effective_limit(self.db, d(0), CFG), 20)
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 20)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(0), CFG), 20)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 20)
 
     def test_day_with_no_sends_keeps_the_limit(self):
         put_day(self.db, d(0), 40)
-        state = ramp.open_day(self.db, ny(1), CFG)
+        state = ramp.open_day(self.db, self.acct, ny(1), CFG)
         self.assertEqual(state.start_limit, 40)
         old = self.row(d(0))
         self.assertIsNone(old["outcome"])
@@ -130,20 +134,20 @@ class RampTest(Base):
     def test_day_with_sends_closes_clean(self):
         put_day(self.db, d(0), 40)
         self.send(ny(0, 10))
-        ramp.open_day(self.db, ny(1), CFG)
+        ramp.open_day(self.db, self.acct, ny(1), CFG)
         self.assertEqual(self.row(d(0))["outcome"], "clean")
 
     def test_a_day_is_not_clean_when_the_three_day_bounce_rate_warns(self):
         put_day(self.db, d(0), 50)
         mon = self.sends(ny(0, 10), 20)
         bounce(self.db, mon[0], ny(0, 15))  # 1 in 20: 5%
-        self.assertEqual(ramp.limit_for(self.db, d(1), CFG), 40)  # the open Monday is not clean
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 40)
+        self.assertEqual(ramp.limit_for(self.db, self.acct, d(1), CFG), 40)  # the open Monday is not clean
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 40)
         self.assertEqual(self.row(d(0))["outcome"], "warning")
         self.assertEqual(self.row(d(0))["outcome_note"], "bounce rate")
         self.sends(ny(1, 10), 20)  # Tuesday has no bounce, but the 3-day rate is 1 in 40: 2.5%
-        self.assertEqual(ramp.limit_for(self.db, d(2), CFG), 30)
-        self.assertEqual(ramp.open_day(self.db, ny(2), CFG).start_limit, 30)
+        self.assertEqual(ramp.limit_for(self.db, self.acct, d(2), CFG), 30)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(2), CFG).start_limit, 30)
         self.assertEqual(self.row(d(1))["outcome"], "warning")
         self.assertEqual(self.row(d(1))["outcome_note"], "bounce rate")
 
@@ -151,46 +155,46 @@ class RampTest(Base):
         put_day(self.db, d(0), 50)
         mon = self.sends(ny(0, 10), 51)
         bounce(self.db, mon[0], ny(0, 15))
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 60)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 60)
         self.assertEqual(self.row(d(0))["outcome"], "clean")
 
     def test_weekend_has_no_row(self):
         for n in (5, 6):
-            self.assertIsNone(ramp.open_day(self.db, ny(n), CFG))
+            self.assertIsNone(ramp.open_day(self.db, self.acct, ny(n), CFG))
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM send_day").fetchone()[0], 0)
-        self.assertIsNone(ramp.today_state(self.db, ny(5), CFG))
+        self.assertIsNone(ramp.today_state(self.db, self.acct, ny(5), CFG))
 
     def test_sleeping_mac_does_not_ramp_twice(self):
         put_day(self.db, d(4), 30)  # Friday
         self.send(ny(4, 10))
-        state = ramp.open_day(self.db, ny(9), CFG)  # the next tick is Wednesday 2026-11-11
+        state = ramp.open_day(self.db, self.acct, ny(9), CFG)  # the next tick is Wednesday 2026-11-11
         self.assertEqual((state.day, state.start_limit), (d(9), 40))
         days = [r[0] for r in self.db.execute("SELECT day FROM send_day ORDER BY day")]
         self.assertEqual(days, [d(4).isoformat(), d(9).isoformat()])
         self.assertEqual(self.row(d(4))["outcome"], "clean")
 
     def test_open_day_twice_in_a_day_changes_nothing(self):
-        ramp.open_day(self.db, ny(0), CFG)
+        ramp.open_day(self.db, self.acct, ny(0), CFG)
         before = self.db.total_changes
-        again = ramp.open_day(self.db, ny(0, 15), CFG)
+        again = ramp.open_day(self.db, self.acct, ny(0, 15), CFG)
         self.assertEqual(again.start_limit, 20)
         self.assertEqual(self.db.total_changes, before)
 
     def test_a_late_signal_belongs_to_its_own_day_until_that_day_closes(self):
         put_day(self.db, d(0), 40)
         late, processed = ny(0, 23, 50), ny(1, 0, 5)
-        self.assertEqual(signals.signal_day(self.db, iso(late), CFG, now=processed), d(0))
+        self.assertEqual(signals.signal_day(self.db, 1, iso(late), CFG, now=processed), d(0))
         self.note("bounce_warning", late, now=processed)
         self.assertEqual(self.row(d(0))["outcome"], "warning")
         self.assertIsNone(self.row(d(1)))
         # The next day opens and closes Monday; a signal for Monday that is read now lands on Tuesday.
-        ramp.open_day(self.db, ny(1, 9), CFG)
+        ramp.open_day(self.db, self.acct, ny(1, 9), CFG)
         self.assertEqual(self.row(d(1))["send_limit"], 30)
         later = ny(1, 9, 30)
-        self.assertEqual(signals.signal_day(self.db, iso(ny(0, 23, 55)), CFG, now=later), d(1))
+        self.assertEqual(signals.signal_day(self.db, 1, iso(ny(0, 23, 55)), CFG, now=later), d(1))
         self.note("policy_rejection", ny(0, 23, 55), now=later)
         self.assertEqual(self.row(d(1))["outcome"], "warning")
-        self.assertEqual(ramp.effective_limit(self.db, d(1), CFG), 20)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(1), CFG), 20)
         day_of = [json.loads(e["detail"])["day"] for e in self.events("policy_rejection")]
         self.assertEqual(day_of, [d(1).isoformat()])
 
@@ -198,73 +202,160 @@ class RampTest(Base):
         # The Mac slept through Tuesday; Wednesday is open, so Tuesday can no longer take a signal.
         put_day(self.db, d(4), 30)
         self.send(ny(4, 10))
-        ramp.open_day(self.db, ny(9), CFG)
-        self.assertEqual(signals.signal_day(self.db, iso(ny(8, 12)), CFG, now=ny(9, 10)), d(9))
+        ramp.open_day(self.db, self.acct, ny(9), CFG)
+        self.assertEqual(signals.signal_day(self.db, 1, iso(ny(8, 12)), CFG, now=ny(9, 10)), d(9))
 
     def test_limit_for_matches_open_day(self):
         put_day(self.db, d(0), 40)
         self.send(ny(0, 10))
         before = self.db.total_changes
-        predicted = ramp.limit_for(self.db, d(1), CFG)
+        predicted = ramp.limit_for(self.db, self.acct, d(1), CFG)
         self.assertEqual(self.db.total_changes, before)
         self.assertEqual(predicted, 50)
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, predicted)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, predicted)
 
     def test_limit_for_with_no_row_is_20(self):
-        self.assertEqual(ramp.limit_for(self.db, d(0), CFG), 20)
+        self.assertEqual(ramp.limit_for(self.db, self.acct, d(0), CFG), 20)
 
     def test_effective_limit_is_one_level_lower_after_a_warning(self):
         put_day(self.db, d(0), 40)
         self.send(ny(0, 10))
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 50)
-        self.assertEqual(ramp.effective_limit(self.db, d(1), CFG), 50)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 50)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(1), CFG), 50)
         self.note("policy_rejection", ny(1, 11))
         before = self.db.total_changes
-        self.assertEqual(ramp.effective_limit(self.db, d(1), CFG), 40)
-        self.assertEqual(ramp.limit_for(self.db, d(1), CFG), 50)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(1), CFG), 40)
+        self.assertEqual(ramp.limit_for(self.db, self.acct, d(1), CFG), 50)
         self.assertEqual(self.row(d(1))["send_limit"], 50)
         self.assertEqual(self.db.total_changes, before)
 
     def test_effective_limit_before_the_day_opens_uses_limit_for(self):
         put_day(self.db, d(0), 40)
         self.send(ny(0, 10))
-        self.assertEqual(ramp.effective_limit(self.db, d(1), CFG), 50)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(1), CFG), 50)
+
+
+class PerAccountRampTest(Base):
+    """Each account ramps on its own numbers (15 up by 3, floor 15; ceiling 40 for the Gmail accounts)."""
+    CFG15 = with_ramp(CFG, ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+
+    def setUp(self):
+        super().setUp()
+        self.rows = accounts.sync(self.db, self.CFG15, STAMP)
+        self.a1, self.a2, self.a3 = (self.rows[a.address] for a in self.CFG15.accounts)
+
+    def send_from(self, account, at, n=1):
+        out = []
+        for _ in range(n):
+            self.people += 1
+            person = seed_email_person(self.db, self.company, f"Q{self.people}", f"q{self.people}@acme.co")
+            seed_sent(self.db, person, at=at, account_id=account.account_id)
+            out.append(self.db.execute("SELECT touch_id FROM touch WHERE person_id = ?", (person,)).fetchone()[0])
+        return out
+
+    def day_row(self, account, day):
+        return self.db.execute("SELECT * FROM send_day WHERE account_id = ? AND day = ?",
+                               (account.account_id, day.isoformat())).fetchone()
+
+    def test_new_account_starts_at_15(self):
+        state = ramp.open_day(self.db, self.a2, ny(0), self.CFG15)
+        self.assertEqual((state.start_limit, state.effective_limit), (15, 15))
+        self.assertEqual(ramp.limit_for(self.db, self.a3, d(0), self.CFG15), 15)
+
+    def test_clean_day_adds_3(self):
+        ramp.open_day(self.db, self.a2, ny(0), self.CFG15)
+        self.send_from(self.a2, ny(0, 10))
+        self.assertEqual(ramp.open_day(self.db, self.a2, ny(1), self.CFG15).start_limit, 18)
+
+    def test_warning_day_drops_3_not_below_15(self):
+        put = lambda a, n, lim: self.db.execute(
+            "INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (?, ?, ?, ?)",
+            (a.account_id, d(n).isoformat(), lim, STAMP))
+        put(self.a2, 0, 24)
+        self.note_for(self.a2, "policy_rejection", ny(0, 11))
+        self.assertEqual(ramp.effective_limit(self.db, self.a2, d(0), self.CFG15), 21)
+        self.assertEqual(ramp.open_day(self.db, self.a2, ny(1), self.CFG15).start_limit, 21)
+        put(self.a3, 0, 15)
+        self.note_for(self.a3, "policy_rejection", ny(0, 11))
+        self.assertEqual(ramp.effective_limit(self.db, self.a3, d(0), self.CFG15), 15)
+        self.assertEqual(ramp.open_day(self.db, self.a3, ny(1), self.CFG15).start_limit, 15)
+
+    def test_ceiling_40_for_gmail(self):
+        self.db.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, closed_at, created_at) "
+                        "VALUES (?, ?, 40, 'clean', ?, ?)", (self.a2.account_id, d(0).isoformat(), STAMP, STAMP))
+        self.assertEqual(ramp.open_day(self.db, self.a2, ny(1), self.CFG15).start_limit, 40)
+        self.assertEqual(ramp.limit_for(self.db, self.a2, d(2), self.CFG15), 40)
+
+    def test_stale_row_above_ceiling_is_clamped(self):
+        self.db.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, closed_at, created_at) "
+                        "VALUES (?, ?, 200, 'clean', ?, ?)", (self.a2.account_id, d(0).isoformat(), STAMP, STAMP))
+        self.assertEqual(ramp.limit_for(self.db, self.a2, d(1), self.CFG15), 40)
+        self.assertEqual(ramp.effective_limit(self.db, self.a2, d(0), self.CFG15), 40)
+        # A day with no outcome carries its level without stepping, so only the clamp brings 200 back to 40.
+        self.db.execute("INSERT INTO send_day(account_id, day, send_limit, closed_at, created_at) "
+                        "VALUES (?, ?, 200, ?, ?)", (self.a3.account_id, d(0).isoformat(), STAMP, STAMP))
+        self.assertEqual(ramp.limit_for(self.db, self.a3, d(1), self.CFG15), 40)
+
+    def test_accounts_ramp_independently(self):
+        for a in (self.a2, self.a3):
+            ramp.open_day(self.db, a, ny(0), self.CFG15)
+            self.send_from(a, ny(0, 10))
+        self.note_for(self.a3, "policy_rejection", ny(0, 11))
+        self.assertEqual(ramp.open_day(self.db, self.a2, ny(1), self.CFG15).start_limit, 18)
+        self.assertEqual(ramp.open_day(self.db, self.a3, ny(1), self.CFG15).start_limit, 15)
+        self.assertEqual(self.day_row(self.a2, d(0))["outcome"], "clean")
+        self.assertEqual(self.day_row(self.a3, d(0))["outcome"], "warning")
+
+    def test_followups_count_toward_day(self):
+        person = seed_email_person(self.db, self.company, "Fo", "fo@acme.co")
+        seed_sent(self.db, person, at=ny(0, 10), account_id=self.a2.account_id)
+        seed_sent(self.db, person, at=ny(1, 10), seq=1)
+        seed_sent(self.db, person, at=ny(1, 11), seq=2)
+        self.assertEqual(signals.sends_on(self.db, self.a2.account_id, d(1), self.CFG15), 2)
+        self.assertEqual(signals.counted_sends_on(self.db, self.a2.account_id, d(1), self.CFG15), 2)
+        self.assertEqual(signals.sends_on(self.db, self.a3.account_id, d(1), self.CFG15), 0)
+        self.assertEqual(ramp.open_day(self.db, self.a2, ny(1), self.CFG15).sent, 2)
+
+    def note_for(self, account, kind, at):
+        self.keys += 1
+        ramp.note_signal(self.db, kind, account=account, at=iso(at), detail={}, key=f"{kind}:{self.keys}",
+                         cfg=self.CFG15, notify=self.notifier, now=at)
 
 
 class FlatLimitTest(Base):
     """The shipped limit is flat 200 a day (#9, 2026-11-12, #227): no warning lowers it, and a stale lower row lifts."""
 
     def test_the_flat_config_is_flat_200(self):
-        self.assertEqual((FLAT.ramp_start, FLAT.ramp_floor, FLAT.ramp_ceiling), (200, 200, 200))
+        self.assertEqual((FLAT.accounts[0].ramp_start, FLAT.accounts[0].ramp_floor, FLAT.accounts[0].ramp_ceiling), (200, 200, 200))
         # The shipped accounts each keep their ceiling at or under the hard 200.
         self.assertTrue(all(a.ramp_ceiling <= 200 for a in load_config(SHIPPED_SEND_CONFIG).accounts))
 
     def test_a_day_with_no_row_gets_200(self):
-        self.assertEqual(ramp.limit_for(self.db, d(0), FLAT), 200)
+        self.assertEqual(ramp.limit_for(self.db, accounts.primary(self.db, FLAT), d(0), FLAT), 200)
 
     def test_a_row_written_at_20_before_the_ruling_still_gets_200(self):
         put_day(self.db, d(0), 20)
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
-        self.assertEqual(ramp.limit_for(self.db, d(1), FLAT), 200)
+        self.assertEqual(ramp.effective_limit(self.db, accounts.primary(self.db, FLAT), d(0), FLAT), 200)
+        self.assertEqual(ramp.limit_for(self.db, accounts.primary(self.db, FLAT), d(1), FLAT), 200)
 
     def test_a_warning_lowers_nothing(self):
         put_day(self.db, d(0), 200)
         self.send(ny(0, 10))
         self.note("bounce_warning", ny(0, 11))
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
-        self.assertEqual(ramp.open_day(self.db, ny(1), FLAT).start_limit, 200)
+        self.assertEqual(ramp.effective_limit(self.db, accounts.primary(self.db, FLAT), d(0), FLAT), 200)
+        self.assertEqual(ramp.open_day(self.db, accounts.primary(self.db, FLAT), ny(1), FLAT).start_limit, 200)
 
     def test_a_hard_block_still_pauses(self):
         put_day(self.db, d(0), 200)
         self.note("gmail_limit", ny(0, 11))
-        self.assertEqual(self.sender()["pause_kind"], "hard_block")
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
+        self.assertEqual(self.account_row()["pause_kind"], "hard_block")
+        self.assertEqual(ramp.effective_limit(self.db, accounts.primary(self.db, FLAT), d(0), FLAT), 200)
 
 
     def test_a_row_written_at_100_before_this_ruling_lifts_to_200(self):
         put_day(self.db, d(0), 100)
-        self.assertEqual(ramp.effective_limit(self.db, d(0), FLAT), 200)
-        self.assertEqual(ramp.limit_for(self.db, d(1), FLAT), 200)
+        self.assertEqual(ramp.effective_limit(self.db, accounts.primary(self.db, FLAT), d(0), FLAT), 200)
+        self.assertEqual(ramp.limit_for(self.db, accounts.primary(self.db, FLAT), d(1), FLAT), 200)
 
 
 class WeekendSendTest(Base):
@@ -275,25 +366,25 @@ class WeekendSendTest(Base):
     def test_new_york_weekend_send_counts_in_the_rates(self):
         touch = self.send(self.TOKYO_MONDAY_8AM, tz="Asia/Tokyo")
         self.sends(ny(4, 10), 3)  # Friday
-        self.assertEqual(signals.sends_on(self.db, d(6), CFG), 1)
-        self.assertEqual(signals.sends_on(self.db, d(7), CFG), 0)
+        self.assertEqual(signals.sends_on(self.db, 1, d(6), CFG), 1)
+        self.assertEqual(signals.sends_on(self.db, 1, d(7), CFG), 0)
         bounce(self.db, touch, ny(6, 19))
         # Sending dates up to Sunday: Sunday and Friday. The weekend date is not skipped.
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(6), CFG), 1 / 4)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(6), CFG), 1 / 4)
 
     def test_weekend_warning_steps_the_next_business_day_down(self):
         put_day(self.db, d(4), 50)
         self.send(ny(4, 10))
         self.note("policy_rejection", ny(6, 18))  # Sunday evening in New York
-        self.assertEqual(ramp.effective_limit(self.db, d(6), CFG), 50)  # Friday clean made Sunday 60, one level lower
-        state = ramp.open_day(self.db, ny(7, 9), CFG)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(6), CFG), 50)  # Friday clean made Sunday 60, one level lower
+        state = ramp.open_day(self.db, self.acct, ny(7, 9), CFG)
         self.assertEqual(state.start_limit, 50)
         self.assertEqual(self.row(d(6))["outcome"], "warning")
         self.assertEqual(self.row(d(4))["outcome"], "clean")
 
     def test_weekend_hard_block_pauses_and_is_not_lost(self):
         self.note("gmail_limit", ny(5, 12))
-        self.assertEqual(self.sender()["pause_kind"], "hard_block")
+        self.assertEqual(self.account_row()["pause_kind"], "hard_block")
         self.assertEqual(self.row(d(5))["outcome"], "hard_block")
 
 
@@ -301,37 +392,37 @@ class BounceRateTest(Base):
     def test_bounce_rate_of_exactly_two_percent_is_a_warning(self):
         touches = self.sends(ny(0, 10), 17) + self.sends(ny(1, 10), 17) + self.sends(ny(2, 10), 16)
         bounce(self.db, touches[-1], ny(2, 12))
-        rate = signals.bounce_rate_3d(self.db, d(2), CFG)
+        rate = signals.bounce_rate_3d(self.db, 1, d(2), CFG)
         self.assertEqual(rate, 0.02)
         self.assertTrue(signals.bounce_rate_warns(rate, CFG))
 
     def test_just_under_two_percent_is_clean(self):
         touches = self.sends(ny(0, 10), 17) + self.sends(ny(1, 10), 17) + self.sends(ny(2, 10), 17)
         bounce(self.db, touches[-1], ny(2, 12))
-        rate = signals.bounce_rate_3d(self.db, d(2), CFG)
+        rate = signals.bounce_rate_3d(self.db, 1, d(2), CFG)
         self.assertAlmostEqual(rate, 1 / 51)
         self.assertFalse(signals.bounce_rate_warns(rate, CFG))
 
     def test_bounce_rate_3d_uses_sending_days_and_is_zero_without_sends(self):
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(2), CFG), 0.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(2), CFG), 0.0)
         monday = self.sends(ny(0, 10), 10)
         self.sends(ny(2, 10), 10)
         self.sends(ny(3, 10), 10)
         friday = self.sends(ny(4, 10), 10)
         # Wednesday's three sending days are Wednesday and Monday only (Tuesday sent nothing).
         bounce(self.db, monday[0], ny(0, 15))
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(2), CFG), 1 / 20)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(2), CFG), 1 / 20)
         # By Friday the window is Friday, Thursday and Wednesday; Monday's bounce has aged out.
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 0.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(4), CFG), 0.0)
         bounce(self.db, friday[0], ny(4, 15))
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 1 / 30)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(4), CFG), 1 / 30)
 
     def test_a_bounce_arriving_on_a_day_with_no_sends_is_counted(self):
         # A delayed DSN on Saturday for a Friday send: the date had no sends, the bounce still counts.
         touches = self.sends(ny(4, 10), 10)
         bounce(self.db, touches[0], ny(5, 10))
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(5), CFG), 1 / 10)
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 0.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(5), CFG), 1 / 10)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(4), CFG), 0.0)
 
     def test_a_bounce_before_the_window_is_not_counted(self):
         touches = self.sends(ny(0, 10), 10)
@@ -339,45 +430,45 @@ class BounceRateTest(Base):
         self.sends(ny(3, 10), 10)
         self.sends(ny(2, 10), 10)
         bounce(self.db, touches[0], ny(1, 10))  # Tuesday: before Wednesday, the first window date
-        self.assertEqual(signals.bounce_rate_3d(self.db, d(4), CFG), 0.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(4), CFG), 0.0)
 
     def test_follow_ups_count_as_sends(self):
         person = seed_email_person(self.db, self.company, "Fo", "fo@acme.co")
         seed_sent(self.db, person, at=ny(0, 10))
         seed_sent(self.db, person, at=ny(1, 10), seq=1)
-        self.assertEqual(signals.sends_on(self.db, d(1), CFG), 1)
+        self.assertEqual(signals.sends_on(self.db, 1, d(1), CFG), 1)
 
     def test_a_send_at_midnight_new_york_belongs_to_the_new_day(self):
         self.send(ny(1, 0, 0))
-        self.assertEqual(signals.sends_on(self.db, d(0), CFG), 0)
-        self.assertEqual(signals.sends_on(self.db, d(1), CFG), 1)
+        self.assertEqual(signals.sends_on(self.db, 1, d(0), CFG), 0)
+        self.assertEqual(signals.sends_on(self.db, 1, d(1), CFG), 1)
 
 
 class HardBlockTest(Base):
     def test_hard_kind_pauses_with_a_reason_and_notifies_once(self):
         put_day(self.db, d(0), 50)
         self.note("gmail_limit", ny(0, 11))
-        first = self.sender()
+        first = self.account_row()
         self.assertEqual((first["paused"], first["pause_kind"]), (1, "hard_block"))
         self.assertTrue(first["paused_reason"].endswith("."))
         self.assertIsNotNone(first["paused_at"])
         self.note("gmail_limit", ny(0, 12))
-        second = self.sender()
+        second = self.account_row()
         self.assertEqual(second["revision"], first["revision"])
         self.assertEqual(second["paused_reason"], first["paused_reason"])
         self.assertEqual(len(self.events("hard_block")), 1)
         self.assertEqual(len(self.events("gmail_limit")), 2)
         self.assertEqual(len(self.notices), 1)
         self.assertEqual(self.row(d(0))["outcome"], "hard_block")
-        self.assertEqual(ramp.effective_limit(self.db, d(0), CFG), 40)
+        self.assertEqual(ramp.effective_limit(self.db, self.acct, d(0), CFG), 40)
 
     def test_each_hard_kind_pauses_with_its_own_reason(self):
         reasons = set()
         for kind in signals.HARD_KINDS:
             self.setUp()
             self.note(kind, ny(0, 11))
-            self.assertEqual(self.sender()["pause_kind"], "hard_block", kind)
-            reasons.add(self.sender()["paused_reason"])
+            self.assertEqual(self.account_row()["pause_kind"], "hard_block", kind)
+            reasons.add(self.account_row()["paused_reason"])
         self.assertEqual(len(reasons), len(signals.HARD_KINDS))
 
     def test_the_same_signal_key_twice_changes_nothing(self):
@@ -386,17 +477,24 @@ class HardBlockTest(Base):
         self.note("gmail_limit", ny(0, 11), key="k1")
         self.assertEqual(self.db.total_changes, before)
 
-    def test_hard_block_over_his_own_pause_becomes_hard_block(self):
+    def test_a_hard_block_never_touches_his_own_pause_row(self):
         self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'away', "
                         "paused_at = ? WHERE sender_id = 1", (iso(MON),))
         self.note("gmail_policy", ny(0, 11))
         row = self.sender()
-        self.assertEqual((row["paused"], row["pause_kind"]), (1, "hard_block"))
-        self.assertNotEqual(row["paused_reason"], "away")
+        self.assertEqual((row["paused"], row["pause_kind"], row["paused_reason"]), (1, "by_you", "away"))
+        own = self.account_row()
+        self.assertEqual((own["paused"], own["pause_kind"]), (1, "hard_block"))
+        self.assertNotEqual(own["paused_reason"], "away")
+
+    def test_a_hard_block_leaves_sender_row_1_alone(self):
+        before = tuple(self.sender())
+        self.note("gmail_limit", ny(0, 11))
+        self.assertEqual(tuple(self.sender()), before)
 
     def test_a_warning_does_not_pause_or_notify(self):
         self.note("policy_rejection", ny(0, 11))
-        self.assertEqual(self.sender()["paused"], 0)
+        self.assertEqual(self.account_row()["paused"], 0)
         self.assertEqual(self.notices, [])
 
     def test_a_warning_never_downgrades_a_hard_block(self):
@@ -407,7 +505,7 @@ class HardBlockTest(Base):
     def test_a_hard_block_day_starts_the_next_day_one_level_lower(self):
         put_day(self.db, d(0), 50)
         self.note("gmail_limit", ny(0, 11))
-        self.assertEqual(ramp.open_day(self.db, ny(1), CFG).start_limit, 40)
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 40)
 
     def test_an_unknown_kind_is_refused(self):
         with self.assertRaises(ValueError):
@@ -416,9 +514,9 @@ class HardBlockTest(Base):
     def test_a_failing_notice_does_not_undo_the_pause(self):
         def broken(title, text):
             raise OSError("no display")
-        ramp.note_signal(self.db, "gmail_limit", at=iso(ny(0, 11)), detail={}, key="k", cfg=CFG, notify=broken,
+        ramp.note_signal(self.db, "gmail_limit", account=self.acct, at=iso(ny(0, 11)), detail={}, key="k", cfg=CFG, notify=broken,
                          now=ny(0, 11))
-        self.assertEqual(self.sender()["pause_kind"], "hard_block")
+        self.assertEqual(self.account_row()["pause_kind"], "hard_block")
 
 
 class StopTagsTest(Base):
@@ -460,9 +558,9 @@ class StopTagsTest(Base):
 class NowIsRequiredTest(Base):
     def test_signal_day_and_note_signal_need_the_moment_they_run(self):
         with self.assertRaises(TypeError):
-            signals.signal_day(self.db, iso(ny(0, 11)), CFG)
+            signals.signal_day(self.db, 1, iso(ny(0, 11)), CFG)
         with self.assertRaises(TypeError):
-            ramp.note_signal(self.db, "bounce_warning", at=iso(ny(0, 11)), detail={}, key="k", cfg=CFG,
+            ramp.note_signal(self.db, "bounce_warning", account=self.acct, at=iso(ny(0, 11)), detail={}, key="k", cfg=CFG,
                              notify=self.notifier)
 
 

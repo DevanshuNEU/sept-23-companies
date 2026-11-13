@@ -39,11 +39,6 @@ class SendConfig:
     accounts: tuple[AccountConfig, ...]
     from_name: str
     day_tz: str
-    # compat until Task A5: the old global ramp, derived from accounts[0] at load (not in config.toml).
-    ramp_start: int
-    ramp_step: int
-    ramp_ceiling: int
-    ramp_floor: int
     spread_jitter: tuple[float, float]
     spread_gap_minutes: tuple[int, int]
     clean_bounce_rate: float
@@ -98,9 +93,8 @@ class SendConfig:
         return None
 
 
-# Fields that are not top-level keys in config.toml: `accounts` comes from [[account]] blocks, the ramp numbers are
-# derived from accounts[0] (compat until Task A5).
-DERIVED_FIELDS = ("accounts", "ramp_start", "ramp_step", "ramp_ceiling", "ramp_floor")
+# Fields that are not top-level keys in config.toml: `accounts` comes from [[account]] blocks (each carries its ramp).
+DERIVED_FIELDS = ("accounts",)
 
 
 # Whole numbers that count things, so zero or less makes no sense.
@@ -302,10 +296,6 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
     values = dict(raw)
     del values["account"]
     values["accounts"] = _accounts(raw["account"])
-    first = values["accounts"][0]
-    # compat until Task A5: ramp.py, queue.py and status.py still read the global ramp.
-    values.update(ramp_start=first.ramp_start, ramp_step=first.ramp_step, ramp_ceiling=first.ramp_ceiling,
-                  ramp_floor=first.ramp_floor)
     values["spread_jitter"] = _pair("spread_jitter", raw["spread_jitter"], (int, float), 0)
     values["spread_gap_minutes"] = _pair("spread_gap_minutes", raw["spread_gap_minutes"], int, 0)
     values["window_start"] = _time("window_start", raw["window_start"])

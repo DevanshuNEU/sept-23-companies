@@ -54,10 +54,9 @@ _send_config.DEFAULT_PATH = _ramp_copy
 
 
 def flat_200(cfg):
-    """The shipped config with the old flat 200 ramp (#9, 2026-11-12, #227) that ramp.py still reads from the global
-    ramp attributes; the shipped ramp is per account now (compat until Task A5)."""
-    import dataclasses
-    return dataclasses.replace(cfg, ramp_start=200, ramp_step=10, ramp_floor=200, ramp_ceiling=200)
+    """The shipped config with the old flat 200 ramp (#9, 2026-11-12, #227) set on every account."""
+    from tests.sendtest import with_ramp
+    return with_ramp(cfg, ramp_start=200, ramp_step=10, ramp_floor=200, ramp_ceiling=200)
 _send_config.load_config.__defaults__ = (_ramp_copy,)
 
 

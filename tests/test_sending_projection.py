@@ -3,16 +3,17 @@ import unittest
 from collections import Counter
 from datetime import date, datetime, timedelta
 
+from outreach.sending import accounts as _accounts
 from outreach.sending import calendar as cal
 from outreach.sending import human, projection, queue, ramp
 from outreach.sending.config import load_config
 from outreach.sending import status
-from tests.sendtest import prove, put_day
+from tests.sendtest import prove, put_day, with_ramp
 from tests.storetest import seed_company
 from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
-CFG = dataclasses.replace(load_config(), ramp_floor=1)
+CFG = with_ramp(load_config(), ramp_floor=1)
 FRI = ny(6, 11, 6)  # Friday 2026-11-06, 11:06 New York (three company slots 60 minutes apart fit before the 15:00 close)
 
 
@@ -22,7 +23,7 @@ def day_of(at: datetime) -> date:
 
 class ProjectionTest(Base):
     def project(self, now=FRI):
-        day = ramp.open_day(self.db, now, CFG)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), now, CFG)
         return projection.project(queue.prepare(self.db, now, CFG, day=day), now, CFG)
 
     def test_nothing_approved_projects_nothing(self):

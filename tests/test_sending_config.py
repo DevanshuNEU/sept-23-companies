@@ -89,9 +89,9 @@ class SendConfigTest(unittest.TestCase):
     def test_config_is_frozen_and_has_every_field(self):
         cfg = load_config()
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            cfg.ramp_start = 50
+            cfg.from_name = "x"
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 41)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 37)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))

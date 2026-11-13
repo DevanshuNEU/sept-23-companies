@@ -3,14 +3,15 @@ import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from outreach.sending import accounts as _accounts
 from outreach.sending import human, queue, ramp
 from outreach.sending.config import load_config
 from tests import SHIPPED_SEND_CONFIG
-from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_message, seed_sent
+from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_message, seed_sent, with_ramp
 from tests.storetest import fresh_store, seed_company
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
-CFG = dataclasses.replace(load_config(), ramp_floor=1, followup_business_days=(3, 7, 14, 21))  # the 4-step order mechanism; shipped config is one follow-up (0016)
+CFG = dataclasses.replace(with_ramp(load_config(), ramp_floor=1), followup_business_days=(3, 7, 14, 21))  # the 4-step order mechanism; shipped config is one follow-up (0016)
 NY = ZoneInfo("America/New_York")
 LA = ZoneInfo("America/Los_Angeles")
 MON_DAY = date(2026, 11, 2)
@@ -59,7 +60,7 @@ class Base(unittest.TestCase):
 
     def verdicts_at(self, now=MON, *, gate=None):
         """The verdicts at `now` by message id."""
-        day = ramp.open_day(self.db, now, CFG)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), now, CFG)
         return {v.message_id: v for v in queue.verdicts(self.db, now, CFG, day=day, gate=gate)}
 
     def reason(self, message, now=MON, **kw) -> str:
@@ -71,7 +72,7 @@ HUMAN = load_config(SHIPPED_SEND_CONFIG)  # the shipped pacing: jittered day sta
 
 class HumanPacingTest(Base):
     def verdicts_with_human(self, now):
-        day = ramp.open_day(self.db, now, HUMAN)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, HUMAN), now, HUMAN)
         return {v.message_id: v for v in queue.verdicts(self.db, now, HUMAN, day=day, gate=None)}
 
     def test_the_first_send_of_the_day_starts_a_little_after_the_window_opens(self):
@@ -125,7 +126,7 @@ class PrepareTest(Base):
         for _ in range(3):
             self.approve(company=other)
         self.sent_at(self.company, MON - timedelta(minutes=30))
-        day = ramp.open_day(self.db, MON, CFG)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), MON, CFG)
         expected = queue.verdicts(self.db, MON, CFG, day=day, gate=None)
         p = queue.prepare(self.db, MON, CFG, day=day)
         got = queue.decide_all(p, MON, CFG, gate=None, pending=p.queue, sends=p.sends,

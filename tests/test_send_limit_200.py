@@ -56,8 +56,8 @@ class SendDayMigrationTest(unittest.TestCase):
 
 class TwoHundredFitsInADayTest(unittest.TestCase):
     def test_the_shipped_pacing_sends_200_in_a_day_with_enough_companies(self):
-        cfg = flat_200(load_config(SHIPPED_SEND_CONFIG))  # compat until Task A5
-        self.assertEqual(cfg.ramp_ceiling, 200)
+        cfg = flat_200(load_config(SHIPPED_SEND_CONFIG))
+        self.assertEqual(cfg.accounts[0].ramp_ceiling, 200)
         # Exact times and first-come order, so the run is the same every time; the limit and the gaps are the shipped ones.
         cfg = dataclasses.replace(cfg, pick_pool=1, day_start_jitter_minutes=0, per_company_gap_jitter_minutes=0,
                                   # The old human pacing (gap_median_minutes) cannot fit 200 into the new 08:00 to 15:00

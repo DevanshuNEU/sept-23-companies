@@ -58,7 +58,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from outreach.sending import calendar as cal
-from outreach.sending import claim, followups, inbound, proof, queue, ramp, signals
+from outreach.sending import accounts, claim, followups, inbound, proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
 from outreach.sending.mail import GmailError, MailClient, scrub
 from outreach.sending.notify import Notifier, notify_once
@@ -497,7 +497,7 @@ class _Tick:
         self.counts["autoReplies"] = self.inbound.get("auto_replies", 0)
         self.counts["bounces"] = self.inbound.get("bounces", 0)
         inbound.observe_stop_tags(conn, now=now, cfg=cfg, notify=self.notify)
-        self.day = ramp.open_day(conn, now, cfg)
+        self.day = ramp.open_day(conn, self._account_row(), now, cfg)
         self._bounce_rules()
         self.counts["planned"] = followups.sync_followups(conn, cfg, now=stamp)
         self.counts["lapsed"] = followups.lapse_followups(conn, self.today, cfg, now=stamp)
@@ -506,18 +506,28 @@ class _Tick:
         self.counts["skipped"] = followups.sweep_stopped(conn, verdicts, now=stamp)
         self._prune()
 
+    def _account_row(self) -> accounts.AccountRow:
+        """The one account this tick runs (account of `cfg.from_address`) until the per-account loop lands."""
+        return accounts.primary(self.conn, self.cfg)
+
     def _bounce_rules(self) -> None:
         """The bounce rule on whatever wrote the bounces (Gmail inbound or another path): today's 3-day rate when a
         bounce is dated today. Its key matches inbound's, so the warning fires once. A bounce rate never pauses."""
         conn, cfg = self.conn, self.cfg
-        signal = {"cfg": cfg, "notify": self.notify, "now": self.now, "at": self.stamp}
+        account = self._account_row()
+        signal = {"cfg": cfg, "notify": self.notify, "now": self.now, "at": self.stamp, "account": account}
         start, end = cal.ny_day_bounds(self.today, cfg)
-        if conn.execute("SELECT 1 FROM touch WHERE bounced_at >= ? AND bounced_at < ? LIMIT 1",
-                        (start, end)).fetchone():
-            rate = signals.bounce_rate_3d(conn, self.today, cfg)
+        if conn.execute("SELECT 1 FROM touch WHERE COALESCE(account_id, 1) = ? AND bounced_at >= ? "
+                        "AND bounced_at < ? LIMIT 1", (account.account_id, start, end)).fetchone():
+            rate = signals.bounce_rate_3d(conn, account.account_id, self.today, cfg)
             if signals.bounce_rate_warns(rate, cfg):
                 ramp.note_signal(conn, "bounce_warning", detail={"rate": rate, "source": "tick"},
-                                 key=f"bounce_warning:{self.today.isoformat()}", **signal)
+                                 key=signals.day_key("bounce_warning", account.account_id, self.today), **signal)
+            bounced, sent = signals.bounce_rate_last_100(conn, account.account_id)
+            if signals.bounce_rate_hard(bounced, sent):
+                ramp.note_signal(conn, "bounce_rate_hard", detail={"bounced": bounced, "sent": sent,
+                                                                   "source": "tick"},
+                                 key=signals.day_key("bounce_rate_hard", account.account_id, self.today), **signal)
 
     def _prune(self) -> None:
         """Once a New York day: delete this job's `ok` no-op runs older than `prune_noop_after_days`."""
@@ -533,11 +543,11 @@ class _Tick:
 
     def _pick(self, old_loaded: bool) -> queue.Queued | None:
         """Step 6."""
-        row = self.conn.execute("SELECT paused, pause_kind, paused_reason FROM sender WHERE sender_id = 1").fetchone()
+        pause = accounts.pause_of(self.conn, self._account_row().account_id)
         gate = None
-        if row["paused"]:
+        if pause is not None:
             gate = "sender_paused"
-            how = "by you" if row["pause_kind"] == "by_you" else f"by a hard block: {row['paused_reason']}"
+            how = "by you" if pause.kind == "by_you" else f"by a hard block: {pause.reason}"
             self._line(f"sending is paused {how}")
         elif self.auth != "ok":
             gate = "signed_out"
@@ -620,7 +630,8 @@ class _Tick:
             "AND kind = 'claimed' ORDER BY event_id DESC LIMIT 1", (picked.message_id,)).fetchone()
         rfc = rfc[0] if rfc is not None else f"message-{picked.message_id}"
         detail = {"message_id": picked.message_id, "error_kind": err.kind, "status": err.status, "source": "send"}
-        signal = {"at": self.stamp, "cfg": self.cfg, "notify": self.notify, "now": self.now}
+        signal = {"at": self.stamp, "cfg": self.cfg, "notify": self.notify, "now": self.now,
+                  "account": self._account_row()}
         self._partial(f"the send of message {picked.message_id} failed ({text}); it is checked against Sent "
                       "before any retry")
         with self._tx():

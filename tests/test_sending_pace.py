@@ -10,19 +10,20 @@ import unittest
 from datetime import date, timedelta
 from unittest import mock
 
+from outreach.sending import accounts as _accounts
 from outreach.sending import human, pace, queue, ramp
 from outreach.sending.config import load_config
 from outreach.sending.simulate import Event, Scenario, cal_days, ny as sim_ny, simulate
 from tests import SHIPPED_SEND_CONFIG
 from tests.ranking_store import board, decision, evidence, posting
-from tests.sendtest import put_day, seed_email_person, seed_message, seed_sent
+from tests.sendtest import put_day, seed_email_person, seed_message, seed_sent, with_ramp
 from tests.storetest import fresh_store, seed_company
 from tests.test_sending_config import config_with
 from tests.test_sending_queue import MON, ny
 
 SHIPPED = load_config(SHIPPED_SEND_CONFIG)
 # The shipped bands with exact gaps (no jitter), on the tests' floor of 1, so a test can count minutes.
-CFG = dataclasses.replace(load_config(), ramp_floor=1,
+CFG = dataclasses.replace(with_ramp(load_config(), ramp_floor=1),
                           size_band_gap_jitter_minutes=(0,) * len(SHIPPED.size_band_daily))
 
 
@@ -130,7 +131,7 @@ class QueueUsesTheBandTest(unittest.TestCase):
         return seed_email_person(self.db, cid, f"P{self.n}", f"p{self.n}@acme.co")
 
     def reason(self, message, now):
-        day = ramp.open_day(self.db, now, CFG)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), now, CFG)
         return {v.message_id: v for v in queue.verdicts(self.db, now, CFG, day=day, gate=None)}[message].reason
 
     def test_a_small_company_stops_at_two_and_a_big_one_goes_on(self):

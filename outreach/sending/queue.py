@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
                                        replied_people, resolve_company)
 from outreach.sending import calendar as cal
-from outreach.sending import human, pace, ramp, signals
+from outreach.sending import accounts, human, pace, ramp, signals
 from outreach.sending.config import SendConfig, load_config
 from outreach.sending.pace import CompanyPace
 from outreach.sending.ramp import DayState
@@ -221,12 +221,13 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: Da
     today = cal.ny_date(now, cfg)
     day_start, _ = cal.ny_day_bounds(today, cfg)
     gap = human.max_company_gap(cfg)  # how far back a company's last send can still hold the next one
-    limit = ramp.effective_limit(conn, today, cfg)
+    account = accounts.primary(conn, cfg)  # one account until the per-account loop lands
+    limit = ramp.effective_limit(conn, account, today, cfg)
     if day is not None and day.day == today:
         limit = min(limit, day.effective_limit)  # the tick's snapshot can only be older, so it can only be higher
     # The ramp counts only what is sent; the limit also counts a claimed message that may have gone out. An email
     # that bounced does not use a slot (#224).
-    sent_today = signals.counted_sends_on(conn, today, cfg) + conn.execute(
+    sent_today = signals.counted_sends_on(conn, account.account_id, today, cfg) + conn.execute(
         "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
         "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
     next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]

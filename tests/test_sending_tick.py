@@ -363,6 +363,25 @@ class GateTest(Base):
         self.clock.advance(minutes=2)
         self.assertEqual(self.tick().sent, (mid,))
 
+    def test_a_failed_read_waits_as_inbound_unread(self):
+        self.tick()  # takes a history cursor
+        mid = self.approve()
+        self.hooks["history"] = lambda: (_ for _ in ()).throw(GmailError("network", None, "offline"))
+        report = self.tick()
+        self.assertEqual(report.sent, ())
+        self.assertEqual(report.waiting, {"inbound_unread": 1})
+        self.assertTrue(any("devanshurajesh@gmail.com was not fully read" in line for line in report.lines))
+        self.clock.advance(minutes=2)
+        self.assertEqual(self.tick().sent, (mid,))
+
+    def test_inbound_that_fails_to_apply_waits_as_inbound_unread(self):
+        self.tick()
+        mid = self.approve()
+        with mock.patch("outreach.sending.inbound.apply_inbound", side_effect=RuntimeError("a bad inbound row")):
+            report = self.tick()
+        self.assertEqual((report.sent, report.waiting), ((), {"inbound_unread": 1}))
+        self.assertEqual(self.message(mid)["state"], "approved")
+
     def test_inbound_that_fails_to_apply_sends_nothing_and_the_rest_still_settles(self):
         first = self.approve()
         self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)

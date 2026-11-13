@@ -10,6 +10,8 @@ Accounts (multi-sender design, "Lanes" and "Window and pacing"): given the accou
 account `accounts.route` picks (`Verdict.account`), and the daily limit, spacing, pause and sign-in are that account's.
 What protects the recipient stays global: company stops and holds, the company's size band (its first emails a day and
 its gap count every account's sends), the window, weekdays, holidays, the recipient's time zone and `first_only`.
+An account whose inbound mail was not fully read this tick (`unread`) holds its own messages and every message to a
+company it has a touch at, as `inbound_unread`: a reply there may not be recorded yet.
 Without accounts (every caller until the per-account tick loop) the one account the tick runs, `cfg.from_address`,
 owns every message, as before accounts existed.
 """
@@ -40,7 +42,7 @@ STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
            "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
            "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address",
-           "no_thread", "lane_waits") + STOP_REASONS
+           "no_thread", "lane_waits", "inbound_unread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
                           "per_company_limit", "per_company_gap"})
@@ -73,6 +75,8 @@ REASON_TEXT = {
                  "first email.",
     # The verdict's own `text` says which lane or account it waits for.
     "lane_waits": "No sending account can take this email yet, so it waits.",
+    # The verdict's own `text` names the account whose replies could not be read.
+    "inbound_unread": "Waits: replies could not be read yet.",
     "company_closed": "This company is closed or removed, so this email will not be sent.",
     "no_go": "This person or company is on the no-go list, so this email will not be sent.",
     "reply_stop": "This person replied, so this email will not be sent.",
@@ -101,7 +105,7 @@ class Verdict:
     reason: str
     earliest_at: datetime | None
     account: str | None = None  # the address of the account that sends it; None when none can (`lane_waits`)
-    text: str | None = None  # this message's own sentence, when `REASON_TEXT` is not enough (`lane_waits`)
+    text: str | None = None  # its own sentence, when `REASON_TEXT` is not enough (`lane_waits`, `inbound_unread`)
 
 
 @dataclass(frozen=True)
@@ -316,6 +320,10 @@ class Prepared:
     routes: dict[int, Route] = field(default_factory=dict)  # message id to the account it goes from
     senders: tuple[str, ...] = ()  # the accounts a projection places mail for, in config order
     paused: bool = False  # his pause (sender row 1), read when accounts are in play; else the caller's gate says it
+    # The accounts whose inbound mail was not fully read (id to address), and each surviving company with a touch
+    # on one of them (to that account's address).
+    unread: dict[int, str] = field(default_factory=dict)
+    unread_companies: dict[int, str] = field(default_factory=dict)
 
 
 _BAD_AUTH = ("signed_out", "wrong_account", "app_closed")
@@ -362,9 +370,32 @@ def _route(conn: sqlite3.Connection, cfg: SendConfig, q: Queued, accounts: Mappi
     return Route(account.cfg.address)
 
 
+def _unread(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
+            account_ids: frozenset[int]) -> tuple[dict[int, str], dict[int, str]]:
+    """The unread accounts by id (to their address), and each surviving company with a touch on one of them. A
+    touch is on an account when it names it, or, with none, when it was sent (a thread or a first send): then it is
+    account 1's, as everywhere else. A touch not sent yet is on no account."""
+    if not account_ids:
+        return {}, {}
+    marks = ",".join("?" * len(account_ids))
+    ids = sorted(account_ids)
+    names = {row[0]: row[1] for row in conn.execute(
+        f"SELECT account_id, address FROM sender_account WHERE account_id IN ({marks})", ids)}
+    unread = {a: names.get(a, f"account {a}") for a in ids}
+    held: dict[int, str] = {}
+    on = ("COALESCE(t.account_id, CASE WHEN t.first_sent_at IS NOT NULL OR ifnull(t.gmail_thread_id, '') <> '' "
+          "THEN 1 END)")
+    for row in conn.execute(
+            f"SELECT p.company_id, {on} AS on_account FROM touch t JOIN person p ON p.person_id = t.person_id "
+            f"WHERE {on} IN ({marks}) ORDER BY on_account, t.touch_id", ids):
+        held.setdefault(resolve_company(companies, row["company_id"])[-1], unread[row["on_account"]])
+    return unread, held
+
+
 def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
-            accounts: Mapping[str, AccountRow] | None = None, *, day: DayState | None) -> Prepared:
-    """The queue and the facts around it, read once. `accounts` and `day` as for `verdicts`."""
+            accounts: Mapping[str, AccountRow] | None = None, *, day: DayState | None,
+            unread: frozenset[int] = frozenset()) -> Prepared:
+    """The queue and the facts around it, read once. `accounts`, `day` and `unread` as for `verdicts`."""
     rows, companies = _rows(conn)
     now = now.astimezone(timezone.utc)
     today = cal.ny_date(now, cfg)
@@ -388,6 +419,7 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
         routes = {q.message_id: _route(conn, cfg, q, accounts) for q in queued}
         senders = tuple(row.cfg.address for row in accounts.values() if row.cfg.sends)
     own = days.get(primary.cfg.address) or _account_day(conn, primary, today, cfg, day, own_block=False)
+    unread_accounts, unread_companies = _unread(conn, companies, frozenset(unread))
     return Prepared(
         queue=queued, stops=_stop_reasons(rows, companies, conn),
         paces=pace.company_paces(conn, {q.company_id for q in queued}, cfg),
@@ -402,7 +434,8 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
         not_before=_not_before(conn, cfg), companies=companies, held=frozenset(held_survivors(companies)),
         sends=_company_sends(conn, companies, min(day_start, (now - gap).strftime(ISO_FMT))),
         sent_today=own.sent_today, limit=own.limit, next_send=own.next_send,
-        days=days, routes=routes, senders=senders, paused=paused)
+        days=days, routes=routes, senders=senders, paused=paused, unread=unread_accounts,
+        unread_companies=unread_companies)
 
 
 def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None, pending: list[Queued],
@@ -446,21 +479,26 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
             account_id = p.days[route.account].account_id
         if p.paused:
             block = "sender_paused"  # his pause stops every account
+        # The account's own mailbox, else one that emailed this company, was not fully read.
+        unread = p.unread.get(account_id) if account_id is not None else None
+        unread = unread or p.unread_companies.get(q.company_id)
         reason, at = _decide(
             q, p.stops, gate, p.companies[q.company_id], q.company_id in p.held, now, cfg, today, day_full,
             sends.get(q.company_id, []), day_begins, day_opens, tomorrow, free_at, q.company_id in live_others,
             no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
             not_before=p.not_before.get(q.message_id),
             company_pace=p.paces.get(q.company_id) or pace.default_pace(cfg), block=block,
-            no_account=route.account is None, account_id=account_id)
-        out.append(Verdict(q.message_id, reason, at, account=route.account,
-                           text=route.text if reason == "lane_waits" else None))
+            no_account=route.account is None, account_id=account_id, unread=unread is not None)
+        text = route.text if reason == "lane_waits" else None
+        if reason == "inbound_unread":
+            text = f"Waits: replies on {unread} could not be read yet."
+        out.append(Verdict(q.message_id, reason, at, account=route.account, text=text))
     return out
 
 
 def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
              accounts: Mapping[str, AccountRow] | None = None, *, day: DayState | None,
-             gate: str | None) -> list[Verdict]:
+             gate: str | None, unread: frozenset[int] = frozenset()) -> list[Verdict]:
     """One verdict per approved message, in queue order, each with the account that sends it.
     `accounts` are the accounts in play (`accounts.sync`), by address: each message goes from the one
     `accounts.route` picks, and its daily limit, spacing, pause and sign-in are that account's (a message none can
@@ -468,12 +506,15 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
     pause and sign-in are the caller's `gate`. `day` is the tick's snapshot of the primary account's day.
     `gate` (`sender_paused`, `signed_out`, `old_sender_running`, `message_id_unproven`) is a reason the whole tick
     knows; it applies to every message that is not a stop.
+    `unread` are the ids of the accounts whose inbound mail this tick did not fully read (or failed to apply): a
+    message from one of them, or to a company with a touch on one of them (merged companies count), waits as
+    `inbound_unread`, with a sentence naming the account; every other message goes on.
     Order of reasons: stops; the gate; the account's own block (his pause, the account's pause, its sign-in);
-    company paused; company held (a hold on any company merged into the survivor counts); no address; a follow-up
-    with no Gmail thread; no account can take it; follow-up not due; an earlier follow-up in the thread not gone
-    out; bad time zone; not a business day; the account's daily limit; per-company limit; per-company gap;
-    recipient's window; recruiter waits; the account's spacing."""
-    p = prepare(conn, now, cfg, accounts, day=day)
+    inbound unread; company paused; company held (a hold on any company merged into the survivor counts); no
+    address; a follow-up with no Gmail thread; no account can take it; follow-up not due; an earlier follow-up in
+    the thread not gone out; bad time zone; not a business day; the account's daily limit; per-company limit;
+    per-company gap; recipient's window; recruiter waits; the account's spacing."""
+    p = prepare(conn, now, cfg, accounts, day=day, unread=unread)
     if not p.queue:
         return []
     return decide_all(p, now, cfg, gate=gate, pending=p.queue, sends=p.sends)
@@ -484,7 +525,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
             day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None, company_pace: CompanyPace | None = None, block: str | None = None,
-            no_account: bool = False, account_id: int | None = None) -> tuple[str, datetime | None]:
+            no_account: bool = False, account_id: int | None = None,
+            unread: bool = False) -> tuple[str, datetime | None]:
     company_pace = company_pace or pace.default_pace(cfg)
     if q.message_id in stops:
         return stops[q.message_id], None
@@ -492,6 +534,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         return gate, None
     if block is not None:
         return block, None
+    if unread:
+        return "inbound_unread", None
     if company["paused_at"] is not None:
         return "company_paused", None
     if held:

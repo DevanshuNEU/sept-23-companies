@@ -59,7 +59,7 @@ __all__ = ["SCHEMA_VERSION", "Rejected", "StoreResult", "store_company_result"]
 
 SCHEMA_VERSION = 1
 _EMPLOYER_KINDS = ("profile", "team", "post")
-_EMAIL_REFUSALS = ("bad_email", "email_source_not_allowed", "email_needs_source")
+_EMAIL_REFUSALS = ("bad_email", "bounced_address", "email_source_not_allowed", "email_needs_source")
 _LEGAL = {"inc", "llc", "ltd", "corp", "co", "gmbh"}
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "phd", "md", "mba"}
 _HONORIFICS = {"dr", "prof", "mr", "mrs", "ms", "mx", "sir"}

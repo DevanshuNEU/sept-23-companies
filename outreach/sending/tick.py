@@ -17,11 +17,14 @@ The steps, in order. Gmail is called only in steps 2, 4 and 7, and never inside 
    applied in one short transaction after the call.
 8. The `job_run` finishes with integer counts and `noop`.
 
-Nothing is sent in a tick whose inbound mail was not fully read or failed to apply (a missed reply could mean
-mail to someone who already answered). Every email carries the sender's marker, `X-Outreach-Id`, the token it
-claimed before the call; a send in doubt is found in Sent by that marker, never by its Message-ID (Gmail's API
-replaces the Message-ID the sender sets with one of its own, and that is normal: the one Gmail stored is recorded
-and follow-ups thread on it). Nothing goes out freely before Gmail is proven to keep the marker (otherwise a send
+Nothing goes out from an account whose inbound mail was not fully read this tick or failed to apply, nor to any
+company with a touch on that account (a missed reply could mean mail to someone who already answered, or their
+colleague): those messages wait as `inbound_unread`, and every other company goes on. Until the per-account loop
+the tick reads and sends as one account, so such a tick sends nothing.
+
+Every email carries the sender's marker, `X-Outreach-Id`, the token it claimed before the call; a send in doubt is
+found in Sent by that marker, never by its Message-ID (Gmail's API replaces the Message-ID the sender sets with
+one of its own, and that is normal: the one Gmail stored is recorded and follow-ups thread on it). Nothing goes out freely before Gmail is proven to keep the marker (otherwise a send
 in doubt could never be found in Sent, and would go out twice): the proof is this sender's first marked email read
 back from Gmail by its Gmail id (`proof.verify_marker`). Nothing older counts, neither an imported email's check
 (`verify_imported`) nor an email sent before the marker. Until then exactly one marked email may be claimed, ever,
@@ -230,7 +233,7 @@ class _Tick:
         self.would_send: int | None = None
         self.waiting: dict[str, int] = {}
         self.counts = Counter()
-        self.hold: str | None = None  # why nothing may be sent this tick, though a message is ready (inbound)
+        self.unread: set[int] = set()  # the accounts whose inbound mail this tick did not fully read or apply
         self.read_account: int | None = None  # the account whose Sent the step 4 scans read
 
     # -- the frame ----------------------------------------------------------------------------------------------
@@ -334,7 +337,7 @@ class _Tick:
                 self._apply(found, read)
                 self._reclock()
                 picked = self._pick(old_loaded)
-                if picked is not None and (self.hold is not None or not self._prechecked(picked)):
+                if picked is not None and (not self._read_in_full() or not self._prechecked(picked)):
                     picked = None
             finally:
                 if self.conn.in_transaction:
@@ -347,9 +350,14 @@ class _Tick:
             self._apply(found, read)
         self._reclock()
         picked = self._pick(old_loaded)
-        if picked is not None and self.hold is None:
+        if picked is not None and self._read_in_full():
             self._send(picked)
         return True
+
+    def _read_in_full(self) -> bool:
+        """The sending account's inbound mail was fully read and applied this tick. The verdicts already hold its
+        messages when it was not (`inbound_unread`); this is the same rule checked again at the send."""
+        return self._account_row().account_id not in self.unread
 
     def _reclock(self) -> None:
         """Read the clock again just before the pick: the Gmail reads can be long, and the window, the gaps and the
@@ -434,7 +442,8 @@ class _Tick:
         """Step 4, with no transaction open."""
         found = {}
         # This tick's one client is this account's; its scans are reconciled against the same account (step 5).
-        account_id = self.read_account = self._account_row().account_id
+        account = self._account_row()
+        account_id = self.read_account = account.account_id
         for u in claim.unclear(self.conn, account_id):
             if u.stored is not None:
                 continue  # settled from the ids Gmail kept, no scan needed
@@ -449,11 +458,11 @@ class _Tick:
                               "it stays in doubt until a later tick")
                 continue
             found[u.message_id] = (hit, complete, u.rfc_id)
-        snap = inbound.snapshot(self.conn, now=self.now, cfg=self.cfg)
-        read = inbound.read_inbound(self.client, snap, cfg=self.cfg, now=self.now)
+        read = inbound.read_inbound(self.conn, self.client, account, cfg=self.cfg, now=self.now)
         if not read.complete:
-            self.hold = "inbound"
-            self._partial("Gmail mail was not fully read; the rest is read next tick, and nothing is sent until then")
+            self.unread.add(account.account_id)
+            self._partial(f"Gmail mail on {account.cfg.address} was not fully read; the rest is read next tick, and "
+                          "nothing goes from it or to a company it emailed until then")
         if not self.dry_run:
             verified = inbound.verify_imported(self.conn, self.client, now=self.now)
             self.counts["verified"] = verified["verified"]
@@ -494,14 +503,15 @@ class _Tick:
                         "sender's log.", at=stamp)
         self.counts["requeued"] = claim.requeue_failed(conn, now=stamp, cfg=cfg)
         self.reconciled = {**self.reconciled, "requeued": self.counts["requeued"], "leftover": self.counts["leftover"]}
+        account = accounts.by_id(conn, cfg, self.read_account) or self._account_row()
         try:
-            self.inbound = inbound.apply_inbound(conn, read, account=self.account, now=now, cfg=cfg,
-                                                 notify=self.notify)
+            self.inbound = inbound.apply_inbound(conn, read, account, now=now, cfg=cfg, notify=self.notify)
         except Exception as err:
             if not conn.in_transaction:
                 raise
-            self.hold = "inbound"
-            self._partial(f"Gmail mail could not be applied ({_text(err)}); nothing is sent until it is")
+            self.unread.add(account.account_id)
+            self._partial(f"Gmail mail on {account.cfg.address} could not be applied ({_text(err)}); nothing goes "
+                          "from it or to a company it emailed until it is")
         self.counts["replies"] = self.inbound.get("replies", 0)
         self.counts["autoReplies"] = self.inbound.get("auto_replies", 0)
         self.counts["bounces"] = self.inbound.get("bounces", 0)
@@ -568,7 +578,8 @@ class _Tick:
         stage = proof.phase(self.conn, account_id)
         if gate is None and stage not in proof.OPEN:
             gate = "message_id_unproven"
-        verdicts = queue.verdicts(self.conn, self.now, self.cfg, day=self.day, gate=gate)
+        verdicts = queue.verdicts(self.conn, self.now, self.cfg, day=self.day, gate=gate,
+                                  unread=frozenset(self.unread))
         if gate is None and stage == proof.FIRST_SEND:
             verdicts = queue.first_only(verdicts)  # one email goes alone; every other waits for its check
         self.waiting = dict(Counter(v.reason for v in verdicts if v.reason != "ready"))

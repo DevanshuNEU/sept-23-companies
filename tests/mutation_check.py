@@ -899,6 +899,33 @@ MUTATIONS = [
     (SENDING / "ramp.py", "effective_limit returns the start limit on a warning day",
      "return _step_down(start, cfg) if lowered else start", "return start",
      "test_effective_limit_is_one_level_lower_after_a_warning"),
+    # ---- sending: inbound mail per account (#9 multi-sender ruling, 2026-11-12) -------------------------------------
+    (SENDING / "inbound.py", "per account: a thread id matches every mailbox's touches, so a reply lands on another",
+     "f\"AND t.gmail_thread_id <> '' AND {_ON_ACCOUNT}\", (account_id,))}",
+     "f\"AND t.gmail_thread_id <> '' AND ? > 0\", (account_id,))}",
+     "test_same_gmail_thread_id_in_two_mailboxes_not_confused"),
+    (SENDING / "inbound.py", "per account: every account writes account 1's cursor",
+     "            conn.execute(\"UPDATE sender_account SET history_id = ? WHERE account_id = ?\",\n"
+     "                         (read.new_history_id, account_id))",
+     "            conn.execute(\"UPDATE sender_account SET history_id = ? WHERE account_id = 1 AND ? > 0\",\n"
+     "                         (read.new_history_id, account_id))",
+     "test_cursor_per_account"),
+    (SENDING / "inbound.py", "per account: the old single cursor is not carried over, so account 1 starts over",
+     "    if not cursor and account_id == 1:", "    if False:",
+     "test_account_1_takes_the_old_sender_cursor_once"),
+    (SENDING / "inbound.py", "dead addresses: a bounce leaves its address off the list",
+     "    _list_the_bounced(conn, touch_id, meta, received)\n", "",
+     "test_bounce_adds_bounced_address"),
+    (SENDING / "queue.py", "inbound unread: a failed read no longer holds the companies that account emailed",
+     "        unread = unread or p.unread_companies.get(q.company_id)\n", "",
+     "test_failed_read_on_account_1_holds_only_its_companies"),
+    (SENDING / "queue.py", "inbound unread: the hold check is removed, so mail goes before replies are read",
+     "    if unread:\n        return \"inbound_unread\", None",
+     "    if False:\n        return \"inbound_unread\", None",
+     "test_a_failed_read_waits_as_inbound_unread"),
+    (PLAN / "people.py", "dead addresses: a found person is stored with an address that bounced before",
+     "        if _bounced_before(conn, email):", "        if False:",
+     "test_an_address_that_bounced_before_is_refused"),
 
     # ---- importer/ (#17 Part A) ---------------------------------------------------------------------------------
     (IMPORTER / "write.py", "a plan with a held record is applied instead of refused",

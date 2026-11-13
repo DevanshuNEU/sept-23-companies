@@ -997,6 +997,70 @@ class AccountsQueueTest(Base):
         self.assertEqual(verdict.reason, "not_business_day")
         self.assertEqual(verdict.earliest_at, ny(30, 8, 0))  # the 27th is a holiday too
 
+    def unread(self, *addresses, now=MON):
+        """The verdicts while the reads of these accounts are incomplete or failed."""
+        held = frozenset(self.ids[a] for a in addresses)
+        return {v.message_id: v for v in queue.verdicts(self.db, now, self.cfg, self.rows, day=None, gate=None,
+                                                        unread=held)}
+
+    def test_failed_read_on_account_1_holds_only_its_companies(self):
+        # Company A was emailed from account 1; its new first email goes from the general account.
+        seed_sent(self.db, self.person(), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GMAIL])
+        _, at_a = self.approve()
+        # Company B has nothing on account 1 (its own queued touch has no account yet).
+        b = seed_company(self.db, "B")
+        _, at_b = self.approve(company=b)
+        # Company C has a touch sent before touches carried an account: its thread is account 1's.
+        c = seed_company(self.db, "C")
+        seed_sent(self.db, self.person(company=c), at=ny(2, 8) - timedelta(days=7))
+        _, at_c = self.approve(company=c)
+        # Company E's duplicate D was emailed from account 1: the family counts.
+        d, e = seed_company(self.db, "D"), seed_company(self.db, "E")
+        seed_sent(self.db, self.person(company=d), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GMAIL])
+        self.merge(d, e)
+        _, at_e = self.approve(company=e)
+        # Company F was emailed only from the general account.
+        f = seed_company(self.db, "F")
+        seed_sent(self.db, self.person(company=f), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GENERAL])
+        _, at_f = self.approve(company=f)
+        clear = self.found()
+        self.assertEqual({m: clear[m].reason for m in (at_a, at_b, at_c, at_e, at_f)},
+                         dict.fromkeys((at_a, at_b, at_c, at_e, at_f), "ready"))
+        found = self.unread(GMAIL)
+        for held in (at_a, at_c, at_e):
+            self.assertEqual((found[held].reason, found[held].account, found[held].earliest_at),
+                             ("inbound_unread", GENERAL, None), held)
+            self.assertEqual(found[held].text, f"Waits: replies on {GMAIL} could not be read yet.")
+        self.assertEqual((found[at_b].reason, found[at_f].reason), ("ready", "ready"))
+        self.assertEqual(queue.pick(list(found.values()), queue.load_queue(self.db, self.cfg), now=MON,
+                                    cfg=self.cfg, account=GENERAL).message_id, at_b)
+
+    def test_an_unread_account_holds_its_own_messages(self):
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        found = self.unread(GENERAL)
+        self.assertEqual((found[general].reason, found[general].account), ("inbound_unread", GENERAL))
+        self.assertEqual(found[general].text, f"Waits: replies on {GENERAL} could not be read yet.")
+        self.assertEqual(found[sponsor].reason, "ready")
+        self.assertIsNone(queue.pick(list(found.values()), queue.load_queue(self.db, self.cfg), account=GENERAL))
+        # A stop still says stopped.
+        self.db.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                        (self.sponsor_co,))
+        self.assertEqual(self.unread(GENERAL, SPONSOR)[sponsor].reason, "company_closed")
+        self.assertIn("inbound_unread", queue.REASONS)
+        self.assertNotIn("inbound_unread", queue.TIME_REASONS | set(queue.STOP_REASONS))
+        self.assertTrue(queue.REASON_TEXT["inbound_unread"])
+
+    def test_without_accounts_an_unread_primary_holds_everything(self):
+        # The tick until the per-account loop: one account owns every message, so its failed read holds them all.
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        primary = _accounts.primary(self.db, self.cfg)
+        found = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, self.cfg, day=None, gate=None,
+                                                                unread=frozenset({primary.account_id}))}
+        self.assertEqual(found, {general: "inbound_unread", sponsor: "inbound_unread"})
+        self.assertEqual({v.reason for v in queue.verdicts(self.db, MON, self.cfg, day=None, gate=None)}, {"ready"})
+
     def test_spacing_per_account(self):
         later = ny(2, 9, 30)
         self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = ?",

@@ -135,6 +135,18 @@ class SubmitCandidatesTest(FindingCase):
         self.assertEqual(self.attempts(), [({"found": 1, "run_id": 0, "version": "mcp:3"}, "claude", self.acme)])
         self.assertEqual(self.target_ids(), [])  # the person it found takes the company off the list
 
+    def test_an_address_that_bounced_before_is_dropped_and_never_stored(self):
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source, source_ref) "
+                        "VALUES ('ada@acme.example', '2026-11-01T00:00:00Z', 'marked', 'person:9')")
+        cand = candidate(email="Ada@Acme.example")
+        cand["sources"].append({"kind": "email", "url": "https://acme.example/contact", "label": "Contact",
+                                "quote": "Ada Lovelace, ada@acme.example"})
+        got = self.submit(cand)
+        self.assertTrue(any("ada@acme.example" in x and "bounced_address" in x for x in got["problems"]),
+                        got["problems"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM person WHERE email IS NOT NULL").fetchone()[0], 0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM person_source WHERE kind = 'email'").fetchone()[0], 0)
+
     def test_the_stores_rejections_come_back_as_rejected_with_why(self):
         got = self.submit(candidate("Grace Hopper", url="https://www.linkedin.com/in/grace"),
                           candidate("Alan Turing", quote="A Software Engineer at Acme Robotics"))

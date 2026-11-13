@@ -386,6 +386,17 @@ class AddCandidateTest(unittest.TestCase):
             self.assertEqual((count(self.conn), count(self.conn, "person_source"), count(self.conn, "event")),
                              before, kw)
 
+    def test_an_address_that_bounced_before_is_refused(self):
+        """An address on the dead-address list (any account, any case) is never stored again."""
+        self.conn.execute("INSERT INTO bounced_address(address, first_seen_at, source, source_ref) "
+                          "VALUES ('Pat@Acme.example', '2026-11-01T00:00:00Z', 'bounce', 'm1')")
+        before = (count(self.conn), count(self.conn, "person_source"), count(self.conn, "event"))
+        result = self.add(email="pat@acme.example", sources=[SourceInput(
+            "email", "https://acme.example/c", quote="pat@acme.example", email_basis="published")])
+        self.assertEqual(result, AddResult(None, False, "bounced_address"))
+        self.assertEqual((count(self.conn), count(self.conn, "person_source"), count(self.conn, "event")), before)
+        self.assertTrue(self.add().created)  # the same person with no address is fine
+
     def test_an_address_that_only_contains_the_quoted_one_is_refused(self):
         """Review fix E, write side: the address must be on the page as a whole address."""
         def backed(email, quote_text):

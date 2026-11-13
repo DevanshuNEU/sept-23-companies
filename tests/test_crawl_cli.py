@@ -259,10 +259,11 @@ class LaunchdTemplateTest(unittest.TestCase):
         self.assertNotIn("{{", text)  # no placeholder other than the two
         return text
 
-    def test_plist_is_valid_and_runs_every_1800_seconds(self):
+    def test_plist_is_valid_and_runs_every_300_seconds(self):
+        # #251: a tick every 5 minutes, so a board on its 15 minute wait is read within 20 minutes of its last read.
         plist = plistlib.loads(self.filled().encode("utf-8"))
         self.assertEqual(plist["Label"], "com.devanshu.outreach-crawl")
-        self.assertEqual(plist["StartInterval"], 1800)
+        self.assertEqual(plist["StartInterval"], 300)
         self.assertEqual(plist["WorkingDirectory"], "/live/checkout")
         self.assertEqual(plist["ProgramArguments"],
                          ["/live/checkout/.venv/bin/python", "-m", "outreach.crawl", "tick"])

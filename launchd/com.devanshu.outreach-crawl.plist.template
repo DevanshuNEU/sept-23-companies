@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The crawl tick (#21): every 30 minutes, read the due boards within the tick budget, then (on the first tick of each
+  The crawl tick (#21): every 5 minutes (#251, was 30), read the due boards within the tick budget, then (on the first tick of each
   New York day) the slug probe for up to 50 companies with no board, then the due watched careers pages. One log line
   per tick. A tick that starts while another still runs finds the crawl lock held and exits 0.
 
@@ -28,7 +28,7 @@
     <string>tick</string>
   </array>
   <key>StartInterval</key>
-  <integer>1800</integer>
+  <integer>300</integer>
   <key>StandardOutPath</key>
   <string>{{LOG_PATH}}</string>
   <key>StandardErrorPath</key>

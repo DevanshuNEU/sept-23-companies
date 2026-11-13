@@ -148,7 +148,8 @@ def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | 
         claim.reconcile(conn, found, now=iso(now), cfg=cfg, rng=rng)
         claim.requeue_failed(conn, now=iso(now), cfg=cfg)
         day = ramp.open_day(conn, _accounts.primary(conn, cfg), now, cfg)
-    picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg), now=now, cfg=cfg)
+    picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg), now=now, cfg=cfg,
+                        account=cfg.from_address)
     if picked is None:
         return None
     try:

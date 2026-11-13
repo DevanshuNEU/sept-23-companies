@@ -5,7 +5,8 @@ A walk down the approved queue on a virtual clock. At each moment it asks the se
 company and the day, and moves on: to the next moment a wait ends when nothing can go. So the business days, the
 recipient's hours, the per-company limit and gap and the daily limit are the sender's, not a second copy of them.
 
-Two things are estimates. Spacing between sends is random (`human.spread_gap`), so the walk uses its expected
+Each sending account (`Prepared.senders`) places its own messages with its own daily limit and spacing; the company
+counts and gaps are shared, as in the sender. Two things are estimates. Spacing between sends is random (`human.spread_gap`), so the walk uses its expected
 gap (`human.expected_gap_minutes`: the formula with its factor at 1.0); the first send of a day
 and each company's gap use their fixed offsets. Later days
 use today's limit as it stands (the ramp may allow more, so mail can only come earlier than shown). Read only: the
@@ -13,6 +14,7 @@ store is read once, by `queue.prepare`. Projected times can run up to about 15 m
 sender ticks every 2 minutes and each gap lands on the next tick), and a claim in doubt (`sending`, `send_unknown`)
 counts as a send.
 """
+import dataclasses
 from datetime import datetime, timedelta, timezone
 
 from outreach.sending import calendar as cal
@@ -30,27 +32,38 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
     cannot go within `MAX_DAYS` days is absent."""
     now = now.astimezone(timezone.utc)
     end = now + timedelta(days=MAX_DAYS)
+    # A pause (his, or an account's hard block) is not a reason to show nothing: the walk runs as if he resumed now.
+    p = dataclasses.replace(p, paused=False,
+                            days={a: dataclasses.replace(d, paused=False) for a, d in p.days.items()})
     pending = list(p.queue)
     sends = {company: list(sent) for company, sent in p.sends.items()}
-    sent_by_day = {cal.ny_date(now, cfg): p.sent_today}
-    next_send = p.next_send
+    today = cal.ny_date(now, cfg)
+    sent_by_day = {a: {today: d.sent_today} for a, d in p.days.items()}
+    next_send = {a: d.next_send for a, d in p.days.items()}
     placed: dict[int, datetime] = {}
     at = now
     while pending and at <= end:
         found = queue.decide_all(p, at, cfg, gate=None, pending=pending, sends=sends, sent_by_day=sent_by_day,
-                                 next_send=next_send, limit=p.limit)
-        q = queue.pick(found, pending, now=at, cfg=cfg)  # the sender's pick: earliest window close, then queue order
+                                 next_send=next_send)
+        # The sender's pick for each account: earliest window close, then queue order. After one placement the
+        # queue is decided again at the same moment, so the next account sees that send at its company.
+        account = q = None
+        for account in p.senders:
+            q = queue.pick(found, pending, now=at, cfg=cfg, account=account)
+            if q is not None:
+                break
         if q is not None:
             placed[q.message_id] = at
             sends.setdefault(q.company_id, []).append((at, q.seq == 0))
             day = cal.ny_date(at, cfg)
-            sent_by_day[day] = sent_by_day.get(day, 0) + 1
+            sent_by_day[account][day] = sent_by_day[account].get(day, 0) + 1
             pending.remove(q)
-            # The sender's rule: minutes left in the window of the recipients that can still go today (as decided
-            # at `at`, before this placement) over the sends left.
-            left = max(p.limit - sent_by_day[day], 0)
-            minutes_left = queue.minutes_left_for([v for v in found if v.message_id != q.message_id], pending, at, cfg)
-            next_send = at + timedelta(minutes=human.expected_gap_minutes(minutes_left, left, cfg))
+            # The sender's rule: minutes left in the window of the account's recipients that can still go today (as
+            # decided at `at`, before this placement) over the account's sends left.
+            left = max(p.days[account].limit - sent_by_day[account][day], 0)
+            minutes_left = queue.minutes_left_for([v for v in found if v.message_id != q.message_id], pending, at, cfg,
+                                                  account)
+            next_send[account] = at + timedelta(minutes=human.expected_gap_minutes(minutes_left, left, cfg))
             continue
         later = [v.earliest_at for v in found
                  if v.reason in queue.TIME_REASONS and v.earliest_at is not None and v.earliest_at > at]

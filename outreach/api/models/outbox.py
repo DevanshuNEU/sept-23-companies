@@ -21,8 +21,8 @@ ScheduleReason = Literal[
     "ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
     "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
     "company_held",
-    "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "company_closed", "no_go",
-    "reply_stop", "touch_done",
+    "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "lane_waits",
+    "company_closed", "no_go", "reply_stop", "touch_done",
 ]
 Seq = Literal[0, 1, 2, 3, 4]
 FollowupSeq = Literal[1, 2, 3, 4]

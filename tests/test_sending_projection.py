@@ -178,3 +178,36 @@ class StatusProjectionTest(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerAccountProjectionTest(Base):
+    """With every account in play, each sending account's queue is projected with its own limit and spacing."""
+
+    def test_each_sending_account_projects_its_own_queue(self):
+        from tests.test_sending_queue import GENERAL, SPONSOR, add_fact, lanes_cfg
+        cfg = lanes_cfg()
+        rows = _accounts.sync(self.db, cfg, "2026-11-06T12:00:00Z")
+        sponsor_co = seed_company(self.db, "Sponsor Co")
+        add_fact(self.db, sponsor_co, "everify", "enrolled")
+        general = [self.approve(company=seed_company(self.db, f"G{i}"))[1] for i in range(3)]
+        sponsor = [self.approve(company=sponsor_co)[1]]
+        got = projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)
+        # Both accounts send their first at once: the sponsor account does not wait out the general one's gap.
+        self.assertEqual((got[general[0]], got[sponsor[0]]), (FRI, FRI))
+        gap = timedelta(minutes=human.expected_gap_minutes(queue.minutes_left_for([], [], FRI, cfg), 14, cfg))
+        self.assertEqual(got[general[1]], FRI + gap)
+        # The general account's 15 do not use the sponsor account's day: at its limit, the sponsor one still goes.
+        for i in range(15):
+            seed_sent(self.db, self.person(company=seed_company(self.db, f"S{i}")), at=ny(6, 8, 10),
+                      account_id=rows[GENERAL].account_id)
+        got = projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)
+        self.assertEqual(got[sponsor[0]], FRI)
+        self.assertEqual(got[general[0]], ny(9, 8, 0))
+        self.assertEqual(set(queue.prepare(self.db, FRI, cfg, rows, day=None).senders), {GENERAL, SPONSOR})
+        # A hard block on the sponsor account still projects, as if he resumed now; a signed-out account does not.
+        _accounts.hard_pause(self.db, rows[SPONSOR].account_id, "Gmail said no", "2026-11-06T15:00:00Z")
+        self.assertEqual(projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)[sponsor[0]],
+                         FRI)
+        self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?",
+                        (rows[SPONSOR].account_id,))
+        self.assertNotIn(sponsor[0], projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg))

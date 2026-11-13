@@ -7574,6 +7574,7 @@
               "recruiter_waits",
               "no_address",
               "no_thread",
+              "lane_waits",
               "company_closed",
               "no_go",
               "reply_stop",

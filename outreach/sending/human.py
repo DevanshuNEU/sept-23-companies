@@ -59,9 +59,12 @@ def _fraction(*parts: object) -> float:
     return int.from_bytes(digest[:8], "big") / 2 ** 64
 
 
-def day_start_offset(day: date, cfg: SendConfig) -> timedelta:
-    """How long after the window opens the first send of `day` waits: 0 up to `day_start_jitter_minutes`."""
-    return timedelta(minutes=_fraction("day-start", day.isoformat()) * cfg.day_start_jitter_minutes)
+def day_start_offset(day: date, cfg: SendConfig, account_id: int = 1) -> timedelta:
+    """How long after the window opens the account's first send of `day` waits: 0 up to `day_start_jitter_minutes`,
+    seeded by the account, so two accounts do not start at the same minute. Account 1 keeps the seed it had before
+    accounts existed."""
+    parts = ("day-start", day.isoformat()) if account_id == 1 else ("day-start", account_id, day.isoformat())
+    return timedelta(minutes=_fraction(*parts) * cfg.day_start_jitter_minutes)
 
 
 def company_gap(company_id: int, last_send: datetime, cfg: SendConfig, pace: CompanyPace | None = None) -> timedelta:

@@ -563,8 +563,9 @@ class _Tick:
         if gate is None and stage == proof.FIRST_SEND:
             verdicts = queue.first_only(verdicts)  # one email goes alone; every other waits for its check
         self.waiting = dict(Counter(v.reason for v in verdicts if v.reason != "ready"))
+        # The one account this tick runs until the per-account loop lands.
         picked = queue.pick(verdicts, queue.load_queue(self.conn, self.cfg), self.deps.rng, self.cfg.pick_pool,
-                            now=self.now, cfg=self.cfg)
+                            now=self.now, cfg=self.cfg, account=self.cfg.from_address)
         if stage in (proof.STOPPED, proof.MISSING, proof.IN_DOUBT):
             self._partial(_PHASE_LINE[stage])
             if stage != proof.IN_DOUBT:

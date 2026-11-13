@@ -41,12 +41,18 @@ def sync(conn: sqlite3.Connection, cfg: SendConfig, now: str) -> dict[str, Accou
     return out
 
 
+# A company fact that puts a company in the sponsor lane.
+_SPONSOR_FACT = ("(fact = 'everify' AND value = 'enrolled') OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) "
+                 "OR fact = 'lca'")
+
+
 def lane_of(conn: sqlite3.Connection, company_id: int) -> Literal["sponsor", "general"]:
-    """Sponsor when the company is enrolled in E-Verify, sponsors (or takes OPT only), or has any LCA row."""
+    """Sponsor when the company is enrolled in E-Verify, sponsors (or takes OPT only), or has any LCA row. The whole
+    merge family counts: the survivor and every company merged into it, since a merge does not move evidence."""
     row = conn.execute(
-        "SELECT 1 FROM company_fact WHERE company_id = ? AND ("
-        "(fact = 'everify' AND value = 'enrolled') OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) "
-        "OR fact = 'lca') LIMIT 1", (company_id,)).fetchone()
+        "WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN family f "
+        f"ON c.merged_into = f.id) SELECT 1 FROM company_fact WHERE company_id IN family AND ({_SPONSOR_FACT}) "
+        "LIMIT 1", (canonical_company(conn, company_id),)).fetchone()
     return "sponsor" if row else "general"
 
 
@@ -57,7 +63,7 @@ def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
     thread_missing: the touch's account is not in `accounts`. A touch with a Gmail thread but no account was sent
     before touches carried one, so its thread is account 1's (as everywhere else a NULL account is). A pin to an
     account that does not send (or is not in config) counts as no pin. The company is followed through
-    `merged_into`; a pin on the raw id still counts."""
+    `merged_into`; a pin on the raw id still counts, and the lane reads the sponsor facts of the whole merge family."""
     return routes(conn, cfg, [touch_id], accounts)[touch_id]
 
 
@@ -74,9 +80,9 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
     companies = company_map(conn)
     pins = {row["company_id"]: row["account_id"] for row in conn.execute(
         "SELECT company_id, account_id FROM company_sender")}
-    sponsors = {row[0] for row in conn.execute(
-        "SELECT DISTINCT company_id FROM company_fact WHERE (fact = 'everify' AND value = 'enrolled') "
-        "OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) OR fact = 'lca'")}
+    # Each sponsor fact counts for its company's survivor: a merge does not move evidence.
+    sponsors = {resolve_company(companies, row[0])[-1] if row[0] in companies else row[0] for row in conn.execute(
+        f"SELECT DISTINCT company_id FROM company_fact WHERE {_SPONSOR_FACT}")}
     by_id = {a.account_id: a for a in accounts.values()}
     out: dict[int, tuple[AccountRow | None, str]] = {}
     for touch in touches:

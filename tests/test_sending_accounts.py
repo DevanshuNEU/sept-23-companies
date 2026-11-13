@@ -141,6 +141,17 @@ class AccountsTest(unittest.TestCase):
         row, reason = accounts.route(self.conn, cfg, tid, self.synced(cfg))
         self.assertEqual((row.cfg.address, reason), (SPONSOR, "lane"))
 
+    def test_a_sponsor_fact_on_the_merged_away_company_counts_for_the_survivor(self):
+        # A merge does not move evidence: the loser's E-Verify fact still makes the survivor a sponsor company.
+        loser = seed_company(self.conn, "Loser")
+        survivor, tid = self.company_touch("Survivor")
+        self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
+                          "WHERE company_id = ?", (survivor, loser))
+        add_fact(self.conn, loser, "everify", "enrolled")
+        self.assertEqual(accounts.lane_of(self.conn, survivor), "sponsor")
+        self.assertEqual(accounts.lane_of(self.conn, loser), "sponsor")
+        self.assertEqual(accounts.route(self.conn, self.cfg, tid, self.synced()), (None, "lane_waits"))
+
     def test_pin_on_loser_before_merge_still_counts_and_survivor_pin_wins(self):
         loser, survivor, tid = self.merged()
         cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))

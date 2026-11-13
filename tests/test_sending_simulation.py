@@ -220,9 +220,9 @@ class StopRulesTest(unittest.TestCase):
         self.assertEqual((day.outcome, day.effective_limit), ("hard_block", 20))
         self.assertEqual(self.after(r, ny(D[2], "11:04")), [], "the day is already past its lowered limit")
 
-    def test_a_high_bounce_rate_never_pauses(self):
+    def test_a_bounce_before_30_are_sent_never_pauses(self):
         r = self.run_scenario(short(1, [morning(1, 40), Event(ny(D[1], "10:00"), "bounce", {"nth": 0})]))
-        self.assertNotIn("hard_bounce_rate", self.kinds(r))
+        self.assertNotIn("bounce_rate_hard", self.kinds(r))
         self.assertEqual(self.paused(r)["paused"], 0)
         self.assertEqual(r.notices, [])
 

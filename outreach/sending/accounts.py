@@ -128,15 +128,16 @@ class Pause:
 
 
 def pause_of(conn: sqlite3.Connection, account_id: int) -> Pause | None:
-    """Read only: why this account may not send, or None. Sender row 1 (his button, or an old hard block) pauses
-    every account; an account's own row holds its hard block."""
-    row = conn.execute("SELECT paused, pause_kind, paused_reason, paused_at FROM sender WHERE sender_id = 1").fetchone()
-    if row["paused"]:
-        return Pause(row["pause_kind"] or "by_you", row["paused_reason"], row["paused_at"], own=False)
+    """Read only: why this account may not send, or None. The account's own hard block comes first (it needs his
+    acknowledgement and he must see its reason), then sender row 1 (his button, or an old hard block), which
+    pauses every account."""
     own = conn.execute("SELECT paused, pause_kind, paused_reason, paused_at FROM sender_account "
                        "WHERE account_id = ?", (account_id,)).fetchone()
     if own is not None and own["paused"]:
         return Pause(own["pause_kind"], own["paused_reason"], own["paused_at"], own=True)
+    row = conn.execute("SELECT paused, pause_kind, paused_reason, paused_at FROM sender WHERE sender_id = 1").fetchone()
+    if row["paused"]:
+        return Pause(row["pause_kind"] or "by_you", row["paused_reason"], row["paused_at"], own=False)
     return None
 
 

@@ -138,10 +138,9 @@ def _event(ctx: WriteCtx, kind: str, detail: dict) -> None:
 
 
 def pause_sending(ctx: WriteCtx, revision: int, cfg: SendConfig, *, old_sender_loaded: bool) -> SendingStatus:
-    """His pause. Already paused (by him, or a hard block on sender row 1 or on an account) writes nothing and answers with the status: the
+    """His pause. Already paused (by him, or a hard block on sender row 1) writes nothing and answers with the status: the
     sender is already stopped, and a hard block must never turn into a pause a plain resume could clear."""
-    blocked = ctx.conn.execute("SELECT 1 FROM sender_account WHERE paused = 1").fetchone() is not None
-    if not _sender(ctx.conn)["paused"] and not blocked:
+    if not _sender(ctx.conn)["paused"]:
         bump(ctx.conn, "sender", "sender_id", 1, revision,
              {"paused": 1, "pause_kind": "by_you", "paused_reason": PAUSED_TEXT, "paused_at": ctx.now}, at=ctx.now)
         _event(ctx, "paused", {"text": "Sending paused by you"})
@@ -160,12 +159,14 @@ def resume_sending(ctx: WriteCtx, revision: int, acknowledge_block: bool, cfg: S
                                "ORDER BY account_id").fetchall()
     if row["paused"] or blocked:
         hard = bool(blocked) or row["pause_kind"] == "hard_block"
-        reason = row["paused_reason"] if row["paused"] else blocked[0]["paused_reason"]
+        reason = blocked[0]["paused_reason"] if blocked else row["paused_reason"]
         if hard and not acknowledge_block:
             reason = reason or "The sender stopped sending to protect the account."
             raise ApiProblem("not_allowed", f"Sending stopped on a hard block. {reason} Confirm that you read this "
                                             f"to resume. {NOT_SAVED}")
-        cleared = row["pause_kind"] if row["paused"] else "hard_block"
+        cleared = "hard_block" if hard else row["pause_kind"]
+        if blocked and row["paused"] and row["pause_kind"] == "by_you":
+            cleared = "hard_block and by_you"
         if row["paused"]:
             bump(ctx.conn, "sender", "sender_id", 1, revision,
                  {"paused": 0, "pause_kind": None, "paused_reason": "", "paused_at": None}, at=ctx.now)

@@ -167,6 +167,10 @@ def note_signal(conn: sqlite3.Connection, kind: str, *, account: AccountRow, at:
         raise ValueError(f"unknown signal kind {kind!r}")
     stamp = now.astimezone(timezone.utc).strftime(ISO_FMT)
     aid = account.account_id
+    if kind in signals.HARD_KINDS and conn.execute("SELECT 1 FROM sender_account WHERE account_id = ?",
+                                                   (aid,)).fetchone() is None:
+        # Nothing to pause and nobody to tell: `accounts.sync` (the tick's first step) creates the row.
+        raise ValueError(f"account {aid} has no sender_account row, so {kind} cannot pause it")
     day = signals.signal_day(conn, aid, at, cfg, now=now)
     if not signals.record_signal(conn, kind, account_id=aid, at=at, detail={**detail, "day": day.isoformat()},
                                  key=key):

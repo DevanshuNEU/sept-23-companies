@@ -75,7 +75,7 @@ class BounceRateLast100Test(Base):
 
 
 class BounceRateHardTest(Base):
-    def test_30_sent_one_bounce_is_no_pause_and_50_sent_one_bounce_is(self):
+    def test_the_hard_rule_needs_30_sent_and_fires_at_2_percent(self):
         touches = self.first_emails(self.a2, 30, ny(0))
         bounce(self.db, touches[0], ny(0, 12))
         bounced, sent = signals.bounce_rate_last_100(self.db, self.a2.account_id)
@@ -153,6 +153,62 @@ class HardPauseScopeTest(Base):
                                               "ORDER BY event_id")]
         self.assertEqual(keys, [f"notify:gmail_limit:{self.a2.account_id}:2026-11-02",
                                 f"notify:gmail_limit:{self.a3.account_id}:2026-11-02"])
+
+
+class NoAccountRowTest(Base):
+    def test_a_hard_signal_with_no_row_raises_and_tells_nobody(self):
+        self.db.execute("DELETE FROM sender_account WHERE account_id = ?", (self.a2.account_id,))
+        with self.assertRaises(ValueError):
+            self.note(self.a2, "gmail_limit", ny(0, 11))
+        self.assertEqual(self.notices, [])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE kind IN ('gmail_limit', 'hard_block', "
+                                         "'notified')").fetchone()[0], 0)
+
+
+class PauseVisibilityTest(Base):
+    def pause_by_you(self):
+        self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'Paused by you', "
+                        "paused_at = ? WHERE sender_id = 1", (STAMP,))
+
+    def ctx(self):
+        ctx = mock.Mock(conn=self.db, now=STAMP)
+        ctx.event_key = lambda i: f"k:{self.keys}:{i}"
+        return ctx
+
+    def test_an_account_hard_block_shows_over_his_pause(self):
+        self.pause_by_you()
+        self.note(self.a1, "gmail_limit", ny(0, 11))
+        pause = accounts.pause_of(self.db, self.a1.account_id)
+        self.assertEqual((pause.kind, pause.own), ("hard_block", True))
+        self.assertIn("Gmail", pause.reason)
+        # An account without a block still shows his pause.
+        self.assertEqual(accounts.pause_of(self.db, self.a2.account_id).kind, "by_you")
+
+    def test_resume_names_the_blocks_reason_and_records_what_was_cleared(self):
+        from outreach.api.errors import ApiProblem
+        from outreach.api.queries import sending as q
+        self.pause_by_you()
+        self.note(self.a1, "gmail_limit", ny(0, 11))
+        block_reason = self.acct_row(self.a1)["paused_reason"]
+        revision = self.sender()["revision"]
+        with self.assertRaises(ApiProblem) as raised:
+            q.resume_sending(self.ctx(), revision, False, CFG, old_sender_loaded=False)
+        self.assertIn(block_reason, str(raised.exception))
+        self.assertNotIn("Paused by you", str(raised.exception))
+        q.resume_sending(self.ctx(), revision, True, CFG, old_sender_loaded=False)
+        event = self.db.execute("SELECT detail FROM event WHERE kind = 'resumed'").fetchone()
+        import json
+        detail = json.loads(event["detail"])
+        self.assertEqual((detail["cleared"], detail["reason"]), ("hard_block and by_you", block_reason))
+        self.assertEqual(self.sender()["paused"], 0)
+        self.assertEqual(self.acct_row(self.a1)["paused"], 0)
+
+    def test_his_pause_works_while_another_account_is_hard_blocked(self):
+        from outreach.api.queries import sending as q
+        self.note(self.a3, "gmail_limit", ny(0, 11))
+        q.pause_sending(self.ctx(), self.sender()["revision"], CFG, old_sender_loaded=False)
+        row = self.sender()
+        self.assertEqual((row["paused"], row["pause_kind"]), (1, "by_you"))
 
 
 class ResumeClearsAccountBlocksTest(Base):

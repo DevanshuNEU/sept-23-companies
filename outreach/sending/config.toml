@@ -11,7 +11,7 @@ day_tz = "America/New_York"
 clean_bounce_rate = 0.02
 bounce_days = 3
 
-# No hard block on the bounce rate (#9, 2026-10-30): Apollo's addresses are not guaranteed, so bounces are normal.
+# Hard block on the bounce rate (#9 multi-sender ruling, 2026-11-12): 2% of an account's last 100 first emails, once 30 are sent, pauses that account.
 
 # Hard block: two "asked to stop" tags within 7 days.
 stop_replies_hard = 2

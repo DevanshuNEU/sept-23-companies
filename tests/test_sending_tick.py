@@ -319,6 +319,16 @@ class GateTest(Base):
         self.assertEqual(len(self.gmail.sent), 2)
         self.assertEqual((self.sender()["paused"], self.sender()["pause_kind"]), (1, "by_you"))
 
+    def test_a_hard_block_with_no_account_row_still_pauses_after_the_ticks_sync(self):
+        self.db.execute("DELETE FROM sender_account")  # a store that signed in after migration 0015 has none
+        self.approve()
+        self.gmail.fail_next_send(GmailError("rate_limit", 429, "Too many requests"))
+        self.tick()
+        row = self.account_row()
+        self.assertIsNotNone(row, "the tick's sync created the row")
+        self.assertEqual((row["paused"], row["pause_kind"]), (1, "hard_block"))
+        self.assertEqual(len(self.notices), 1)
+
     def test_hard_block_on_429_pauses_and_the_message_is_retried_after_resume(self):
         mid = self.approve()
         self.gmail.fail_next_send(GmailError("rate_limit", 429, "Too many requests"))

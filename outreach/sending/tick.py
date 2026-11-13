@@ -475,6 +475,7 @@ class _Tick:
     def _apply(self, found: dict, read: inbound.InboundRead) -> None:
         """Step 5, inside the caller's transaction."""
         conn, cfg, now, stamp = self.conn, self.cfg, self.now, self.stamp
+        accounts.sync(conn, cfg, stamp)  # the only thing that creates sender_account rows
         self.reconciled = claim.reconcile(conn, found, now=stamp, cfg=cfg, rng=self.deps.rng)
         self.counts["reconciled"] = self.reconciled["sent"] + self.reconciled["failed"]
         if self.reconciled["errors"]:
@@ -512,7 +513,8 @@ class _Tick:
 
     def _bounce_rules(self) -> None:
         """The bounce rule on whatever wrote the bounces (Gmail inbound or another path): today's 3-day rate when a
-        bounce is dated today. Its key matches inbound's, so the warning fires once. A bounce rate never pauses."""
+        bounce is dated today. Its key matches inbound's, so the warning fires once. 2% of the account's last 100 first emails
+        bounced, once 30 are sent, pauses that account (#9 multi-sender ruling, 2026-11-12)."""
         conn, cfg = self.conn, self.cfg
         account = self._account_row()
         signal = {"cfg": cfg, "notify": self.notify, "now": self.now, "at": self.stamp, "account": account}

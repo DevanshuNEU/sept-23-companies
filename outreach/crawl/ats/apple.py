@@ -100,8 +100,8 @@ def _parse(job: object) -> JobRef | None:
     title = _text(job.get("postingTitle"))
     if not native_id or not title:
         return None
-    places = [p for p in job.get("locations") or [] if isinstance(p, dict)] if isinstance(job.get("locations"),
-                                                                                         list) else []
+    locations = job.get("locations")
+    places = [p for p in locations if isinstance(p, dict)] if isinstance(locations, list) else []
     shown = [_text(p.get("name")) for p in places if _text(p.get("name"))]
     summary = job.get("jobSummary")
     body = summary.strip() if isinstance(summary, str) else ""

@@ -239,11 +239,14 @@ class ConcurrencyTests(ViewCase):
         self.assertLess(waited, 1.4)
 
     def test_a_waiter_on_a_slow_shared_computation_is_busy_at_its_own_deadline(self):
+        # #189: the computation takes 3 s and every waiter must answer near its 1 s deadline, well before the
+        # computation ends. The 2.5 s bound keeps that meaning with room for a busy CI runner (1.4 s against a 1.5 s
+        # computation failed there three times on 2026-11-13 at 1.42 to 1.57 s).
         self.configure(queue_wait_seconds=1)
-        self.slow_shell(1.5)
+        self.slow_shell(3.0)
         got = self.run_together(["/api/shell"] * 3)
         self.assertEqual({res.status_code for res, _ in got}, {503})
-        self.assertLess(max(t for _, t in got), 1.4)
+        self.assertLess(max(t for _, t in got), 2.5)
         self.assertEqual(self.get("/api/shell").status_code, 200)  # the computation finished and filled the cache
         self.assertEqual(self.cache().computed, 1)
 

@@ -124,6 +124,56 @@ class EightfoldListTests(unittest.TestCase):
         self.assertEqual((r.result, client.requests), ("error", []))
 
 
+def head(routes, token="micron"):
+    client = FakeClient(routes)
+    return EightfoldAdapter(client).head(token), client
+
+
+class EightfoldHeadTests(unittest.TestCase):
+    """The head read (#263): page 1 of the search, already newest first, one request."""
+
+    def test_page_one_is_a_partial_head_read(self):
+        r, client = head({url(0): page(1159, [pos(n) for n in range(10)])})
+        self.assertEqual(client.requests, [url(0)])
+        self.assertIn("sort_by=timestamp", client.requests[0])
+        self.assertEqual((r.result, r.partial, r.head, len(r.jobs), r.validators), ("ok", True, True, 10, Validators()))
+        self.assertIn("10 of 1159", r.partial_note)
+        j = r.jobs[0]
+        self.assertEqual((j.native_id, j.url, j.title), ("44890000", "https://careers.micron.com/careers/job/44890000",
+                                                         "Software Engineer, New College Grad"))
+
+    def test_the_microsoft_tenant_reads_its_own_host(self):
+        u = search_url("apply.careers.microsoft.com", "microsoft.com", 0)
+        r, client = head({u: page(30, [pos(1)])}, token="microsoft")
+        self.assertEqual((r.result, client.requests), ("ok", [u]))
+
+    def test_eightfold_is_a_head_ats(self):
+        from outreach.crawl.config import load_crawl_config
+        self.assertIn("eightfold", load_crawl_config().tiers.head_ats)
+
+    def test_an_empty_page_is_unchanged(self):
+        r, _ = head({url(0): page(0, [])})
+        self.assertEqual((r.result, r.head, r.jobs), ("unchanged", True, ()))
+
+    def test_a_broken_row_is_skipped_and_only_broken_rows_is_an_error(self):
+        r, _ = head({url(0): page(30, [pos(1), pos(2, name="")])})
+        self.assertEqual([j.native_id for j in r.jobs], ["44890001"])
+        r, _ = head({url(0): page(30, [pos(2, name="")])})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
+
+    def test_wrong_shapes_and_refusals_are_errors(self):
+        for name, resp in {"html": text_response("<html>Just a moment</html>"),
+                           "rate limited": text_response("Please try again later", status=429),
+                           "no positions": json_response({"data": {"count": 3}}), "500": status_response(500),
+                           "network": FetchError("network", "down")}.items():
+            r, _ = head({url(0): resp})
+            self.assertEqual((r.result, r.jobs), ("error", ()), name)
+
+    def test_a_bad_token_makes_no_request(self):
+        r, client = head({}, token="../x")
+        self.assertEqual((r.result, client.requests), ("error", []))
+
+
 class EightfoldBodyTests(unittest.TestCase):
     def body(self, resp, native_id="44890001"):
         client = FakeClient({detail_url(HOST, DOMAIN, native_id): resp})

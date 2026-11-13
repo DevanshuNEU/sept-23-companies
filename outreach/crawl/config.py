@@ -19,6 +19,8 @@ ATS_HOSTS = {
     "rippling": "rippling.com", "breezy": "breezy.hr", "pinpoint": "pinpointhq.com", "teamtailor": "teamtailor.com",
     "recruitee": "recruitee.com", "bamboohr": "bamboohr.com", "jazzhr": "applytojob.com", "amazon": "amazon.jobs",
     "eightfold": "eightfold.ai",  # a tenant on its own host (careers.micron.com) is its own bucket
+    # Single-company sites (#263): the exact host, so the rest of google.com and apple.com never shares their bucket.
+    "google": "www.google.com", "apple": "jobs.apple.com",
 }
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",

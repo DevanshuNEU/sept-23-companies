@@ -205,7 +205,7 @@ out_always = [
   "ios", "android", "mobile", "embedded", "firmware", "hardware", "fpga", "asic",
   "salesforce", "servicenow", "sap", "pega", "cobol", "mainframe",
   "data scientist", "data scientists", "data analyst", "data analysts",
-  "site reliability", "sre", "devops", "devsecops", "mlops",
+  "site reliability", "sre", "devops", "devsecops", "mlops", "ai ops", "aiops",
   "professional services", "support engineer", "technical support", "sales engineer", "solutions engineer",
   "solution engineer", "solutions architect", "implementation", "customer success", "database administrator", "dba",
 ]
@@ -407,6 +407,8 @@ non_us_countries = [
 us_possible = ["north america", "americas", "north & south america", "north and south america"]
 # refresh/finalcheck.py:69-80 NONUS (city names found only outside the US; Tel Aviv, Munich, Toronto, Tbilisi and Bengaluru are the ones the design names)
 non_us_cities = [
+  # 2026-11-13 sanity check: Thoughtworks' "TW Xi'an" was listed
+  "xi'an", "xian", "tianjin", "dalian",
   # #212 (2026-11-12): places from the job list audit and his passes
   "cape town", "wien", "vienna", "bucharest", "malaga", "málaga",
   "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "noida", "gurgaon", "gurugram", "mumbai", "delhi",

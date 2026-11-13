@@ -215,6 +215,8 @@ class ConfigTests(unittest.TestCase):
         # #257: the known staffing firms; every key is required and checked.
         self.assertEqual(load_pipeline_config().staffing.client_min, 3)
         self.assertIn("Raydar", load_pipeline_config().staffing.known)
+        for name in ("Clera", "Weekday AI"):  # 2026-11-13, his call: recruiting platforms
+            self.assertIn(name, load_pipeline_config().staffing.known)
         with self.assertRaisesRegex(KeyError, "staffing"):
             self.load("[simplify]\n" + self.GOOD, staffing=False)
         for old, new in (("client_min = 3", "client_min = 0"), ("client_share = 0.5", "client_share = 2"),

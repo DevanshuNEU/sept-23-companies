@@ -195,6 +195,14 @@ describe('the Jobs page', () => {
     expect(screen.getByRole('tab', { name: /^Your level/ })).toHaveTextContent('22');
   });
 
+  it('tags a company that may be a staffing firm and a posting made for a client (#257)', async () => {
+    await open();
+    expect(row(9006)).toHaveTextContent('Maybe a staffing firm');
+    expect(row(9005)).toHaveTextContent('Posted for a client');
+    expect(row(9005)).not.toHaveTextContent('Maybe a staffing firm');
+    expect(row(9000)).not.toHaveTextContent('Posted for a client');
+  });
+
   it('a window chip changes what is asked, and Any time pages 50 at a time', async () => {
     const user = userEvent.setup();
     await open();

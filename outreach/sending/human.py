@@ -3,16 +3,15 @@
 Pure: nothing here reads the clock or the store. Two kinds of randomness:
 
 - Drawn once, when a send happens, from the sender's own `random.Random`: the gap before the next send
-  (`next_gap_minutes`) and which of the first few ready messages goes next (`choose`).
+  (`spread_gap`) and which of the first few ready messages goes next (`choose`).
 - Fixed by a hash of what is being decided, so every read of the queue (each tick, the status page, the projection)
   gets the same answer: how late the first send of a day starts (`day_start_offset`) and how long a company waits
   between two of its emails (`company_gap`).
 
-Gaps are log-normal, not uniform: mostly short, sometimes long, with the odd real break. Uniform gaps from 4 to 9
-minutes have a flat, even look that no person produces.
+Gaps spread the account's day across its window (`spread_gap`): the minutes left over the sends left, with a random
+factor, and the odd real break. Uniform gaps have a flat, even look that no person produces.
 """
 import hashlib
-import math
 import random
 from datetime import date, datetime, timedelta, timezone
 from typing import Sequence, TypeVar
@@ -21,23 +20,30 @@ from outreach.sending.config import SendConfig
 from outreach.sending.pace import CompanyPace, default_pace
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["next_gap_minutes", "mean_gap_minutes", "choose", "day_start_offset", "company_gap", "max_company_gap"]
+__all__ = ["spread_gap", "expected_gap_minutes", "choose", "day_start_offset", "company_gap", "max_company_gap"]
 
 T = TypeVar("T")
 
 
-def next_gap_minutes(rng: random.Random, cfg: SendConfig) -> float:
-    """Minutes until the next send: now and then a break, otherwise a log-normal gap clipped to `gap_minutes`."""
+def spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: SendConfig) -> float:
+    """Minutes until the account's next send: now and then a break, otherwise the minutes left in its window over the
+    sends it has left today, times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's
+    sends spread across the window. No sends left gives the high clip."""
+    low, high = cfg.spread_gap_minutes
+    if sends_left <= 0:
+        return float(high)
     if rng.random() < cfg.break_chance:
         return rng.uniform(*cfg.break_minutes)
-    low, high = cfg.gap_minutes
-    return min(max(rng.lognormvariate(math.log(cfg.gap_median_minutes), cfg.gap_spread), low), high)
+    return min(max(minutes_left / sends_left * rng.uniform(*cfg.spread_jitter), low), high)
 
 
-def mean_gap_minutes(cfg: SendConfig) -> float:
-    """The expected gap, for the projection (it ignores the clipping, which only trims the long tail a little)."""
-    plain = cfg.gap_median_minutes * math.exp(cfg.gap_spread ** 2 / 2)
-    return (1 - cfg.break_chance) * plain + cfg.break_chance * sum(cfg.break_minutes) / 2
+def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig) -> float:
+    """The gap `spread_gap` has on average, for the projection: the formula with its factor at 1.0 (the middle of
+    `spread_jitter`), clipped. It leaves out the rare break."""
+    low, high = cfg.spread_gap_minutes
+    if sends_left <= 0:
+        return float(high)
+    return min(max(minutes_left / sends_left * sum(cfg.spread_jitter) / 2, low), high)
 
 
 def choose(candidates: Sequence[T], rng: random.Random, pool: int) -> T | None:

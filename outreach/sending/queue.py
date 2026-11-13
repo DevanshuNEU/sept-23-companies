@@ -8,6 +8,7 @@ the surviving company.
 """
 import random
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -22,7 +23,7 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "Verdict", "canonical_company",
-           "load_queue", "Prepared", "prepare", "decide_all", "verdicts", "first_only", "pick"]
+           "load_queue", "minutes_left", "minutes_left_among", "Prepared", "prepare", "decide_all", "verdicts", "first_only", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
@@ -195,6 +196,27 @@ def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
     return sends
 
 
+def minutes_left_among(zones: Iterable[ZoneInfo | None], now: datetime, cfg: SendConfig) -> float:
+    """Minutes from `now` to the latest window close (`window_end`, in each recipient's own time, on today's New York
+    date) among `zones`; a zone that is unknown is skipped. With none known, the close in New York. Never below 0."""
+    now = now.astimezone(timezone.utc)
+    today = cal.ny_date(now, cfg)
+    closes = [_local(today, cfg.window_end, zone) for zone in zones if zone is not None]
+    close = max(closes, default=_local(today, cfg.window_end, ZoneInfo(cfg.day_tz)))
+    return max((close - now).total_seconds() / 60, 0.0)
+
+
+def minutes_left(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, account: str) -> float:
+    """How long the account's day still has, for `human.spread_gap`: minutes from `now` to the latest window close
+    among the time zones of its approved recipients that have an address (`minutes_left_among`). `account` is its
+    address; until accounts have their own queues (the per-account loop) the one sending account owns every
+    approved message, so it does not filter yet."""
+    zones = [cal.recipient_zone(row[0]) for row in conn.execute(
+        "SELECT DISTINCT p.tz FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+        "JOIN person p ON p.person_id = t.person_id WHERE m.state = 'approved' AND COALESCE(p.email, '') != ''")]
+    return minutes_left_among(zones, now, cfg)
+
+
 @dataclass(frozen=True)
 class Prepared:
     """What one pass over the approved queue reads from the store, so a projection can decide the same queue at many
@@ -230,7 +252,7 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *, day: Da
     sent_today = signals.counted_sends_on(conn, account.account_id, today, cfg) + conn.execute(
         "SELECT COUNT(*) FROM message WHERE state IN ('sending', 'send_unknown') AND claimed_at >= ? "
         "AND claimed_at < ?", cal.ny_day_bounds(today, cfg)).fetchone()[0]
-    next_send = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()["next_send_at"]
+    next_send = account.next_send_at
     queued = _sorted([_queued(row, companies) for row in rows], cfg)
     return Prepared(
         queue=queued, stops=_stop_reasons(rows, companies, conn),

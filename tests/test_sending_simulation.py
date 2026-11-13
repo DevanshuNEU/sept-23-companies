@@ -7,19 +7,18 @@ import dataclasses
 import json
 import unittest
 from collections import Counter, defaultdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending.config import load_config
+from tests import SHIPPED_SEND_CONFIG
 from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, ny, simulate
 
-# Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and for slow,
-# steady pacing of 4 to 9 minutes, since its bounces and limits sit at fixed positions in the day. The shipped human pacing
-# is checked in test_sending_human and test_sending_queue. The scenario's volume and 4 to 9 minute gaps need the old
-# 08:30 to 16:30 window (in the shipped 08:00 to 15:00 window the later days no longer fit their follow-ups); spread
-# pacing replaces these gaps in Task A6, which rewrites this scenario. The window itself is tested in test_sending_calendar.
-CFG = dataclasses.replace(load_config(), followup_business_days=(7,), gap_minutes=(4, 9), gap_median_minutes=5.5,
-                          gap_spread=0.2, break_chance=0.0, window_start=time(8, 30), window_end=time(16, 30))
+# Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and with no
+# breaks, since its bounces and limits sit at fixed positions in the day. Gaps are the shipped spread pacing (the scratch
+# config shortens its clip for the tick tests, so the shipped [2, 45] is set here); the shipped
+# breaks are checked in test_sending_human, the window in test_sending_calendar.
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,), break_chance=0.0001, spread_gap_minutes=(2, 45))
 NY = ZoneInfo("America/New_York")
 MON = date(2026, 11, 2)
 D = {n: date(2026, 11, 2) + timedelta(days=d) for n, d in
@@ -55,7 +54,8 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual([row.start_limit for row in self.r.days], [20, 30, 40, 50, 40, 50, 60, 70, 60, 70])
         self.assertEqual(len(rows), 10)
         warn = rows[D[4]]  # Thursday 2026-11-05: a policy bounce at 11:00
-        self.assertEqual((warn.outcome, warn.effective_limit, warn.sent), ("warning", 40, 40))
+        self.assertEqual((warn.outcome, warn.effective_limit), ("warning", 40))
+        self.assertGreaterEqual(warn.sent, 30)
         self.assertEqual([e["kind"] for e in events(self.r, "policy_rejection")], ["policy_rejection"])
         block = rows[D[8]]  # Wednesday 2026-11-11: Gmail answers 429 at 13:00
         self.assertEqual(block.outcome, "hard_block")
@@ -73,7 +73,10 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual(paused, 0, "the scripted resume cleared the pause")
         for n, row in enumerate(self.r.days, start=1):
             if n not in (4, 8):
-                self.assertEqual(row.sent, row.start_limit, f"day {n} ({row.day}) is kept full")
+                # Spread pacing runs a day on to the last window close, and the recipients whose window has closed
+                # cannot take the rest: a day is full only while every zone still has someone queued late in it.
+                self.assertLessEqual(row.sent, row.start_limit, f"day {n} ({row.day})")
+                self.assertGreaterEqual(row.sent, 0.75 * row.start_limit, f"day {n} ({row.day}) is mostly full")
                 self.assertEqual(row.outcome, "clean", f"day {n}")
 
     def test_two_weeks_per_company_spacing(self):
@@ -103,16 +106,16 @@ class TwoWeeksTest(unittest.TestCase):
             local = s.at.astimezone(ZoneInfo(s.zone))
             self.assertLess(local.weekday(), 5, s)
             self.assertTrue(CFG.window_start <= local.time() <= CFG.window_end, f"{s.person} at {local}")
-        # The stored gap is cut to whole seconds, so allow a second under the shortest gap.
+        # The stored gap is cut to whole seconds, so allow a second under the shortest gap. A break is longer still.
         ordered = sorted(s.at for s in self.r.sends)
         for a, b in zip(ordered, ordered[1:]):
-            self.assertGreaterEqual(b - a, timedelta(minutes=CFG.gap_minutes[0]) - timedelta(seconds=1))
+            self.assertGreaterEqual(b - a, timedelta(minutes=CFG.spread_gap_minutes[0]) - timedelta(seconds=1))
         self.assertTrue({"America/Los_Angeles", "Europe/London"} <= {s.zone for s in self.r.sends})
 
     def test_two_weeks_follow_up_dates(self):
         conn = self.r.conn
         first_day = [s for s in self.r.sends if s.seq == 0 and ny_date(s.at) == D[1]]
-        self.assertEqual(len(first_day), 20)
+        self.assertTrue(15 <= len(first_day) <= 20, "the day's limit is 20 and spread pacing can leave a few unsent")
         for s in first_day:
             info = self.r.people[s.person]
             row = conn.execute("SELECT due_on FROM message WHERE touch_id = ? AND seq = 1", (info.touch_id,)).fetchone()
@@ -126,7 +129,13 @@ class TwoWeeksTest(unittest.TestCase):
                 due = row["due_on"]
             self.assertEqual(due, "2026-11-11", s.person)
         followups = [s for s in self.r.sends if s.seq == 1]
-        self.assertEqual(len(followups), 18, "20 first emails, one replied and one bounced")
+        # Every first email but the replied one and the bounced one has a follow-up drafted and approved on day 8. The
+        # queue is first come, first served and the days' first emails are approved earlier, so some wait their turn.
+        by_state = dict(conn.execute("SELECT state, COUNT(*) FROM message WHERE seq = 1 AND touch_id IN "
+                                     "(SELECT touch_id FROM touch WHERE origin = 'sender') GROUP BY state").fetchall())
+        self.assertEqual(by_state.get("sent", 0) + by_state.get("approved", 0), len(first_day) - 2, by_state)
+        self.assertEqual(len(followups), by_state.get("sent", 0))
+        self.assertGreater(len(followups), 0)
         firsts = {s.person: s for s in self.r.sends if s.seq == 0}
         for s in followups:
             self.assertGreaterEqual(ny_date(s.at), D[8], s.person)
@@ -136,7 +145,7 @@ class TwoWeeksTest(unittest.TestCase):
         per_day = Counter(ny_date(s.at) for s in self.r.sends)
         for row in self.r.days:
             self.assertEqual(row.sent, per_day[row.day], "a follow-up counts toward its day's sends")
-        self.assertTrue(any(ny_date(s.at) == D[8] for s in followups))
+        # They queue behind the first emails approved on days 1 to 7, so none need go out on day 8 itself.
 
     def test_two_weeks_company_hold_on_reply(self):
         conn, info = self.r.conn, self.r.people["c2p0"]
@@ -189,6 +198,25 @@ def short(days: int, evts: list[Event], *, companies: int = 30, people: int = 2,
 
 def morning(n: int, count: int) -> Event:
     return Event(ny(D[n], "07:00"), "approve", {"count": count})
+
+
+class SpreadAcrossWindowTest(unittest.TestCase):
+    """One account at 15 a day, recipients split between New York and Los Angeles, one Monday (spec: Window and pacing)."""
+
+    def test_fifteen_spread_across_window(self):
+        from tests.sendtest import with_ramp
+        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+        # Eight New York companies then seven Los Angeles ones, approved in that order: the New York ones go while
+        # their window is open, and the day runs on until Los Angeles closes (18:00 New York).
+        scenario = short(1, [morning(1, 15)], companies=15, people=1,
+                         zones=("America/New_York",) * 8 + ("America/Los_Angeles",) * 7)
+        result = simulate(scenario, seed=7, cfg=cfg)
+        self.addCleanup(result.close)
+        times = sorted(s.at.astimezone(NY) for s in result.sends)
+        self.assertEqual(len(times), 15)
+        self.assertGreaterEqual(times[0], ny(D[1], "08:00"))
+        self.assertLessEqual(sum(1 for t in times if t < ny(D[1], "10:00")), 5, [t.strftime("%H:%M") for t in times])
+        self.assertGreater(times[-1], ny(D[1], "13:00"), [t.strftime("%H:%M") for t in times])
 
 
 class StopRulesTest(unittest.TestCase):

@@ -50,11 +50,19 @@ class ProjectionTest(Base):
         _, mid = self.approve()
         self.assertEqual(self.project(ny(7, 11))[mid], ny(9, 8, 0))
 
-    def test_spacing_separates_different_companies_by_the_mean_gap(self):
+    def test_spacing_separates_different_companies_by_the_expected_spread_gap(self):
         mids = [self.approve(company=seed_company(self.db, f"Co{i}"))[1] for i in range(3)]
         got = self.project()
-        mean = timedelta(minutes=human.mean_gap_minutes(CFG))
-        self.assertEqual([got[m] for m in mids], [FRI, FRI + mean, FRI + 2 * mean])
+        # Each gap is the spread rule at factor 1.0: the minutes left until the window closes (15:00 New York, the
+        # recipients are in New York) over the sends left today, clipped.
+        limit = queue.prepare(self.db, FRI, CFG, day=None).limit
+        first = timedelta(minutes=human.expected_gap_minutes(
+            queue.minutes_left_among([NY], FRI, CFG), limit - 1, CFG))
+        self.assertEqual(got[mids[0]], FRI)
+        self.assertEqual(got[mids[1]], FRI + first)
+        second = timedelta(minutes=human.expected_gap_minutes(
+            queue.minutes_left_among([NY], FRI + first, CFG), limit - 2, CFG))
+        self.assertEqual(got[mids[2]], FRI + first + second)
 
     def test_daily_limit_holds_flat_for_later_days(self):
         put_day(self.db, date(2026, 11, 6), 4)
@@ -94,7 +102,7 @@ class ProjectionTest(Base):
         _, mid = self.approve()
         self.assertEqual(self.project()[mid], FRI)
         soon = FRI + timedelta(minutes=3)
-        self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(soon),))
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(soon),))
         verdict = queue.verdicts(self.db, FRI, CFG, day=None, gate=None)[0]
         self.assertEqual((verdict.reason, verdict.earliest_at), ("spacing", soon))
         self.assertEqual(self.project()[mid], soon)

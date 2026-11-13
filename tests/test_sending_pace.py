@@ -182,7 +182,8 @@ def _distinct_first_email(rng: random.Random, name: str, company: str, index: in
 class BigCompanyDayTest(unittest.TestCase):
     @mock.patch("outreach.sending.simulate._first_email", _distinct_first_email)
     def test_a_big_company_gets_fifteen_first_emails_in_a_day(self):
-        cfg = dataclasses.replace(SHIPPED, pick_pool=1, day_start_jitter_minutes=0)
+        # Short spread gaps: this test is about the company's band (15 a day, 20 minutes apart), not the day's pacing.
+        cfg = dataclasses.replace(SHIPPED, pick_pool=1, day_start_jitter_minutes=0, spread_gap_minutes=(2, 3))
         day = cal_days(date(2026, 11, 16), 1, cfg)[0]
         scenario = Scenario(start=day, days=1, companies=1, people_per_company=30, zones=("America/New_York",),
                             events=(Event(sim_ny(day, "07:00"), "approve", {"count": 30}),),

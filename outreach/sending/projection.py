@@ -5,7 +5,8 @@ A walk down the approved queue on a virtual clock. At each moment it asks the se
 company and the day, and moves on: to the next moment a wait ends when nothing can go. So the business days, the
 recipient's hours, the per-company limit and gap and the daily limit are the sender's, not a second copy of them.
 
-Two things are estimates. Spacing between sends is random (`human.next_gap_minutes`), so the walk uses its mean; the first send of a day
+Two things are estimates. Spacing between sends is random (`human.spread_gap`), so the walk uses its expected
+gap (`human.expected_gap_minutes`: the formula with its factor at 1.0); the first send of a day
 and each company's gap use their fixed offsets. Later days
 use today's limit as it stands (the ramp may allow more, so mail can only come earlier than shown). Read only: the
 store is read once, by `queue.prepare`.
@@ -27,7 +28,6 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
     cannot go within `MAX_DAYS` days is absent."""
     now = now.astimezone(timezone.utc)
     end = now + timedelta(days=MAX_DAYS)
-    spacing = timedelta(minutes=human.mean_gap_minutes(cfg))
     pending = list(p.queue)
     sends = {company: list(sent) for company, sent in p.sends.items()}
     sent_by_day = {cal.ny_date(now, cfg): p.sent_today}
@@ -44,8 +44,12 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
             sends.setdefault(q.company_id, []).append((at, q.seq == 0))
             day = cal.ny_date(at, cfg)
             sent_by_day[day] = sent_by_day.get(day, 0) + 1
-            next_send = at + spacing
             pending.remove(q)
+            # The sender's rule: minutes left in the window of the recipients still queued over the sends left.
+            left = max(p.limit - sent_by_day[day], 0)
+            zones = [cal.recipient_zone(name) for name in {r.tz for r in pending}]
+            minutes_left = queue.minutes_left_among(zones, at, cfg)
+            next_send = at + timedelta(minutes=human.expected_gap_minutes(minutes_left, left, cfg))
             continue
         later = [v.earliest_at for v in found
                  if v.reason in queue.TIME_REASONS and v.earliest_at is not None and v.earliest_at > at]

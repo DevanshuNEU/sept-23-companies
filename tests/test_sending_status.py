@@ -62,7 +62,8 @@ class Base(unittest.TestCase):
 
     def sender(self, **columns) -> None:
         sets = ", ".join(f"{k} = ?" for k in columns)
-        self.db.execute(f"UPDATE sender SET {sets} WHERE sender_id = 1", tuple(columns.values()))
+        table, key = ("sender_account", "account_id") if "next_send_at" in columns else ("sender", "sender_id")
+        self.db.execute(f"UPDATE {table} SET {sets} WHERE {key} = 1", tuple(columns.values()))
 
     def signal(self, kind: str, at: datetime, *, detail=None) -> None:
         self.keys += 1

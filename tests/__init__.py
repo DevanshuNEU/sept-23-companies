@@ -41,7 +41,7 @@ for _key, _value in (("ramp_start", 20), ("ramp_step", 10), ("ramp_floor", 20), 
 # November dates, so the scratch copy has none; tests/test_sending_config.py checks the shipped list.
 _ramp_text, _n = _re.subn(r"^holidays = .*$", "holidays = []", _ramp_text, flags=_re.M)
 assert _n == 1, "tests/__init__.py: holidays is not in config.toml once"
-for _old, _new in (("gap_median_minutes = 1.5", "gap_median_minutes = 2.0"),
+for _old, _new in (("spread_gap_minutes = [2, 45]", "spread_gap_minutes = [2, 3]"),  # short gaps: tests tick a few minutes apart
                    ("per_company_daily = 2", "per_company_daily = 3"),  # the old default band (#229 ships 2)
                    ("pick_pool = 5", "pick_pool = 1"),
                    ("day_start_jitter_minutes = 25", "day_start_jitter_minutes = 0"),

@@ -67,7 +67,7 @@ class Base(unittest.TestCase):
         return self.verdicts_at(now, **kw)[message].reason
 
 
-HUMAN = load_config(SHIPPED_SEND_CONFIG)  # the shipped pacing: jittered day start and company gaps, a pick pool
+HUMAN = load_config(SHIPPED_SEND_CONFIG)  # the shipped config: jittered day start and company gaps, a pick pool
 
 
 class HumanPacingTest(Base):
@@ -401,7 +401,7 @@ class TimingTest(Base):
 
     def test_spacing_uses_next_send_at(self):
         _, message = self.approve()
-        self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(MON + timedelta(minutes=5)),))
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(MON + timedelta(minutes=5)),))
         verdict = self.verdicts_at()[message]
         self.assertEqual((verdict.reason, verdict.earliest_at), ("spacing", MON + timedelta(minutes=5)))
         self.assertEqual(self.reason(message, MON + timedelta(minutes=5)), "ready")
@@ -638,7 +638,7 @@ class ReasonsTest(Base):
         self.approve(company=seed_company(self.db, "Fine"), tz="America/Los_Angeles")
         nobody, _ = self.approve(company=seed_company(self.db, "Nobody"))
         self.db.execute("UPDATE person SET email = NULL, added_by = 'import' WHERE person_id = ?", (nobody,))
-        self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(MON + timedelta(minutes=3)),))
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(MON + timedelta(minutes=3)),))
         seen = set()
         for now in (MON, ny(2, 16, 45), ny(7, 10)):
             for verdict in self.verdicts_at(now).values():

@@ -67,9 +67,7 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
         self.assertEqual((cfg.per_company_daily, cfg.per_company_gap_minutes), (2, 60))
         self.assertEqual(cfg.followup_business_days, (7,))
-        self.assertEqual(cfg.gap_minutes, (1, 25))
-        self.assertEqual((cfg.gap_median_minutes, cfg.gap_spread, cfg.break_chance, cfg.break_minutes),
-                         (1.5, 0.6, 0.04, (10, 25)))
+        self.assertEqual((cfg.break_chance, cfg.break_minutes), (0.04, (10, 25)))
         self.assertEqual((cfg.pick_pool, cfg.day_start_jitter_minutes, cfg.per_company_gap_jitter_minutes),
                          (5, 25, 60))
         self.assertEqual(cfg.day_tz, "America/New_York")
@@ -91,7 +89,7 @@ class SendConfigTest(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             cfg.from_name = "x"
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 37)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 34)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
@@ -132,10 +130,8 @@ class SendConfigTest(unittest.TestCase):
         self.refused("window_start", window_end='"07:30"')
 
     def test_inverted_gap_is_refused(self):
-        self.refused("gap_minutes", gap_minutes="[9, 4]")
         self.refused("break_minutes", break_minutes="[30, 10]")
         self.refused("break_chance", break_chance="1.5")
-        self.refused("gap_median_minutes", gap_median_minutes="0")
         self.refused("pick_pool", pick_pool="0")
 
     def test_weekday_outside_zero_to_six_is_refused(self):

@@ -416,7 +416,7 @@ class _Run:
         candidates = [now + STEP, end]
         if self.pending:
             candidates.append(self.pending[0].at)
-        gap = self.conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()[0]
+        gap = accounts.primary(self.conn, self.cfg).next_send_at
         gap_at = datetime.strptime(gap, ISO_FMT).replace(tzinfo=timezone.utc) if gap else None
         if gap_at is not None and gap_at > now:
             candidates.append(gap_at)  # while the gap runs, nothing sooner can send

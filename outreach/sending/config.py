@@ -51,9 +51,6 @@ class SendConfig:
     holidays: tuple[date, ...]
     per_company_daily: int
     per_company_gap_minutes: int
-    gap_minutes: tuple[float, float]
-    gap_median_minutes: float
-    gap_spread: float
     break_chance: float
     break_minutes: tuple[float, float]
     pick_pool: int
@@ -245,12 +242,6 @@ def _check(cfg: SendConfig) -> None:
         raise ValueError(f"followup_business_days must be positive and increasing, not {list(days)}")
     if cfg.window_start >= cfg.window_end:
         raise ValueError(f"window_start ({cfg.window_start}) must be before window_end ({cfg.window_end})")
-    low, high = cfg.gap_minutes
-    if low < 0 or low > high:
-        raise ValueError(f"gap_minutes must be [low, high] with 0 <= low <= high, not {list(cfg.gap_minutes)}")
-    if cfg.gap_median_minutes <= 0 or cfg.gap_spread < 0:
-        raise ValueError("gap_median_minutes must be above 0 and gap_spread 0 or more, not "
-                         f"{cfg.gap_median_minutes} and {cfg.gap_spread}")
     break_low, break_high = cfg.break_minutes
     if break_low < 0 or break_low > break_high:
         raise ValueError(f"break_minutes must be [low, high] with 0 <= low <= high, not {list(cfg.break_minutes)}")
@@ -308,13 +299,6 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
     if not isinstance(holidays, list):
         raise ValueError(f"holidays must be a list of dates, not {holidays!r}")
     values["holidays"] = tuple(_date("holidays", h) for h in holidays)
-    gap = raw["gap_minutes"]
-    if not isinstance(gap, list) or len(gap) != 2 or not all(isinstance(g, (int, float)) for g in gap):
-        raise ValueError(f"gap_minutes must be [low, high], not {gap!r}")
-    values["gap_minutes"] = (gap[0], gap[1])
-    for key in ("gap_median_minutes", "gap_spread"):
-        if isinstance(raw[key], bool) or not isinstance(raw[key], (int, float)):
-            raise ValueError(f"{key} must be a number, not {raw[key]!r}")
     breaks = raw["break_minutes"]
     if not isinstance(breaks, list) or len(breaks) != 2 or not all(isinstance(b, (int, float)) for b in breaks):
         raise ValueError(f"break_minutes must be [low, high], not {breaks!r}")

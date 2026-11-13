@@ -43,17 +43,10 @@ size_band_gap_jitter_minutes = [60, 30, 30, 20, 15]
 # open US postings) takes this band (1 is the first): 4, the 501 to 1,000 band.
 size_guessed_big_band = 4
 
-# Human pacing (#9, 2026-11-06; median 1.5 since 2026-11-12, #227). The gap after a send is log-normal around
-# gap_median_minutes (gap_spread is its width), clipped to gap_minutes, and now and then (break_chance) a real break of
-# break_minutes. The sender ticks every 2 minutes, so a gap lands on the next tick. With recipients across the US
-# zones the window runs about 11 hours on the New York clock, and the simulation sends 200 a day at median 1.5
-# (tests/test_send_limit_200.py); recipients all in one zone fit fewer.
-gap_minutes = [1, 25]
-gap_median_minutes = 1.5
-gap_spread = 0.6
-# compat until Task A6: gap_minutes, gap_median_minutes and gap_spread above go when spread pacing replaces them.
-# Spread pacing (#9 multi-sender ruling): each account's gap is its window length over its day's count, times a random
-# factor from spread_jitter, clipped to spread_gap_minutes.
+# Spread pacing (#9 multi-sender ruling, 2026-11-12). An account's gap after a send is the minutes left in its window
+# over the sends it has left today, times a random factor from spread_jitter, clipped to spread_gap_minutes, so a day
+# of 15 spreads across the window and does not go out in the first half hour. The sender ticks every 2 minutes, so a
+# gap lands on the next tick. Now and then (break_chance) the gap is a real break of break_minutes instead.
 spread_jitter = [0.6, 1.4]
 spread_gap_minutes = [2, 45]
 break_chance = 0.04

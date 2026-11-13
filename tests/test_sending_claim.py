@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 
 from outreach.outcomes.context import CONTEXT_KEYS
-from outreach.sending import claim, human, proof, queue
+from outreach.sending import accounts, calendar as cal, claim, human, proof, queue, ramp, signals
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
@@ -213,15 +213,19 @@ class RecordSentTest(Base):
                                "AND seq > 0", (self.touch(person)["touch_id"],)).fetchall()
         self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-11", "sender", "")])
 
-    def test_next_send_at_is_a_human_gap_later(self):
+    def test_next_send_at_is_a_spread_gap_later(self):
         _, mid = self.approve()
         self.send(mid)
-        gap = human.next_gap_minutes(random.Random(7), CFG)
+        account = accounts.primary(self.db, CFG)
+        today = cal.ny_date(MON, CFG)
+        left = ramp.effective_limit(self.db, account, today, CFG) - signals.counted_sends_on(
+            self.db, account.account_id, today, CFG)
+        gap = human.spread_gap(queue.minutes_left(self.db, MON, CFG, account.cfg.address), left, random.Random(7), CFG)
         expected = iso(MON + timedelta(minutes=gap))
-        got = self.db.execute("SELECT next_send_at FROM sender").fetchone()[0]
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
         self.assertEqual(got, expected)
-        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= parse(got)
-                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
+        self.assertTrue(MON + timedelta(minutes=CFG.spread_gap_minutes[0]) <= parse(got)
+                        <= MON + timedelta(minutes=max(CFG.spread_gap_minutes[1], CFG.break_minutes[1])))
 
     def test_a_reconciled_record_never_moves_next_send_at_earlier(self):
         _, mid = self.approve()
@@ -229,10 +233,10 @@ class RecordSentTest(Base):
         with self.assertRaises(GmailError):
             self.send(mid)
         # A reconcile hit dates the send to its claim, which can be long before a gap set since.
-        self.db.execute("UPDATE sender SET next_send_at = '2026-11-02T20:00:00Z'")
+        self.db.execute("UPDATE sender_account SET next_send_at = '2026-11-02T20:00:00Z' WHERE account_id = 1")
         claim.record_sent(self.db, mid, Sent("m-x", "t-x", self.message(mid)["pending_rfc_id"]), at=iso(MON),
                           cfg=CFG, rng=self.rng, reconciled=True)
-        self.assertEqual(self.db.execute("SELECT next_send_at FROM sender").fetchone()[0], "2026-11-02T20:00:00Z")
+        self.assertEqual(self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0], "2026-11-02T20:00:00Z")
 
 
 class ContextTest(Base):
@@ -425,9 +429,9 @@ class UnclearTest(Base):
         self.gmail.fail_next_send(GmailError("network", None, "connection reset"))
         with self.assertRaises(GmailError):
             self.send(mid)
-        got = parse(self.db.execute("SELECT next_send_at FROM sender").fetchone()[0])
-        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= got
-                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
+        got = parse(self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0])
+        self.assertTrue(MON + timedelta(minutes=CFG.spread_gap_minutes[0]) <= got
+                        <= MON + timedelta(minutes=max(CFG.spread_gap_minutes[1], CFG.break_minutes[1])))
 
     def test_a_rewritten_message_id_is_recorded_sent_and_does_not_pause(self):
         # What Gmail did on the first live send. It is how a send normally ends, not a failure.

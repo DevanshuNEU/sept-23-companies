@@ -30,7 +30,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
                                        resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
-from outreach.sending import accounts, human, proof
+from outreach.sending import accounts, human, proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import plan_followups
 from outreach.sending.gmail import new_message_id
@@ -257,12 +257,27 @@ def email_context(conn: sqlite3.Connection, person_id: int, company_id: int, *, 
 
 # -- recording --------------------------------------------------------------------------------------------------
 
-def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random) -> None:
-    """`sender.next_send_at` becomes `at` plus a random gap, unless it is already later: a gap never shrinks."""
-    candidate = (as_datetime(at) + timedelta(minutes=human.next_gap_minutes(rng, cfg))).strftime(ISO_FMT)
-    current = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()[0]
-    if current is None or candidate > current:
-        conn.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (candidate,))
+def _account_of(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int) -> accounts.AccountRow:
+    """The account that sends this touch: its own, or the primary account while the touch has none yet."""
+    row = conn.execute("SELECT account_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
+    account = accounts.by_id(conn, cfg, row[0]) if row is not None and row[0] is not None else None
+    return account or accounts.primary(conn, cfg)
+
+
+def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random, touch_id: int) -> None:
+    """The sending account's `next_send_at` becomes `at` plus a spread gap (`human.spread_gap`: the minutes left in
+    its window over the sends it has left today), unless it is already later: a gap never shrinks."""
+    account = _account_of(conn, cfg, touch_id)
+    when = as_datetime(at)
+    today = cal.ny_date(when, cfg)
+    sends_left = max(ramp.effective_limit(conn, account, today, cfg)
+                     - signals.counted_sends_on(conn, account.account_id, today, cfg), 0)
+    minutes_left = queue.minutes_left(conn, when, cfg, account.cfg.address)
+    candidate = (when + timedelta(minutes=human.spread_gap(minutes_left, sends_left, rng, cfg))).strftime(ISO_FMT)
+    current = conn.execute("SELECT next_send_at FROM sender_account WHERE account_id = ?",
+                           (account.account_id,)).fetchone()
+    if current is not None and (current[0] is None or candidate > current[0]):
+        conn.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = ?", (candidate, account.account_id))
 
 
 def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: str, cfg: SendConfig,
@@ -275,7 +290,7 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
     claimed token and the marker Gmail showed (None when not read). When a marked claim's marker was read and is not
     the claimed one (Gmail dropped or changed it), `marker_missing` is appended in the same write: sending stops at
     once, before any later email could be claimed, whatever the next tick's read back does. `at` is when it went
-    out (a reconcile passes the claim time). `next_send_at` moves to `at` plus a gap, never earlier than it was.
+    out (a reconcile passes the claim time). The sending account's `next_send_at` moves to `at` plus a spread gap, never earlier than it was.
     LookupError when the message is not `sending` or `send_unknown`."""
     stamp = _stamp(at)
     recorded = _stamp(now) if now else stamp
@@ -324,7 +339,7 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
                                  "found_marker": normalise_message_id(sent.marker),
                                  "gmail_message_id": sent.gmail_message_id, "stored_rfc_id": sent.rfc_message_id,
                                  "thread_id": sent.thread_id})
-        _push_gap(conn, stamp, cfg, rng)
+        _push_gap(conn, stamp, cfg, rng, row["touch_id"])
 
 
 def _kind_of(err: BaseException) -> str:
@@ -358,7 +373,7 @@ def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, 
                      idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
                      detail={**(extra or {}), "pending_rfc_id": row["pending_rfc_id"], "error": text,
                              "error_kind": kind, "retryable": kind in RETRYABLE})
-        _push_gap(conn, stamp, cfg, rng)
+        _push_gap(conn, stamp, cfg, rng, row["touch_id"])
 
 
 def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:

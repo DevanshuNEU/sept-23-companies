@@ -197,6 +197,20 @@ class GuardRefusesNewTablesTest(unittest.TestCase):
             with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
                 conn.execute(sql, args)
 
+    def test_a_touch_insert_with_an_account_is_refused_even_with_the_insert_grant(self):
+        # The guard's touch_insert trigger (0017 added account_id to it): a touch from Claude starts with no account.
+        db = fresh_store()
+        self.addCleanup(db.close)
+        company = add_company(db, "Guard Co")
+        first, second = add_person(db, company, "g@guard.co", "G"), add_person(db, company, "h@guard.co", "H")
+        conn = guard.open_guarded({"touch": guard.Grant(insert=True)}, path=store_path(db))
+        self.addCleanup(conn.close)
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "a touch from Claude starts open with nothing sent"):
+            conn.execute("INSERT INTO touch(person_id, account_id, created_at, updated_at) VALUES (?, 1, ?, ?)",
+                         (first, T, T))
+        conn.execute("INSERT INTO touch(person_id, created_at, updated_at) VALUES (?, ?, ?)", (second, T, T))
+        self.assertEqual([tuple(r) for r in db.execute("SELECT person_id, account_id FROM touch")], [(second, None)])
+
 
 if __name__ == "__main__":
     unittest.main()

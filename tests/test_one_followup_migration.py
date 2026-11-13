@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from outreach.sending.config import load_config
+from outreach.sending.followups import sync_followups
 from outreach.store.migrate import migrate, migration_files
 
 T = "2026-11-12T05:00:00Z"
@@ -102,6 +103,21 @@ class OneFollowupMigrationTest(unittest.TestCase):
             self.assertEqual((row["kind"], row["company_id"]), ("skipped", self.company))
             self.assertEqual(json.loads(row["detail"]),
                              {"reason": "rule_changed", "ruling": "multi-sender 2026-11-12"})
+
+    def test_one_sync_after_the_migration_plans_nothing_for_the_skipped_follow_ups(self):
+        # A skipped row keeps its (touch, seq) slot, so the shipped one-follow-up schedule brings none of them back.
+        resting, sending = self.touch(1, 1), self.touch(2, 2)
+        skipped = [self.message(resting, seq, "planned") for seq in (1, 2, 3, 4)]
+        skipped += [self.message(sending, seq, "drafted") for seq in (2, 3, 4)]
+        kept = self.message(sending, 1, "planned")
+        migrate(self.db)
+        before = self.db.execute("SELECT count(*) FROM message").fetchone()[0]
+        sync_followups(self.db, load_config(), now="2026-11-13T15:00:00Z")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM message").fetchone()[0], before)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM event WHERE kind = 'followup_planned'").fetchone()[0], 0)
+        for mid in skipped:
+            self.assertEqual(self.state(mid)["state"], "skipped")
+        self.assertEqual(self.state(kept)["state"], "planned")
 
     def test_shipped_config_is_one_followup(self):
         self.assertEqual(load_config().followup_business_days, (7,))

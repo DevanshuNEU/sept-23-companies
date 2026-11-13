@@ -345,7 +345,7 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
                due: list[_Row], *, now: str, ats: tuple[str, ...], limit: int | None,
                workers: Mapping[str, int] | None, source: tuple[str, str] = (_SOURCE, _SOURCE_VERSION),
                event_kind: str = EVENT_KIND, should_stop: Callable[[], bool] = lambda: False,
-               as_is: bool = False) -> SeedReport:
+               as_is: bool = False, any_answer: bool = False) -> SeedReport:
     with transaction(conn):
         for row, board_id in known:
             if row.gate_result not in ("promoted", "known"):
@@ -371,6 +371,10 @@ def _gate_rows(conn: sqlite3.Connection, client: HttpClient, rows: list[_Row], k
                     tripped.add(item.tripped)
                 continue
             verdict = gate(item.result, rules_cfg)
+            if any_answer and verdict.result == "no_us_engineering":
+                # A board the feed names with a software listing (2026-11-13): the listing already says it hires, so
+                # a board that answers is added even with no US engineering role on it at this moment.
+                verdict = Gate("promoted", verdict.open_us_engineering, verdict.board_name)
             if verdict.result == "promoted":
                 if owners is None:
                     owners = _name_owners(conn)

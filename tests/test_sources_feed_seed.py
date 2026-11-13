@@ -68,18 +68,20 @@ class FeedSeedTest(unittest.TestCase):
         self.listing("ashby", "gamma", "Gamma")
         self.routes = {GH.format("acme"): gh_answer(US_ENG), ASHBY.format("gamma"): ashby_answer(UK_ENG)}
         report = self.seed()
-        self.assertEqual(report, SeedReport(read=2, promoted=1, rejected=1, dead=0, errors=0, known=0, left=0))
+        # 2026-11-13: a board the feed names with a software listing is added whenever it answers, even with no US
+        # engineering role on it at that moment (34 such boards were turned away, NoGigiddy's 9 listings among them).
+        self.assertEqual(report, SeedReport(read=2, promoted=2, rejected=0, dead=0, errors=0, known=0, left=0))
         board = self.one("SELECT * FROM board WHERE ats = 'greenhouse' AND token = 'acme'")
         self.assertIsNotNone(board)
         self.assertIsNone(board["next_read_at"])  # the next tick reads it in full
         cand = self.one("SELECT * FROM board_candidate WHERE token = 'acme'")
         self.assertEqual((cand["source"], cand["gate_result"], cand["board_id"]), ("simplify", "promoted",
                                                                                   board["board_id"]))
-        self.assertIsNone(self.one("SELECT 1 FROM board WHERE token = 'gamma'"))
+        self.assertIsNotNone(self.one("SELECT 1 FROM board WHERE token = 'gamma'"))
         self.assertEqual(self.one("SELECT source_name FROM company_source WHERE company_id = ?",
                                   board["company_id"])[0], "simplify")
         event = self.one("SELECT detail FROM event WHERE entity = 'source' AND kind = ?", EVENT_KIND)
-        self.assertEqual(json.loads(event[0])["promoted"], 1)
+        self.assertEqual(json.loads(event[0])["promoted"], 2)
 
     def test_a_known_board_sends_nothing_whatever_the_letter_case(self):
         company = seed_company(self.conn, "Acme")
@@ -128,29 +130,30 @@ class FeedSeedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             SeedConfig(enabled=True, weekly_limit=10, retry_days=30, feed_per_tick=-1)
 
-    def test_a_rejected_board_waits_the_retry_days_and_an_error_is_tried_next_run(self):
+    def test_a_board_with_no_engineering_role_yet_is_added_and_an_error_is_tried_next_run(self):
         self.listing("lever", "birch", "Birch")
         self.listing("greenhouse", "beta", "Beta")
         self.routes = {LEVER.format("birch"): lever_answer(("Account Executive", "Austin, TX")),
                        GH.format("beta"): status_response(503)}
         report = self.seed()
-        self.assertEqual((report.rejected, report.errors), (1, 1))
+        self.assertEqual((report.promoted, report.rejected, report.errors), (1, 0, 1))
+        self.assertIsNotNone(self.one("SELECT 1 FROM board WHERE token = 'birch'"))
         self.routes[GH.format("beta")] = gh_answer(US_ENG)
         report = self.seed(now=later(1))
         self.assertEqual(self.client.requests, [GH.format("beta")])
         self.assertEqual(report.promoted, 1)
-        self.assertIsNone(self.seed(now=later(29)))
-        self.seed(now=later(31))
-        self.assertEqual(self.client.requests, [LEVER.format("birch")])
 
-    def test_a_board_the_stapply_seed_already_rejected_keeps_its_wait(self):
+    def test_a_board_rejected_for_no_us_engineering_is_gated_again_for_the_feed(self):
+        # The stapply seed (or the feed before 2026-11-13) turned it away; the feed now names it, so it is read again
+        # and added.
         self.conn.execute("INSERT INTO board_candidate(ats, token, name, source, found_at, gated_at, gate_result, "
                           "open_us_engineering) VALUES ('greenhouse', 'acme', 'Acme', 'stapply', ?, ?, "
                           "'no_us_engineering', 0)", (later(-5), later(-5)))
         self.listing("greenhouse", "acme", "Acme")
-        self.assertIsNone(self.seed())
-        self.assertEqual(self.client.requests, [])
-        self.assertEqual(self.one("SELECT source FROM board_candidate WHERE token = 'acme'")[0], "stapply")
+        self.routes = {GH.format("acme"): gh_answer(UK_ENG)}
+        report = self.seed()
+        self.assertEqual(report.promoted, 1)
+        self.assertIsNotNone(self.one("SELECT 1 FROM board WHERE ats = 'greenhouse' AND token = 'acme'"))
 
     def test_a_name_held_by_one_company_joins_it(self):
         company = seed_company(self.conn, "Acme Robotics")

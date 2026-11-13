@@ -96,8 +96,9 @@ def _state(conn: sqlite3.Connection, row: sqlite3.Row, cfg: SendConfig) -> DaySt
 
 
 def _ensure_row(conn: sqlite3.Connection, d: date, cfg: SendConfig, now: str) -> sqlite3.Row:
-    conn.execute("INSERT INTO send_day(day, send_limit, created_at) VALUES (?, ?, ?) ON CONFLICT(day) DO NOTHING",
-                 (d.isoformat(), limit_for(conn, d, cfg), now))
+    # Account 1 is the only account with days until the per-account ramp lands (multi-sender plan, Phase A).
+    conn.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (1, ?, ?, ?) "
+                 "ON CONFLICT(account_id, day) DO NOTHING", (d.isoformat(), limit_for(conn, d, cfg), now))
     return _row(conn, d)
 
 

@@ -2,13 +2,16 @@
 every row, and the shipped pacing fits 200 sends in one business day when the queue has enough companies (with
 no size on file, a company takes 2 a day, so 200 needs about 100 or more of them)."""
 import dataclasses
+import shutil
 import sqlite3
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 
 from outreach.sending.config import load_config
 from outreach.sending.simulate import Event, Scenario, cal_days, ny, simulate
-from outreach.store.migrate import MIGRATIONS_DIR
+from outreach.store.migrate import MIGRATIONS_DIR, migrate, migration_files
 from tests import SHIPPED_SEND_CONFIG
 from tests.storetest import fresh_store
 
@@ -22,7 +25,7 @@ class SendDayMigrationTest(unittest.TestCase):
         self.addCleanup(self.db.close)
 
     def put(self, day, limit):
-        self.db.execute("INSERT INTO send_day(day, send_limit, created_at) VALUES (?, ?, ?)", (day, limit, T))
+        self.db.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (1, ?, ?, ?)", (day, limit, T))
 
     def test_a_limit_of_200_is_stored_and_201_is_refused(self):
         self.put("2026-11-12", 200)
@@ -32,13 +35,22 @@ class SendDayMigrationTest(unittest.TestCase):
             self.put("2026-11-16", -1)
 
     def test_the_rebuild_keeps_every_row_and_column(self):
-        self.put("2026-11-10", 100)
-        self.db.execute("INSERT INTO send_day(day, send_limit, outcome, outcome_note, created_at, closed_at) "
-                        "VALUES ('2026-11-11', 150, 'warning', 'bounce rate', ?, ?)", (T, T))
-        before = [tuple(r) for r in self.db.execute("SELECT * FROM send_day ORDER BY day")]
-        self.db.executescript(SQL)
-        self.assertEqual([tuple(r) for r in self.db.execute("SELECT * FROM send_day ORDER BY day")], before)
-        cols = [r[1] for r in self.db.execute("PRAGMA table_info(send_day)")]
+        # 0012 runs on a store at version 11 (0015 later rebuilds send_day again, per account).
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for version, _name, path in migration_files():
+            if version <= 11:
+                shutil.copy(path, Path(tmp.name) / path.name)
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(db.close)
+        self.assertEqual(migrate(db, Path(tmp.name)), 11)
+        db.execute("INSERT INTO send_day(day, send_limit, created_at) VALUES ('2026-11-10', 100, ?)", (T,))
+        db.execute("INSERT INTO send_day(day, send_limit, outcome, outcome_note, created_at, closed_at) "
+                   "VALUES ('2026-11-11', 90, 'warning', 'bounce rate', ?, ?)", (T, T))
+        before = [tuple(r) for r in db.execute("SELECT * FROM send_day ORDER BY day")]
+        db.executescript(SQL)
+        self.assertEqual([tuple(r) for r in db.execute("SELECT * FROM send_day ORDER BY day")], before)
+        cols = [r[1] for r in db.execute("PRAGMA table_info(send_day)")]
         self.assertEqual(cols, ["day", "send_limit", "outcome", "outcome_note", "created_at", "closed_at"])
 
 

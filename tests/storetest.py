@@ -33,7 +33,18 @@ def fresh_store() -> sqlite3.Connection:
     atexit.register(shutil.rmtree, folder, True)
     path = str(Path(folder) / "outreach.db")
     install(path)
-    return connect(path)
+    conn = connect(path)
+    seed_sender_account(conn)
+    return conn
+
+
+def seed_sender_account(conn: sqlite3.Connection, account_id: int = 1, address: str = "devanshurajesh@gmail.com",
+                        kind: str = "gmail") -> None:
+    """The account a store has once Gmail has signed in. `send_day` rows need one, and a fresh store has none
+    (migration 0015 copies an account only from a `sender` row that has one), so `fresh_store` adds account 1."""
+    now = utcnow()
+    conn.execute("INSERT OR IGNORE INTO sender_account(account_id, address, kind, created_at, updated_at) "
+                 "VALUES (?, ?, ?, ?, ?)", (account_id, address, kind, now, now))
 
 
 # The 14 ATSs the crawler plan builds an adapter for (#21). The other board.ats values (gem, icims, cornerstone and

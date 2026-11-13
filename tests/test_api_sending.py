@@ -90,15 +90,15 @@ class StatusTest(SendingBase):
     def test_ramp_level_and_next_limit_if_clean(self):
         for limit, level, nxt in ((40, 3, 50), (100, 9, 100)):
             with self.subTest(limit=limit):
-                self.conn.execute("INSERT INTO send_day(day, send_limit, created_at) VALUES (?, ?, ?) "
-                                  "ON CONFLICT(day) DO UPDATE SET send_limit = excluded.send_limit",
+                self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (1, ?, ?, ?) "
+                                  "ON CONFLICT(account_id, day) DO UPDATE SET send_limit = excluded.send_limit",
                                   (TODAY, limit, NOW))
                 s = self.status()
                 self.assertEqual((s["rampLevel"], s["nextLimitIfClean"], s["limitToday"]), (level, nxt, limit))
 
     def test_last_step_down_is_the_newest_warning_day_with_its_reason(self):
-        self.conn.execute("INSERT INTO send_day(day, send_limit, outcome, created_at) VALUES "
-                          "('2026-11-06', 30, 'warning', '2026-11-06T13:00:00Z')")
+        self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES "
+                          "(1, '2026-11-06', 30, 'warning', '2026-11-06T13:00:00Z')")
         append_event(self.conn, entity="sender", entity_id=1, kind="policy_rejection", actor="sender",
                      at="2026-11-06T16:20:00Z", detail={"day": "2026-11-06"}, idempotency_key="w1")
         self.assertEqual(self.status()["lastStepDown"], {"at": "2026-11-06T16:20:00Z", "reason": "policy_rejection"})

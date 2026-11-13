@@ -46,7 +46,7 @@ NEVER_TABLES = frozenset({
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",
-    "posting", "posting_body",
+    "posting", "posting_body", "sender_account", "company_sender", "bounced_address",
 })
 
 # The two tables only `log_sent` holds a grant on (insert only; tests/test_mcp_write_grants pins it). Every other
@@ -135,7 +135,7 @@ _VALUE_TRIGGERS = (
      "NEW.state IS NOT 'open' OR NEW.origin IS NOT 'sender' OR NEW.close_reason IS NOT NULL "
      "OR NEW.gmail_thread_id IS NOT NULL OR NEW.first_rfc_id IS NOT NULL OR NEW.first_sent_at IS NOT NULL "
      "OR NEW.replied_at IS NOT NULL OR NEW.reply_kind IS NOT NULL OR NEW.bounced_at IS NOT NULL "
-     "OR NEW.auto_reply_at IS NOT NULL OR NEW.closed_at IS NOT NULL",
+     "OR NEW.auto_reply_at IS NOT NULL OR NEW.closed_at IS NOT NULL OR NEW.account_id IS NOT NULL",
      "a touch from Claude starts open with nothing sent"),
     ("touch_update", "BEFORE UPDATE ON main.touch", None, "Claude never changes a touch"),
     ("person_insert", "BEFORE INSERT ON main.person", "NEW.added_by IS NOT 'claude'",

@@ -106,7 +106,7 @@ def put_day(conn: sqlite3.Connection, day: date | str, limit: int, *, outcome: s
             closed: bool = False) -> None:
     """A `send_day` row as the ramp would have left it (for tests that start part way up the ramp)."""
     day = day.isoformat() if isinstance(day, date) else day
-    conn.execute("INSERT INTO send_day(day, send_limit, outcome, closed_at, created_at) VALUES (?, ?, ?, ?, ?)",
+    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, closed_at, created_at) VALUES (1, ?, ?, ?, ?, ?)",
                  (day, limit, outcome, _NOW_SEED if closed else None, _NOW_SEED))
 
 

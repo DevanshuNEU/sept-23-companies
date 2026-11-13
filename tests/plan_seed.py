@@ -130,7 +130,7 @@ def seed_log_only(conn: sqlite3.Connection, person_id: int, kind: str, on: date,
 
 
 def seed_send_day(conn: sqlite3.Connection, day: date, limit: int, outcome: str | None = None) -> None:
-    conn.execute("INSERT INTO send_day(day, send_limit, outcome, created_at) VALUES (?, ?, ?, ?)",
+    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES (1, ?, ?, ?, ?)",
                  (day.isoformat(), limit, outcome, utcnow()))
 
 

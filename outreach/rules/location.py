@@ -8,6 +8,7 @@ state codes and cities, and last the city names shared by the US and other count
 literals with bounded gaps, so a search is linear in the location.
 """
 import re
+import unicodedata
 
 from .config import Config, phrases
 
@@ -89,6 +90,13 @@ def _title_names_non_us_country(title: str, p: _Patterns) -> bool:
     return found
 
 
+def _fold(text: str | None) -> str | None:
+    """The text without accents ("México" is "Mexico", #257), so the word lists, written plain, match either way."""
+    if text is None:
+        return None
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
 def us_status(location: str, country: str | None, cfg: Config, title: str | None = None) -> str:
     """yes, no or unknown. A structured country that names the US wins. A US place in the location text beats a
     known non-US country (Devanshu's ruling, 2026-10-21: a multi-location posting carries one country, often the
@@ -96,6 +104,7 @@ def us_status(location: str, country: str | None, cfg: Config, title: str | None
     non-US country reads no. Any other country is no evidence, so the location text decides (a country the lists do
     not know is never a "no" on its own). When all of those say nothing, a title that names a non-US country and no US
     place reads no ("Software Engineer II (Venezuela)"); a title never overrides what the location or country said."""
+    location, country, title = _fold(location), _fold(country), _fold(title)
     p = _Patterns(cfg)
     read = None
     if country is not None and country.strip():

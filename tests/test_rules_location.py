@@ -99,6 +99,14 @@ class UsStatusTest(unittest.TestCase):
                 self.assertEqual(us_status(loc, None, self.cfg), "no")
         self.assertEqual(us_status("Remote - US or Latin America", None, self.cfg), "yes")
 
+    def test_accented_places_fold(self):
+        # #257: "IC3 - Infra Engineer - NetSecOps" in "México" was listed; an accent never hides a place.
+        for loc in ("México", "Montréal", "Zürich", "Kraków"):
+            with self.subTest(location=loc):
+                self.assertEqual(us_status(loc, None, self.cfg), "no")
+        self.assertEqual(us_status("San José, CA", None, self.cfg), "yes")
+        self.assertEqual(us_status("Remote", "México", self.cfg), "no")
+
     def test_a_region_beside_north_america_stays_possible(self):
         # #250 review: "North America" may be the US, so a non-US region next to it never makes the posting "no".
         for loc in ("Remote - North America or South America", "Remote - Americas (North America, Latin America)",

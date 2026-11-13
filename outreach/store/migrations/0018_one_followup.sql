@@ -1,4 +1,4 @@
--- 0016: one follow-up (#9 multi-sender ruling, 2026-11-12). 0001 to 0015 are never edited.
+-- 0018: one follow-up (#9 multi-sender ruling, 2026-11-12). 0001 to 0017 are never edited.
 -- A follow-up that has not gone out is skipped when it is seq 2 or later, or when its touch was sent from the
 -- resting account (account 1: the thread's follow-up moves with the new sender, not from here). planned, drafted
 -- and approved to skipped are legal in the 0005 trigger. Each skip gets one message event, keyed by the message.

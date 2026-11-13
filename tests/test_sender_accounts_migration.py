@@ -1,6 +1,6 @@
-"""Migration 0015 (#9 multi-sender design): sender accounts, per-account send days, company pins, bounced addresses.
+"""Migration 0017 (#9 multi-sender design): sender accounts, per-account send days, company pins, bounced addresses.
 
-The store is built to version 14, seeded as the single-sender store was, and then migrated to the latest."""
+The store is built to version 16, seeded as the single-sender store was, and then migrated to the latest."""
 import json
 import shutil
 import sqlite3
@@ -17,18 +17,18 @@ T = "2026-11-12T05:00:00Z"
 GMAIL = "devanshurajesh@gmail.com"
 
 
-def store_at_14(case: unittest.TestCase) -> sqlite3.Connection:
+def store_at_16(case: unittest.TestCase) -> sqlite3.Connection:
     tmp = tempfile.TemporaryDirectory()
     case.addCleanup(tmp.cleanup)
     old = Path(tmp.name)
     for version, _name, path in migration_files():
-        if version <= 14:
+        if version <= 16:
             shutil.copy(path, old / path.name)
     conn = sqlite3.connect(":memory:", isolation_level=None)
     case.addCleanup(conn.close)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    assert migrate(conn, old) == 14
+    assert migrate(conn, old) == 16
     return conn
 
 
@@ -46,13 +46,21 @@ def add_company(conn, name):
 
 class SenderAccountsMigrationTest(unittest.TestCase):
     def setUp(self):
-        self.db = store_at_14(self)
+        self.db = store_at_16(self)
 
     def migrate(self):
         migrate(self.db)
 
     def seed_sender(self):
         self.db.execute("UPDATE sender SET account = ?, history_id = '268958' WHERE sender_id = 1", (GMAIL,))
+
+    def test_a_store_at_master_version_16_applies_17_and_18(self):
+        self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 16)
+        self.assertEqual([r[0] for r in self.db.execute("SELECT version FROM schema_migration ORDER BY version")][-2:], [15, 16])
+        self.assertEqual(migrate(self.db), 18)
+        rows = self.db.execute("SELECT version, name FROM schema_migration WHERE version > 16 ORDER BY version").fetchall()
+        self.assertEqual([(r[0], r[1]) for r in rows], [(17, "sender_accounts"), (18, "one_followup")])
+        self.assertEqual(migrate(self.db), 18)
 
     def test_account_one_copies_sender_row(self):
         self.seed_sender()

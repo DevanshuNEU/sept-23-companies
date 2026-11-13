@@ -115,7 +115,7 @@ class DraftTest(DrafterCase):
         system, sent, name = model.calls[0]
         self.assertEqual(system, load_prompt())
         self.assertEqual(name, CFG.model)
-        self.assertEqual(sent["followup"], {"seq": 1, "of": 1, "last": True})  # one follow-up (0016)
+        self.assertEqual(sent["followup"], {"seq": 1, "of": 1, "last": True})  # one follow-up (0018)
         thread = sent["brief"]["person"]["email"]["messages"]
         self.assertEqual(thread[0]["body"], "Hi Sam Sent, the first email body.")
         for key in ("voice", "stories", "evidence", "posting"):  # both parts of the brief

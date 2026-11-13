@@ -49,10 +49,10 @@ Live result: devanshuchi9@gmail.com sends the general lane from 15 a day; devans
 - [ ] **Step 2:** Open one issue "Multi-sender: accounts, ramp, window, one follow-up (#9 multi-sender ruling)" with this plan's Phase A Done-when lines; open a second for Phase B and a third for Phase C.
 - [ ] **Step 3:** Commit `docs/README.md`, the spec and this plan: `docs: multi-sender design and plan`.
 
-### Task A1: Schema migration 0015 (accounts, pins, per-account days, bounced addresses)
+### Task A1: Schema migration 0017 (accounts, pins, per-account days, bounced addresses)
 
 **Files:**
-- Create: `outreach/store/migrations/0015_sender_accounts.sql`
+- Create: `outreach/store/migrations/0017_sender_accounts.sql`
 - Modify: `outreach/mcp/guard.py:44-58,133-138` (new tables in `NEVER_TABLES`; `touch.account_id` in the protected touch columns)
 - Test: `tests/test_sender_accounts_migration.py`, update `tests/test_sending_schema.py`
 
@@ -96,12 +96,12 @@ Backfill: account 1 from `sender` row 1 (`account`, `history_id`, `next_send_at`
 - [ ] **Step 2:** Run `uv run python -m unittest tests.test_sender_accounts_migration -v`; expect failures on missing tables.
 - [ ] **Step 3:** Write the migration and the guard changes; update `tests/test_sending_schema.py` (it pins `sender_id = 1`, which stays true for `sender`).
 - [ ] **Step 4:** Run the file, then the whole suite; expect PASS.
-- [ ] **Step 5:** Commit `store: sender accounts, per-account send days, company pins, bounced addresses (0015)`.
+- [ ] **Step 5:** Commit `store: sender accounts, per-account send days, company pins, bounced addresses (0017)`.
 
-### Task A2: Migration 0016, one follow-up
+### Task A2: Migration 0018, one follow-up
 
 **Files:**
-- Create: `outreach/store/migrations/0016_one_followup.sql`
+- Create: `outreach/store/migrations/0018_one_followup.sql`
 - Modify: `outreach/sending/config.toml:72` (`followup_business_days = [7]`)
 - Test: `tests/test_one_followup_migration.py`
 
@@ -111,7 +111,7 @@ The migration moves every `message` in `planned`, `drafted` or `approved` with `
 - [ ] **Step 2:** Run; expect FAIL.
 - [ ] **Step 3:** Write the migration; change the config line.
 - [ ] **Step 4:** Run the file and `tests.test_sending_followups`; fix any test that pinned `[3, 7, 14, 21]` to read the config instead.
-- [ ] **Step 5:** Commit `sending: one follow-up at 7 business days (0016)`.
+- [ ] **Step 5:** Commit `sending: one follow-up at 7 business days (0018)`.
 
 ### Task A3: Config: accounts, window, holidays, spread pacing
 
@@ -273,7 +273,7 @@ config.toml gets three `[[account]]` blocks with the Global Constraints values (
 ### Phase A Done when
 
 - Full suite green; CI `CLEAN`; PR base `master`.
-- In the live checkout (Devanshu runs the sign-in): `uv run python -m outreach.install` applies 0015 and 0016; `python -m outreach.sending auth --account devanshuchi9@gmail.com`; `whoami --account devanshuchi9@gmail.com` prints it; the status strip shows devanshuchi9 at 15, devanshurajesh reading, Northeastern waiting.
+- In the live checkout (Devanshu runs the sign-in): `uv run python -m outreach.install` applies 0017 and 0018; `python -m outreach.sending auth --account devanshuchi9@gmail.com`; `whoami --account devanshuchi9@gmail.com` prints it; the status strip shows devanshuchi9 at 15, devanshurajesh reading, Northeastern waiting.
 - On the first weekday after deploy: the first email goes alone (proof), then the rest spread to 15; no sponsor lane email goes; no email goes outside 08:00 to 15:00 recipient time.
 
 ---

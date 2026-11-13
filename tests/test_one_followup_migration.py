@@ -1,6 +1,6 @@
-"""Migration 0016 (#9 multi-sender ruling 2026-11-12): one follow-up, 7 business days after the first email.
+"""Migration 0018 (#9 multi-sender ruling 2026-11-12): one follow-up, 7 business days after the first email.
 
-The store is built to version 15, seeded as the four-follow-up store was, and then migrated to the latest."""
+The store is built to version 17, seeded as the four-follow-up store was, and then migrated to the latest."""
 import json
 import shutil
 import sqlite3
@@ -15,24 +15,24 @@ T = "2026-11-12T05:00:00Z"
 DAY = "2026-11-20"
 
 
-def store_at_15(case: unittest.TestCase) -> sqlite3.Connection:
+def store_at_17(case: unittest.TestCase) -> sqlite3.Connection:
     tmp = tempfile.TemporaryDirectory()
     case.addCleanup(tmp.cleanup)
     old = Path(tmp.name)
     for version, _name, path in migration_files():
-        if version <= 15:
+        if version <= 17:
             shutil.copy(path, old / path.name)
     conn = sqlite3.connect(":memory:", isolation_level=None)
     case.addCleanup(conn.close)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    assert migrate(conn, old) == 15
+    assert migrate(conn, old) == 17
     return conn
 
 
 class OneFollowupMigrationTest(unittest.TestCase):
     def setUp(self):
-        self.db = store_at_15(self)
+        self.db = store_at_17(self)
         for account_id, address in ((1, "a@gmail.com"), (2, "b@northeastern.edu")):
             self.db.execute("INSERT INTO sender_account(account_id, address, kind, created_at, updated_at) "
                             "VALUES (?, ?, 'gmail', ?, ?)", (account_id, address, T, T))

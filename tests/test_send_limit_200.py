@@ -36,7 +36,7 @@ class SendDayMigrationTest(unittest.TestCase):
             self.put("2026-11-16", -1)
 
     def test_the_rebuild_keeps_every_row_and_column(self):
-        # 0012 runs on a store at version 11 (0015 later rebuilds send_day again, per account).
+        # 0012 runs on a store at version 11 (0017 later rebuilds send_day again, per account).
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         for version, _name, path in migration_files():

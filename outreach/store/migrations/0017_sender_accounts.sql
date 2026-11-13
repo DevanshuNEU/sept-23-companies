@@ -1,4 +1,4 @@
--- 0015: several sender accounts (multi-sender design, 2026-11-12). 0001 to 0014 are never edited.
+-- 0017: several sender accounts (multi-sender design, 2026-11-12). 0001 to 0016 are never edited.
 -- sender_account holds one row per address that sends. `sender` row 1 stays as the global pause (his button).
 -- company_sender pins a company to one account, bounced_address is the dead-address list across accounts, and
 -- touch.account_id says which account sent the first email. send_day is rebuilt per account (the 0012 pattern).

@@ -229,7 +229,7 @@ class _Run:
         path = str(self.folder / "outreach.db")
         install(path)
         self.conn = connect(path)
-        # The sender's account: send days are kept per account (migration 0015) and a new store has none.
+        # The sender's account: send days are kept per account (migration 0017) and a new store has none.
         stamp = ny(scenario.start, "00:00").astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.conn.execute("INSERT INTO sender_account(account_id, address, kind, created_at, updated_at) "
                           "VALUES (1, ?, 'gmail', ?, ?)", (cfg.from_address, stamp, stamp))

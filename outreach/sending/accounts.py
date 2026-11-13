@@ -29,7 +29,7 @@ def sync(conn: sqlite3.Connection, cfg: SendConfig, now: str) -> dict[str, Accou
     Returns the rows keyed by the address as written in config."""
     out: dict[str, AccountRow] = {}
     for acct in cfg.accounts:
-        # sender_account.address is COLLATE NOCASE (0015), so `=` ignores case.
+        # sender_account.address is COLLATE NOCASE (0017), so `=` ignores case.
         row = conn.execute("SELECT * FROM sender_account WHERE address = ?", (acct.address,)).fetchone()
         if row is None:
             conn.execute("INSERT INTO sender_account(address, kind, created_at, updated_at) VALUES (?, ?, ?, ?)",

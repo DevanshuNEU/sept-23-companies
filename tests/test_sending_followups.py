@@ -18,7 +18,7 @@ from outreach.store import transaction
 from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = dataclasses.replace(load_config(), followup_business_days=(3, 7, 14, 21))  # the 4-step mechanism; the shipped config is one follow-up (0016)
 STAMP = "2026-11-20T15:00:00Z"
 ONE = dataclasses.replace(CFG, followup_business_days=(7,))  # one follow-up, for the tests about lapses and closes
 # A first email on Monday 2026-11-02: follow-ups at 3, 7, 14 and 21 business days (#9, 2026-10-31).

@@ -68,8 +68,8 @@ day_start_jitter_minutes = 25
 # A company's gap is per_company_gap_minutes plus up to this many (a different amount after each send).
 per_company_gap_jitter_minutes = 60
 
-# Follow-ups (#9, 2026-10-31): 4, at 3, 7, 14 and 21 business days after the first email; at most 4 (message.seq 0 to 4).
-followup_business_days = [3, 7, 14, 21]
+# Follow-ups (#9 multi-sender ruling, 2026-11-12): one, 7 business days after the first email (message.seq allows up to 4).
+followup_business_days = [7]
 # A follow-up nobody approved or skipped this many business days after it was due lapses (planned or drafted).
 followup_lapse_business_days = 5
 # An open touch with nothing queued closes no_reply this many business days after its last sent message.

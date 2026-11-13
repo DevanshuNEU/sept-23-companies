@@ -12,6 +12,7 @@ from outreach.followup_drafter import __main__ as cli
 from outreach.followup_drafter.config import load_drafter_config
 from outreach.followup_drafter.run import load_prompt, run_drafter
 from outreach.reader.night import RunResult
+from outreach.sending.config import load_config as load_send_config
 from tests import apiseed as seed
 from tests.mcptest import fingerprint, store_path
 from tests.storetest import fresh_store
@@ -114,7 +115,7 @@ class DraftTest(DrafterCase):
         system, sent, name = model.calls[0]
         self.assertEqual(system, load_prompt())
         self.assertEqual(name, CFG.model)
-        self.assertEqual(sent["followup"], {"seq": 1, "of": 4, "last": False})
+        self.assertEqual(sent["followup"], {"seq": 1, "of": 1, "last": True})  # one follow-up (0016)
         thread = sent["brief"]["person"]["email"]["messages"]
         self.assertEqual(thread[0]["body"], "Hi Sam Sent, the first email body.")
         for key in ("voice", "stories", "evidence", "posting"):  # both parts of the brief
@@ -126,7 +127,9 @@ class DraftTest(DrafterCase):
     def test_the_fourth_is_marked_last(self):
         self.thread("Sam Sent", seqs=(4,))
         model = FakeModel(GOOD)
-        self.run_it(model)
+        four = replace(load_send_config(), followup_business_days=(3, 7, 14, 21))
+        with mock.patch("outreach.followup_drafter.run.load_send_config", return_value=four):
+            self.run_it(model)
         self.assertEqual(model.calls[0][1]["followup"], {"seq": 4, "of": 4, "last": True})
 
     def test_two_follow_ups_in_one_thread_go_in_order_and_the_second_sees_the_first(self):

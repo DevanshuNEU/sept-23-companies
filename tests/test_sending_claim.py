@@ -206,15 +206,12 @@ class RecordSentTest(Base):
         self.assertEqual(self.message(mid)["state"], "sent")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outreach_touch").fetchone()[0], 1)
 
-    def test_first_send_plans_four_follow_ups(self):
+    def test_first_send_plans_one_follow_up(self):
         person, mid = self.approve()
         self.send(mid)
         rows = self.db.execute("SELECT seq, state, due_on, saved_by, subject FROM message WHERE touch_id = ? "
                                "AND seq > 0", (self.touch(person)["touch_id"],)).fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-05", "sender", ""),
-                                                    (2, "planned", "2026-11-11", "sender", ""),
-                                                    (3, "planned", "2026-11-20", "sender", ""),
-                                                    (4, "planned", "2026-12-01", "sender", "")])
+        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-11", "sender", "")])
 
     def test_next_send_at_is_a_human_gap_later(self):
         _, mid = self.approve()

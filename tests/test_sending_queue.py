@@ -10,7 +10,7 @@ from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_me
 from tests.storetest import fresh_store, seed_company
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
-CFG = dataclasses.replace(load_config(), ramp_floor=1)
+CFG = dataclasses.replace(load_config(), ramp_floor=1, followup_business_days=(3, 7, 14, 21))  # the 4-step order mechanism; shipped config is one follow-up (0016)
 NY = ZoneInfo("America/New_York")
 LA = ZoneInfo("America/Los_Angeles")
 MON_DAY = date(2026, 11, 2)

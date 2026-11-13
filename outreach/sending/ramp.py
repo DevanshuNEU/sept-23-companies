@@ -162,6 +162,8 @@ def note_signal(conn: sqlite3.Connection, kind: str, *, account: AccountRow, at:
     account's `sender_account` row with `pause_kind 'hard_block'` (never `sender` row 1: that is his button, and it
     pauses every account), appends a `hard_block` event and tells him once per kind per account per day. A repeated
     `key` changes nothing. `now` is when the signal is processed (required: nothing here reads the real clock).
+    An account that does not send (`sends = false`, account 1 resting) gets the signal and its day's outcome but
+    never a pause or a notice: it sends nothing, and a block nobody can see would only hold his Resume.
     Callers pass only send-path Gmail limits as `gmail_limit` or `gmail_policy`: a 429 on a read is not one."""
     if kind not in signals.WARNING_KINDS + signals.HARD_KINDS:
         raise ValueError(f"unknown signal kind {kind!r}")
@@ -180,8 +182,8 @@ def note_signal(conn: sqlite3.Connection, kind: str, *, account: AccountRow, at:
     if hard or row["outcome"] != "hard_block":
         conn.execute("UPDATE send_day SET outcome = ? WHERE account_id = ? AND day = ?",
                      ("hard_block" if hard else "warning", aid, day.isoformat()))
-    if not hard:
-        return
+    if not hard or not account.cfg.sends:
+        return  # a resting account (sends = false) cannot send, so a hard kind is recorded but pauses nothing
     reason = _reason(kind, account, cfg)
     if accounts.hard_pause(conn, aid, reason, stamp):
         append_event(conn, entity="sender", entity_id=aid, kind="hard_block", actor="sender", at=at,

@@ -9,7 +9,7 @@ from outreach.sending import accounts, notify, ramp, signals
 from outreach.sending.config import load_config
 from outreach.store.writes import log_touch
 from tests import SHIPPED_SEND_CONFIG, flat_200
-from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_sent, with_ramp
+from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_sent, solo, with_ramp
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()  # the tests' scratch copy: the adaptive ramp, 20 up to 100
@@ -37,7 +37,8 @@ class Base(unittest.TestCase):
         self.people = 0
         self.notices = []
         self.keys = 0
-        self.acct = accounts.primary(self.db, CFG)
+        # Account 1 as the one account that sends (`solo`): a resting account records signals but is never paused.
+        self.acct = accounts.primary(self.db, solo(CFG))
 
     def notifier(self, title, text):
         self.notices.append((title, text))

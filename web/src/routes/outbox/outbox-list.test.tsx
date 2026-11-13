@@ -118,8 +118,10 @@ describe('SendingStrip', () => {
     expect(screen.getByRole('group', { name: 'Sender' })).toHaveTextContent('Gmail signed out');
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Gmail is signed out')).toBeInTheDocument();
-    expect(within(alert).getByText(/python -m outreach\.sending auth --account devanshuchi9@gmail\.com/)).toBeInTheDocument();
-    expect(within(alert).getByText(/Approve still works/)).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      'devanshuchi9@gmail.com: signed out. Run python -m outreach.sending auth --account devanshuchi9@gmail.com. Approve still works: approved emails wait until Gmail is back.',
+    );
+    expect(within(alert).getByText('python -m outreach.sending auth --account devanshuchi9@gmail.com').tagName).toBe('CODE');
     expect(screen.queryByRole('button', { name: /^Resume sending/ })).toBeNull();
   });
 

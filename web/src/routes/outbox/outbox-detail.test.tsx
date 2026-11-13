@@ -86,6 +86,23 @@ afterEach(async () => {
   window.localStorage.clear();
 });
 
+describe('from', () => {
+  it('the header names the account the email goes from', async () => {
+    await open(T.omar, 'Omar Haddad');
+    expect(screen.getByRole('banner')).toHaveTextContent('From devanshuchi9@gmail.com');
+  });
+
+  it('a draft no account can take says what it waits for', async () => {
+    const db = buildFixture('default');
+    const waits = 'Waits for chicholikar.d@northeastern.edu, which does not send yet.';
+    db.details[T.omar]!.fromAccount = { address: null, text: waits };
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.omar}`, client: new FixtureClient(db) });
+    await screen.findByRole('heading', { level: 2, name: 'Omar Haddad' });
+    expect(screen.getByText(waits)).toBeInTheDocument();
+    expect(screen.queryByText(/^From /)).toBeNull();
+  });
+});
+
 describe('approve', () => {
   it('Kenji: Approve is aria-disabled with the block in its tooltip, and neither a nor a click approves', async () => {
     const { client } = await open(T.kenji, 'Kenji Watanabe');

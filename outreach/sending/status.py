@@ -261,7 +261,8 @@ def _state(conn: sqlite3.Connection, lines: tuple[AccountSnapshot, ...], now: da
         first = held[0]
         error = conn.execute("SELECT auth_error FROM sender_account WHERE address = ?", (first.address,)).fetchone()
         detail = error["auth_error"] if error is not None and first.auth_state == "wrong_account" else ""
-        return "signed_out", f"{first.address}: {first.text}" + (f" ({detail})" if detail else ""), None
+        detail = f" {detail[:1].upper()}{detail[1:]}." if detail else ""
+        return "signed_out", f"{first.address}: {first.text}.{detail}", None
     if old_sender_loaded:
         return "paused_by_you", OLD_SENDER_TEXT, None
     local = now.astimezone(ZoneInfo(cfg.day_tz))

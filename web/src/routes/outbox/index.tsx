@@ -15,7 +15,7 @@ import { OutboxList, OutboxListSkeleton } from './outbox-list';
 import { firstToAct } from './outbox-order';
 import { OutboxDetailPane } from './outbox-detail';
 import { forCompany } from './outbox-patches';
-import { SendingStrip, SendingStripSkeleton } from './sending-strip';
+import { CommandText, SendingStrip, SendingStripSkeleton } from './sending-strip';
 
 const SPLIT_KEY = 'outreach.outbox.split';
 const LIST_PX = 400;
@@ -54,7 +54,8 @@ function SenderAlert({ s }: { s: SendingStatus }) {
   if (s.state === 'signed_out') {
     return (
       <StateBanner tone="bad" title="Gmail is signed out">
-        {`${s.pausedReason} Approve still works: approved emails wait until Gmail is back.`}
+        <CommandText text={s.pausedReason} />
+        {' Approve still works: approved emails wait until Gmail is back.'}
       </StateBanner>
     );
   }

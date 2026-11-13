@@ -1492,7 +1492,13 @@ class MultiAccountTest(MultiBase):
                         f"WHERE touch_id IN ({touches[0]}, {touches[1]})", (iso(MON - timedelta(hours=1)),))
         fresh = self.approve()
         report = self.tick()
-        self.assertEqual(self.account_of(1)["paused"], 1)
+        # The stops came to account 1: its signal is recorded there, never on account 2. Account 1 rests, so the
+        # signal pauses nothing (a resting account cannot send; Task A11 review).
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE entity = 'sender' AND entity_id = 1 "
+                                         "AND kind = 'stop_replies_hard'").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE entity = 'sender' AND entity_id = ? "
+                                         "AND kind = 'stop_replies_hard'", (self.two.account_id,)).fetchone()[0], 0)
+        self.assertEqual(self.account_of(1)["paused"], 0)
         self.assertEqual(self.account_of(self.two.account_id)["paused"], 0)
         self.assertEqual(report.sent, (fresh,))
 

@@ -127,7 +127,7 @@ class EmptyStoreTest(Base):
         self.sender(auth_state="signed_out", auth_error="invalid_grant")
         s = self.snap()
         self.assertEqual((s.state, s.paused_reason),
-                         ("signed_out", "devanshurajesh@gmail.com: signed out. Run: python -m outreach.sending auth"))
+                         ("signed_out", "devanshurajesh@gmail.com: signed out. Run: python -m outreach.sending auth."))
         self.sender(auth_state="wrong_account", auth_error="the token signs in as other@gmail.com, not me@gmail.com")
         s = self.snap()
         self.assertEqual(s.state, "signed_out")
@@ -516,7 +516,8 @@ class AccountsSnapshotTest(unittest.TestCase):
                                                  f"auth --account {GENERAL}")
         self.assertEqual(self.lines(s)[REST], f"{REST}: reading replies only")
         self.assertEqual(s.state, "signed_out", "the only sending account is signed out, so nothing sends")
-        self.assertIn(f"python -m outreach.sending auth --account {GENERAL}", s.paused_reason)
+        self.assertEqual(s.paused_reason, f"{GENERAL}: not signed in yet. Run: python -m outreach.sending auth "
+                                          f"--account {GENERAL}.")
         self.auth(self.two, "signed_out", "invalid_grant")  # a token that worked once and died
         self.assertEqual(self.lines(self.snap())[GENERAL],
                          f"{GENERAL}: signed out. Run: python -m outreach.sending auth --account {GENERAL}")
@@ -524,7 +525,8 @@ class AccountsSnapshotTest(unittest.TestCase):
         s = self.snap()
         self.assertEqual(s.accounts[1].state, "signed_out")
         self.assertIn("python -m outreach.sending auth --account", self.lines(s)[GENERAL])
-        self.assertIn("other@gmail.com", s.paused_reason)
+        self.assertTrue(s.paused_reason.endswith(f"auth --account {GENERAL}. The token for {GENERAL} signs in as "
+                                                 "other@gmail.com."), s.paused_reason)
 
     def test_a_signed_out_resting_account_says_its_replies_are_not_read(self):
         self.auth(1, "signed_out", "no Gmail token; run: python -m outreach.sending auth")

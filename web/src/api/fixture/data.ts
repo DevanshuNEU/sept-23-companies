@@ -1416,7 +1416,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     s.lastStepDown = { at: et(TODAY, '10:02'), reason: 'Gmail daily limit reached' };
   } else if (scenario === 'signed_out') {
     const command = `python -m outreach.sending auth --account ${ACCOUNTS.general}`;
-    pause(s, 'signed_out', `${ACCOUNTS.general}: signed out. Run: ${command}`, et(TODAY, '09:50'), 'Gmail is signed out.');
+    pause(s, 'signed_out', `${ACCOUNTS.general}: signed out. Run: ${command}.`, et(TODAY, '09:50'), 'Gmail is signed out.');
     s.pausedAt = null;
     s.accounts = fixtureAccounts(s.sentToday, s.limitToday, { state: 'signed_out', text: `signed out. Run: ${command}`, authState: 'signed_out' });
   } else if (scenario === 'weekend') {

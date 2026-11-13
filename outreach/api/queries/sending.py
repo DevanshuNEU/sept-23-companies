@@ -155,14 +155,19 @@ def pause_sending(ctx: WriteCtx, revision: int, cfg: SendConfig, *, old_sender_l
 
 def resume_sending(ctx: WriteCtx, revision: int, acknowledge_block: bool, cfg: SendConfig, *,
                    old_sender_loaded: bool) -> SendingStatus:
-    """Clears his pause. A hard block is cleared only with `acknowledge_block`; without it the refusal carries the
-    block's reason. Not paused writes nothing. The revision is checked first in every case."""
+    """Clears his pause. A hard block on an account that sends is cleared only with `acknowledge_block`; without it
+    the refusal carries the block's reason. A block on an account that does not send needs no acknowledgement and is
+    cleared with his pause. Not paused writes nothing. The revision is checked first in every case."""
     row = _sender(ctx.conn)
     if row["revision"] != revision:
         raise ApiProblem("conflict", f"Sending changed since you loaded it. {NOT_SAVED}")
-    # A hard block lives on an account's own row (`sender_account`) now, or on sender row 1 in an older store.
-    blocked = ctx.conn.execute("SELECT paused_reason FROM sender_account WHERE paused = 1 "
-                               "ORDER BY account_id").fetchall()
+    # A hard block lives on an account's own row (`sender_account`) now, or on sender row 1 in an older store. Only
+    # a block on an account that sends needs his acknowledgement (the strip shows only those); a leftover block on
+    # an account that does not send is cleared with the rest (`clear_hard_blocks`).
+    sending_ids = [a.account_id for a in accounts.sending(accounts.in_play(ctx.conn, cfg))]
+    blocked = ctx.conn.execute(
+        f"SELECT paused_reason FROM sender_account WHERE paused = 1 AND account_id IN "
+        f"({','.join('?' * len(sending_ids))}) ORDER BY account_id", sending_ids).fetchall()
     if row["paused"] or blocked:
         hard = bool(blocked) or row["pause_kind"] == "hard_block"
         reason = blocked[0]["paused_reason"] if blocked else row["paused_reason"]

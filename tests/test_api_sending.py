@@ -248,6 +248,31 @@ class PauseResumeTest(SendingBase):
         detail = json.loads(event["detail"])
         self.assertEqual((detail["cleared"], detail["acknowledged"], detail["reason"]), ("hard_block", True, HARD_REASON))
 
+    def test_a_leftover_block_on_the_resting_account_never_traps_his_resume(self):
+        """A hard block left on account 1 (it rests, so the strip never shows it) needs no acknowledgement: pause,
+        then a plain resume, resumes and clears it."""
+        self.conn.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, "
+                          "paused_at = ? WHERE account_id = 1", (HARD_REASON, NOW))
+        s = self.status()
+        self.assertEqual(s["state"], "running")
+        res = self.post("/api/sending/pause", {"revision": s["revision"]})
+        self.assertEqual((res.status_code, res.json()["state"]), (200, "paused_by_you"), res.text)
+        res = self.post("/api/sending/resume", {"revision": res.json()["revision"]})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["state"], "running")
+        row = self.conn.execute("SELECT paused, pause_kind FROM sender_account WHERE account_id = 1").fetchone()
+        self.assertEqual(row[:], (0, None))
+        self.assertEqual(self.conn.execute("SELECT paused FROM sender").fetchone()[0], 0)
+
+    def test_a_block_on_a_sending_account_still_needs_the_acknowledgement(self):
+        self.conn.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, "
+                          "paused_at = ? WHERE account_id = ?", (HARD_REASON, NOW, self.general))
+        res = self.post("/api/sending/resume", {"revision": 1})
+        self.assertEqual((res.status_code, res.json()["code"]), (409, "not_allowed"), res.text)
+        self.assertIn(HARD_REASON, res.json()["message"])
+        res = self.post("/api/sending/resume", {"revision": 1, "acknowledgeBlock": True})
+        self.assertEqual((res.status_code, res.json()["state"]), (200, "running"), res.text)
+
     def test_a_pause_never_overwrites_a_hard_block(self):
         self.hard_block()
         res = self.post("/api/sending/pause", {"revision": 3})

@@ -45,14 +45,22 @@ const ACCOUNT_TONE: Record<AccountState, Tone> = {
 /** What sends first, then what will send once it is set up, then what only reads replies. Config order within each. */
 const accountRank = (a: AccountStatus) => (a.sends ? 0 : a.lane ? 1 : 2);
 
-/** The account's words after its address. A sign-in line ends in the command to run, set as code he can copy. */
-function AccountText({ a }: { a: AccountStatus }) {
-  const at = a.text.indexOf('. Run: ');
-  if (a.state !== 'signed_out' || at < 0) return <>{a.text}</>;
+const RUN = '. Run: ';
+
+/** Sender text that ends in a sign-in command ("signed out. Run: python -m ... auth --account x."), with the command
+ * set as code he can copy and nothing else in the code. Text with no command reads as it is. */
+export function CommandText({ text }: { text: string }) {
+  const at = text.indexOf(RUN);
+  if (at < 0) return <>{text}</>;
+  const rest = text.slice(at + RUN.length);
+  const stop = rest.indexOf('. '); // a command has no ". " in it; anything after it is its own sentence
+  const command = (stop < 0 ? rest : rest.slice(0, stop)).replace(/\.$/, '');
+  const after = stop < 0 ? (rest.endsWith('.') ? '.' : '') : rest.slice(stop);
   return (
     <>
-      {`${a.text.slice(0, at)}. Run `}
-      <code className="font-mono select-all">{a.text.slice(at + '. Run: '.length)}</code>
+      {`${text.slice(0, at)}. Run `}
+      <code className="font-mono select-all">{command}</code>
+      {after}
     </>
   );
 }
@@ -71,7 +79,7 @@ function Accounts({ accounts }: { accounts: AccountStatus[] }) {
             <span aria-hidden className={cn('size-1.5 flex-none rounded-full', DOT[tone])} />
             <span className="font-medium whitespace-nowrap">{a.address}</span>
             <span className={cn('min-w-0 break-words tabular-nums', red ? 'text-bad' : 'text-muted-foreground')}>
-              <AccountText a={a} />
+              <CommandText text={a.text} />
             </span>
           </li>
         );

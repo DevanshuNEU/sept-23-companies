@@ -13,7 +13,7 @@ import type { IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsView } from '.
 /** The API's `name_key` in the small: lower case, letters and digits only. A search with none of either finds nothing. */
 const nameKey = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-interface Company { id: number; name: string; size: number | null; guessedBig?: boolean; yc?: boolean; everify?: boolean; noSponsor?: boolean; contactedOn?: IsoDate }
+interface Company { id: number; name: string; size: number | null; guessedBig?: boolean; yc?: boolean; everify?: boolean; noSponsor?: boolean; contactedOn?: IsoDate; maybeStaffing?: boolean }
 
 const COMPANIES: Company[] = [
   { id: 7001, name: 'Retell AI', size: 45, yc: true, everify: true },
@@ -22,7 +22,7 @@ const COMPANIES: Company[] = [
   { id: 7004, name: 'Resend', size: 300, everify: true },
   { id: 7005, name: 'Baseten', size: 640 },
   { id: 7006, name: 'Helix', size: 2400, noSponsor: true },
-  { id: 7007, name: 'Axiom', size: null },
+  { id: 7007, name: 'Axiom', size: null, maybeStaffing: true },
   { id: 7008, name: 'Juniper', size: 75, noSponsor: true },
   { id: 7009, name: 'Kestrel', size: 1200 },
   { id: 7010, name: 'Lumen', size: 30, yc: true },
@@ -56,6 +56,7 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
   const company = (c: Company) => ({
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
+    maybeStaffing: c.maybeStaffing === true, forClient: false,
   });
   const rows = Array.from({ length: 80 }, (_, i): JobRow => {
     const c = COMPANIES[i % COMPANIES.length] as Company;
@@ -81,6 +82,7 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
       seenGapS: old ? null : i === 4 ? 3 * 86_400 + 3600 : 1800, firstRead: old,
       repostedFrom: i === 1 ? '2026-10-02T14:30:00Z' : null,
       ...company(c),
+      forClient: i === 5,
     };
   });
   // No date: a board with no posting time, found on its first read.
@@ -147,6 +149,7 @@ export function foundJobs(asOf: IsoTime): JobRow[] {
     listAt: minus(30 * (i + 1)), postedAt: minus(30 * (i + 1)), firstSeenAt: asOf, seenGapS: 1800, firstRead: false, repostedFrom: null,
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
+    maybeStaffing: c.maybeStaffing === true, forClient: false,
   }));
 }
 

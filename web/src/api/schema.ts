@@ -2356,12 +2356,16 @@ export interface components {
             firstRead: boolean;
             /** Firstseenat */
             firstSeenAt: string;
+            /** Forclient */
+            forClient: boolean;
             /** Leveltag */
             levelTag: string;
             /** Listat */
             listAt: string | null;
             /** Location */
             location: string;
+            /** Maybestaffing */
+            maybeStaffing: boolean;
             /** Postedat */
             postedAt: string | null;
             /** Postingid */

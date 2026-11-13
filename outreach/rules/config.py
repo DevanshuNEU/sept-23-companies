@@ -20,6 +20,7 @@ REQUIRED = {
               "off_lane_unless_software", "software_titles", "ambiguous", "ambiguous_margin", "software_words", "physical_words",
               "phd_titles"),
     "role": ("out_always", "software_core", "ai", "out_unless_core", "allowed"),
+    "staffing": ("client_phrases", "client_window_chars"),
     "years": ("experience_words", "preferred", "degree_alternative", "company_age", "company_voice", "candidate_voice",
               "body_entry", "master_words", "master_abbreviations", "bachelor_words", "upper_bound", "technologies",
               "phd_words", "phd_cues", "phd_softeners"),
@@ -50,6 +51,7 @@ class Config:
     eligibility: dict
     facts: dict
     role: dict  # the software role lists (#250), read by role.py
+    staffing: dict  # client wording (#257), read by staffing.py
     raw: bytes  # the file bytes, stored with the ruleset row
 
 

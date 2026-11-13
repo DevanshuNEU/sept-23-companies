@@ -410,6 +410,7 @@ export interface JobRow {
   firstRead: boolean /* found on the board's first read */; repostedFrom: IsoTime | null /* a repost: when Knock first saw the one it repeats */;
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
+  maybeStaffing: boolean /* work tier 3, staffing-flagged and not promoted (#257) */; forClient: boolean /* opens with client wording (#257) */;
 }
 export interface JobCounts { yourLevel: number; higher: number; other: number }
 export interface JobsView { asOf: IsoTime; rows: JobRow[]; total: number; nextAfter: string | null; counts: JobCounts }

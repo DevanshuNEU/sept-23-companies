@@ -8,7 +8,7 @@ RULES_DIR = Path(__file__).resolve().parent
 # The files whose bytes decide what a posting gets. config.py is in because phrases() decides how every word list
 # matches. Files that do not exist yet (the rule modules land task by task) hash as empty.
 RULE_FILES = ("config.toml", "config.py", "text.py", "title.py", "years.py", "location.py", "sponsorship.py",
-              "eligibility.py", "facts.py", "decide.py", "role.py")
+              "eligibility.py", "facts.py", "decide.py", "role.py", "staffing.py")
 # Files in this folder that cannot change a decision. A test fails on any file that is in neither tuple.
 NOT_RULES = ("__init__.py", "version.py", "rebuild.py")
 

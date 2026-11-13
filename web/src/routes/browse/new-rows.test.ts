@@ -5,7 +5,7 @@ const job = (postingId: number, o: Partial<JobRow> = {}): JobRow => ({
   postingId, title: `Software Engineer ${postingId}`, url: `https://jobs.example/${postingId}`, location: 'Remote (US)', levelTag: 'new grad',
   listAt: '2026-11-10T15:00:00Z', postedAt: '2026-11-10T15:00:00Z', firstSeenAt: '2026-11-10T15:05:00Z', seenGapS: 1800, firstRead: false,
   repostedFrom: null, companyId: 7001, companyName: 'Retell AI', size: 45, big: false, saysNoSponsorship: false, everify: false, yc: false,
-  contactedOn: null, ...o,
+  contactedOn: null, maybeStaffing: false, forClient: false, ...o,
 });
 const ids = (rows: JobRow[]) => rows.map((r) => r.postingId);
 

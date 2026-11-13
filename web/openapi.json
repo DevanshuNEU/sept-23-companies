@@ -2991,6 +2991,10 @@
             "title": "Firstseenat",
             "type": "string"
           },
+          "forClient": {
+            "title": "Forclient",
+            "type": "boolean"
+          },
           "levelTag": {
             "title": "Leveltag",
             "type": "string"
@@ -3009,6 +3013,10 @@
           "location": {
             "title": "Location",
             "type": "string"
+          },
+          "maybeStaffing": {
+            "title": "Maybestaffing",
+            "type": "boolean"
           },
           "postedAt": {
             "anyOf": [
@@ -3094,7 +3102,9 @@
           "saysNoSponsorship",
           "everify",
           "yc",
-          "contactedOn"
+          "contactedOn",
+          "maybeStaffing",
+          "forClient"
         ],
         "title": "JobRowWire",
         "type": "object"

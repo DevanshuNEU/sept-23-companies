@@ -110,12 +110,14 @@ function whatToWiden(on: { window: boolean; q: boolean; size: boolean; level: bo
 function Flags({ job, asOf, reachedOn }: { job: JobRow; asOf: IsoTime; reachedOn: string | null }) {
   const repost = repostTag(job.repostedFrom, asOf);
   const gap = gapTag(job);
-  if (!repost && !gap && !job.saysNoSponsorship && !job.everify && !job.yc && !reachedOn) return null;
+  if (!repost && !gap && !job.saysNoSponsorship && !job.maybeStaffing && !job.forClient && !job.everify && !job.yc && !reachedOn) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {repost ? <Badge variant="idle">{repost}</Badge> : null}
       {gap ? <Badge variant="idle">{gap}</Badge> : null}
       {job.saysNoSponsorship ? <Badge variant="warn">Says no sponsorship</Badge> : null}
+      {job.maybeStaffing ? <Badge variant="warn">Maybe a staffing firm</Badge> : null}
+      {job.forClient ? <Badge variant="warn">Posted for a client</Badge> : null}
       {job.everify ? <Badge variant="idle">E-Verify</Badge> : null}
       {job.yc ? <Badge variant="idle">YC</Badge> : null}
       {reachedOn ? <Badge variant="info">{`Reached ${reachedOn}`}</Badge> : null}

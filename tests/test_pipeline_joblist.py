@@ -243,6 +243,80 @@ class RoleTests(JobListCase):
         self.assertFalse({r.posting_id for r in cross.rows} & set(sw))
 
 
+class StaffingTests(JobListCase):
+    """#257: a known staffing firm is on no tab and in no count; an uncertain one carries a tag."""
+
+    def all_ids(self):
+        return {pid for view in ("your_level", "higher", "other") for pid in self.ids(view=view)}
+
+    def zero_counts(self):
+        return {"your_level": 0, "higher": 0, "other": 0}
+
+    def test_a_known_staffing_firm_is_on_no_tab(self):
+        firm = self.company("Raydar")
+        self.job(firm)
+        self.job(firm, "Data Scientist I", role="other")
+        self.assertEqual((self.all_ids(), self.run_query().counts), (set(), self.zero_counts()))
+
+    def test_a_staffing_word_in_the_name_hides_it(self):
+        self.job(self.company("Acme Staffing Group"))
+        self.job(self.company("Northwind Recruiting"))
+        self.assertEqual(self.all_ids(), set())
+
+    def test_mostly_client_postings_hide_the_company(self):
+        firm = self.company("Pinnacle Partners")
+        for _ in range(3):
+            self.job(firm, for_client=1)
+        self.job(firm)
+        self.assertEqual(self.all_ids(), set())
+
+    def test_two_client_postings_stay_listed_and_say_so(self):
+        co = self.company("Small Agency")
+        ids = {self.job(co, for_client=1), self.job(co, for_client=1)}
+        rows = {r.posting_id: r for r in self.run_query().rows}
+        self.assertEqual(set(rows), ids)
+        self.assertTrue(all(r.for_client for r in rows.values()))
+
+    def test_a_bank_saying_our_clients_is_untouched(self):
+        bank = self.company("Big Bank")
+        pid = self.job(bank)  # for_client 0: "our clients" never counts (rules)
+        row, = self.run_query().rows
+        self.assertEqual((row.posting_id, row.for_client, row.maybe_staffing), (pid, False, False))
+
+    def test_a_company_merged_into_a_staffing_firm_is_hidden(self):
+        firm, alias = self.company("True Talent Solutions Partners"), self.company("TTSP")
+        merge(self.conn, alias, firm)
+        self.job(alias)
+        self.assertEqual(self.all_ids(), set())
+
+    def test_a_product_company_with_placement_in_its_name_stays(self):
+        pid = self.job(self.company("Placements.io"))
+        self.assertEqual(self.all_ids(), {pid})
+
+    def test_an_alias_name_never_hides_the_company_it_was_merged_into(self):
+        acme, alias = self.company("Acme"), self.company("Acme Recruiting")
+        merge(self.conn, alias, acme)
+        pid = self.job(acme)
+        self.assertEqual(self.all_ids(), {pid})
+
+    def test_tier_3_is_maybe_staffing_unless_promoted(self):
+        tier3, promoted = self.company(), self.company()
+        for cid, flag in ((tier3, 0), (promoted, 1)):
+            self.conn.execute("INSERT INTO work_tier(company_id, tier, promoted, reason, set_at) "
+                              "VALUES (?, 3, ?, 'LCA staffing', '2026-11-01T00:00:00Z')", (cid, flag))
+        a, b = self.job(tier3), self.job(promoted)
+        rows = {r.posting_id: r.maybe_staffing for r in self.run_query().rows}
+        self.assertEqual(rows, {a: True, b: False})
+
+    def test_check_now_does_not_count_a_hidden_firm(self):
+        from outreach.crawl import check_all
+        firm = posting(self.conn, self.company("Raydar"), seen_gap_s=60, posted_on="2026-11-02")
+        decision(self.conn, firm)
+        ok = posting(self.conn, self.company("Acme"), seen_gap_s=60, posted_on="2026-11-02")
+        decision(self.conn, ok)
+        self.assertEqual(check_all._listed_new(self.conn, 0, joblist.listed_params(self.conn)), 1)
+
+
 class LevelStateTests(JobListCase):
     """Your level reads `level_state` (#154): fit, or uncertain at a small or unknown-size company."""
 

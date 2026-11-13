@@ -34,6 +34,8 @@ class JobRowWire(Wire):
     everify: bool
     yc: bool
     contacted_on: str | None  # YYYY-MM-DD, the newest day he reached it: a person contacted, or his own Done mark
+    maybe_staffing: bool  # work tier 3, staffing-flagged by the LCA rules and not promoted (#257)
+    for_client: bool  # the posting opens with client wording, a recruiter's (#257)
 
 
 class JobCounts(Wire):

@@ -145,7 +145,7 @@ def company_board_states(conn: sqlite3.Connection, canon: dict[int, int], doubtf
 
 _DECISION_COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us",
                      "sponsorship", "sponsorship_quote", "citizenship", "citizenship_quote", "eligibility",
-                     "eligibility_reason", "eligibility_quote", "start_2027", "level_state", "years_ms", "role")
+                     "eligibility_reason", "eligibility_quote", "start_2027", "level_state", "years_ms", "role", "for_client")
 _QUERY = (
     "SELECT p.posting_id, p.company_id, p.board_id, p.title, p.location, p.pay, p.posted_on, p.first_seen_at, "
     "p.last_seen_at, b.board_id IS NOT NULL AS has_board, b.last_read, b.active, d.posting_id IS NOT NULL AS decided, "

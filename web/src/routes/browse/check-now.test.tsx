@@ -120,7 +120,7 @@ describe('Check now', () => {
     await open((c) => {
       vi.spyOn(c, 'checkStatus').mockResolvedValue(running);
     });
-    expect(await head().findByText('Greenhouse paused: too many requests')).toBeInTheDocument();
+    expect(await head().findByText('Greenhouse paused: too many failed requests')).toBeInTheDocument();
     expect(head().getByText('Checked 1,240 of 4,013 boards, 3 new')).toBeInTheDocument();
   });
 

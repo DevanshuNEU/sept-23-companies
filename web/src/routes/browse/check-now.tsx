@@ -39,12 +39,13 @@ function tookText(seconds: number): string {
   return min === 0 ? `${Math.floor(s / 3600)} h` : `${Math.floor(s / 3600)} h ${min} min`;
 }
 
-/** "Greenhouse paused: too many requests", "Greenhouse and Ashby paused: ...", or null when every host is read. */
+/** "Greenhouse paused: too many failed requests" (the breaker opens on errors in a row, not only on a 429), "Greenhouse
+ * and Ashby paused: ...", or null when every host is read. */
 function pausedText(hosts: readonly string[]): string | null {
   if (hosts.length === 0) return null;
   const names = hosts.map((h) => ATS_NAMES[h] ?? h);
   const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `${list} paused: too many requests`;
+  return `${list} paused: too many failed requests`;
 }
 
 /** The line for a running or finished check: "Checked 1,240 of 4,013 boards, 3 new"; "Checked 4,013 boards in 3 min 10 s. 6 new." */

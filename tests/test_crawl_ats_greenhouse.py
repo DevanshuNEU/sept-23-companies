@@ -321,7 +321,9 @@ class GreenhouseTests(unittest.TestCase):
             GreenhouseAdapter(client).list("acme", Validators())
         self.assertEqual(client.requests, [US, EU])
 
-    def test_both_greenhouse_api_hosts_share_one_polite_bucket(self):
+    def test_the_eu_api_host_has_its_own_polite_bucket(self):
+        # 2026-11-13: boards-api.eu.greenhouse.io has no DNS record, so every 404 board's EU try failed; sharing the US
+        # bucket, five in a row opened the breaker and paused every Greenhouse board ("Greenhouse paused").
         cfg = load_crawl_config()
         self.assertEqual(bucket_for("boards-api.greenhouse.io", cfg), "greenhouse.io")
-        self.assertEqual(bucket_for("boards-api.eu.greenhouse.io", cfg), "greenhouse.io")
+        self.assertEqual(bucket_for("boards-api.eu.greenhouse.io", cfg), "eu.greenhouse.io")

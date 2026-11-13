@@ -11,7 +11,8 @@ reads `<token>.eightfold.ai` for `<token>.com`. A list is read page by page unti
 `MAX_PAGES` pages. As for Workday, Oracle and Amazon (#232), a broken row is skipped and a list a little short of
 `count` (`short_allowed`) is a partial `ok`: what it listed is kept and nothing is closed. There is no ETag, so
 `unchanged` is the id fingerprint. A site that answers 403 "Not authorized for PCSX" (the older v2 API, Netflix) or
-429 (Microsoft, 2026-11-12) is an error and is never worked around.
+429 (Microsoft, 2026-11-12) on page 1 is an error and is never worked around; a later page that fails ends the read
+there as a partial `ok` of the pages read (2026-11-13), with no retry and no further page.
 
 A head read (#263) is page 1 alone (`start=0`): the search is newest first, so it is a partial `ok` that closes
 nothing, or `unchanged` when the page lists nothing.
@@ -121,13 +122,19 @@ class EightfoldAdapter:
             return read_error(f"{token!r} is not an Eightfold tenant token")
         host, domain = site
         jobs: dict[str, JobRef] = {}
+        stopped = ""
         broken = 0
         total = 0
         resp: Response | None = None
         for n in range(MAX_PAGES):
             got = self._page(host, domain, n * PAGE)
             if isinstance(got, ReadResult):
-                return got
+                if n == 0 or not jobs:
+                    return got
+                # A later page failed (a timeout, a 429): keep what was read as a partial ok that closes nothing,
+                # and send no further page (2026-11-13: a whole read was lost to one page, so head reads never began).
+                stopped = f"stopped at page {n + 1}: {got.error}"
+                break
             rows, count, resp = got
             if n == 0:
                 total = count
@@ -142,6 +149,9 @@ class EightfoldAdapter:
                 break
         if resp is None:
             return read_error("no page was read")
+        if stopped:
+            return finish_list(jobs.values(), resp, validators,
+                               partial_note=f"{len(jobs)} of {total} positions read, {stopped}")
         if len(jobs) > total or total - len(jobs) > short_allowed(total):
             return read_error(f"{len(jobs)} positions listed but count is {total}", status=resp.status)
         missing = total - len(jobs)

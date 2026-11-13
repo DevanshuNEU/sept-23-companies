@@ -117,11 +117,20 @@ class AppleTests(unittest.TestCase):
         r, _ = read({U1: page(300, [result(n) for n in range(20)]), U2: page(300, [])})
         self.assertEqual((r.result, r.jobs), ("error", ()))
 
-    def test_a_page_that_fails_is_an_error(self):
+    def test_a_later_page_that_fails_keeps_what_was_read_and_stops(self):
+        # 2026-11-13 live: page 158 of about 228 timed out and the whole read was an error, so Apple never got its
+        # first full read and its head reads never began. Now the pages read are a partial ok that closes nothing.
         for name, resp in {"500": status_response(500), "429": status_response(429),
                            "network": FetchError("network", "down"), "no data": text_response("<html></html>")}.items():
-            r, _ = read({U1: page(40, [result(n) for n in range(20)]), U2: resp})
-            self.assertEqual((r.result, r.jobs), ("error", ()), name)
+            r, client = read({U1: page(60, [result(n) for n in range(20)]), U2: resp,
+                              U3: page(60, [result(n) for n in range(40, 60)])})
+            self.assertEqual((r.result, r.partial, len(r.jobs)), ("ok", True, 20), name)
+            self.assertIn("stopped at page 2", r.partial_note)
+            self.assertEqual(client.requests, [U1, U2], name)  # no further page after the failure
+
+    def test_a_first_page_that_fails_is_an_error(self):
+        r, _ = read({U1: status_response(429)})
+        self.assertEqual((r.result, r.jobs), ("error", ()))
 
     def test_a_broken_row_is_skipped_and_the_read_is_partial(self):
         broken = result(2)

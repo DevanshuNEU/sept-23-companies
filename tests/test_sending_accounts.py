@@ -119,6 +119,40 @@ class AccountsTest(unittest.TestCase):
         row, reason = accounts.route(self.conn, self.cfg, tid, self.synced())
         self.assertEqual((row, reason), (None, "lane_waits"))
 
+    def test_thread_account_not_in_config_is_thread_missing(self):
+        _, tid = self.company_touch()
+        accts = self.synced()
+        self.conn.execute("INSERT INTO sender_account(account_id, address, kind, created_at, updated_at) "
+                          "VALUES (9, 'old@example.com', 'gmail', ?, ?)", (NOW, NOW))
+        self.conn.execute("UPDATE touch SET account_id = 9 WHERE touch_id = ?", (tid,))
+        self.assertEqual(accounts.route(self.conn, self.cfg, tid, accts), (None, "thread_missing"))
+
+    def merged(self):
+        loser, tid = self.company_touch("Loser")
+        survivor = seed_company(self.conn, "Survivor")
+        self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' WHERE company_id = ?",
+                          (survivor, loser))
+        return loser, survivor, tid
+
+    def test_merged_company_routes_by_survivor_facts(self):
+        _, survivor, tid = self.merged()
+        add_fact(self.conn, survivor, "everify", "enrolled")
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        row, reason = accounts.route(self.conn, cfg, tid, self.synced(cfg))
+        self.assertEqual((row.cfg.address, reason), (SPONSOR, "lane"))
+
+    def test_pin_on_loser_before_merge_still_counts_and_survivor_pin_wins(self):
+        loser, survivor, tid = self.merged()
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.conn.execute("INSERT INTO company_sender VALUES (?, ?, 'rule', ?)", (loser, accts[SPONSOR].account_id, NOW))
+        self.assertEqual(accounts.route(self.conn, cfg, tid, accts)[1], "pinned")
+        accounts.pin(self.conn, loser, accts[GENERAL].account_id, "you", NOW)
+        row, _ = accounts.route(self.conn, cfg, tid, accts)
+        self.assertEqual(row.cfg.address, GENERAL)
+        self.assertEqual(self.conn.execute("SELECT account_id FROM company_sender WHERE company_id = ?",
+                                           (survivor,)).fetchone()[0], accts[GENERAL].account_id)
+
     def test_pin_upserts_and_logs_event(self):
         cid, _ = self.company_touch()
         accts = self.synced()

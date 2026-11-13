@@ -88,7 +88,9 @@ def _token(list_name: str, slug: str, url: str) -> str:
         if "sites" not in path or path.index("sites") + 1 >= len(path):
             raise ValueError(f"no Oracle site in {url!r}")
         return f"{host}/{path[path.index('sites') + 1]}"
-    if list_name == "icims":
+    if list_name == "icims":  # the list names icims.com sites; a Jibe host comes only from a Jibe link (#220)
+        if not host.endswith(".icims.com"):
+            raise ValueError(f"no icims.com host in {url!r}")
         return host
     return slug.strip()
 

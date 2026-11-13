@@ -28,6 +28,13 @@ keep checking: one that comes back without its marker stops sending the same way
 Message-ID Gmail stored, when the send could not read it, so follow-ups and replies match on Gmail's own id.
 `claim.claim` asks `may_claim` inside its own transaction, so no caller can claim a second email while unproven.
 Read only, except `verify_marker`, which reads Gmail with no transaction open and then writes once.
+
+All of it is per sender account (#9 multi-sender ruling, 2026-11-12). An event or a claim belongs to the account of
+its message's touch (`touch.account_id`; none is account 1, the one account before accounts existed, and so is an
+event that names no message). So account 1's old `marker_verified` still proves account 1, a new account sends its
+own first email alone and is proven by its own read back, and `marker_missing` stops only the account it was found
+on. `verify_marker` reads back only its own account's mail, with that account's client: another account's email is
+not in this mailbox, and reading it there would look like Gmail lost it.
 """
 import sqlite3
 from datetime import datetime, timezone
@@ -41,8 +48,15 @@ from outreach.store.writes import append_event
 __all__ = ["PROOF_SQL", "MISSING_SQL", "PROVEN", "FIRST_SEND", "CHECKING", "IN_DOUBT", "STOPPED", "MISSING",
            "PHASES", "OPEN", "PHASE_TEXT", "phase", "may_claim", "verify_marker"]
 
-PROOF_SQL = "SELECT 1 FROM event WHERE entity = 'message' AND kind = 'marker_verified' LIMIT 1"
-MISSING_SQL = "SELECT 1 FROM event WHERE entity = 'message' AND kind = 'marker_missing' LIMIT 1"
+# The account an event on a message belongs to: its touch's, where none (a touch sent before accounts existed, or an
+# event that names no message) is account 1.
+_EVENT_ACCOUNT = ("COALESCE((SELECT t.account_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                  "WHERE m.message_id = e.entity_id), 1)")
+# Each takes one parameter, the account id.
+PROOF_SQL = (f"SELECT 1 FROM event e WHERE e.entity = 'message' AND e.kind = 'marker_verified' "
+             f"AND {_EVENT_ACCOUNT} = ? LIMIT 1")
+MISSING_SQL = (f"SELECT 1 FROM event e WHERE e.entity = 'message' AND e.kind = 'marker_missing' "
+               f"AND {_EVENT_ACCOUNT} = ? LIMIT 1")
 
 PROVEN, FIRST_SEND, CHECKING, IN_DOUBT, STOPPED, MISSING = (
     "proven", "first_send", "checking", "in_doubt", "stopped", "missing")
@@ -61,18 +75,19 @@ PHASE_TEXT = {
              "doubt could not be found in Sent. Nothing more is sent until this is cleared by hand.",
 }
 
-# Messages with a marked claim (a `claimed` event that names its marker), and their state.
-_MARKED = ("SELECT DISTINCT m.message_id, m.state FROM message m JOIN event e ON e.entity = 'message' "
-           "AND e.entity_id = m.message_id AND e.kind = 'claimed' AND json_extract(e.detail, '$.marker') IS NOT NULL")
+# One account's messages with a marked claim (a `claimed` event that names its marker), and their state.
+_MARKED = ("SELECT DISTINCT m.message_id, m.state FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+           "JOIN event e ON e.entity = 'message' AND e.entity_id = m.message_id AND e.kind = 'claimed' "
+           "AND json_extract(e.detail, '$.marker') IS NOT NULL WHERE COALESCE(t.account_id, 1) = ?")
 
 
-def phase(conn: sqlite3.Connection) -> str:
-    """Where the proof stands (see the module text). Read only."""
-    if conn.execute(MISSING_SQL).fetchone() is not None:
+def phase(conn: sqlite3.Connection, account_id: int) -> str:
+    """Where the proof stands for this account (see the module text). Read only."""
+    if conn.execute(MISSING_SQL, (account_id,)).fetchone() is not None:
         return MISSING
-    if conn.execute(PROOF_SQL).fetchone() is not None:
+    if conn.execute(PROOF_SQL, (account_id,)).fetchone() is not None:
         return PROVEN
-    states = {row["state"] for row in conn.execute(_MARKED)}
+    states = {row["state"] for row in conn.execute(_MARKED, (account_id,))}
     if not states:
         return FIRST_SEND
     if states & {"sending", "send_unknown"}:
@@ -82,9 +97,10 @@ def phase(conn: sqlite3.Connection) -> str:
     return STOPPED
 
 
-def may_claim(conn: sqlite3.Connection) -> bool:
-    """True when a new claim is allowed: Gmail is proven to keep the marker, or no marked email was ever claimed."""
-    return phase(conn) in OPEN
+def may_claim(conn: sqlite3.Connection, account_id: int) -> bool:
+    """True when a new claim from this account is allowed: Gmail is proven to keep its marker, or no marked email was
+    ever claimed from it."""
+    return phase(conn, account_id) in OPEN
 
 
 def _stamp(at: datetime) -> str:
@@ -97,12 +113,14 @@ def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:
     return canonical_company(conn, row[0])
 
 
-# Every sent message with a marked claim that was not read back yet, with the marker of its (last) marked claim.
+# One account's sent messages with a marked claim that were not read back yet, with the marker of the (last) marked
+# claim of each.
 _TO_VERIFY = (
     "SELECT m.message_id, m.touch_id, m.seq, m.gmail_message_id, m.rfc_message_id, "
     "(SELECT json_extract(e.detail, '$.marker') FROM event e WHERE e.entity = 'message' "
     " AND e.entity_id = m.message_id AND e.kind = 'claimed' AND json_extract(e.detail, '$.marker') IS NOT NULL "
-    " ORDER BY e.event_id DESC LIMIT 1) AS marker FROM message m WHERE m.state = 'sent' "
+    " ORDER BY e.event_id DESC LIMIT 1) AS marker FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+    "WHERE m.state = 'sent' AND COALESCE(t.account_id, 1) = ? "
     "AND EXISTS (SELECT 1 FROM event e WHERE e.entity = 'message' AND e.entity_id = m.message_id "
     "AND e.kind = 'claimed' AND json_extract(e.detail, '$.marker') IS NOT NULL) "
     "AND NOT EXISTS (SELECT 1 FROM event e WHERE e.entity = 'message' AND e.entity_id = m.message_id "
@@ -127,21 +145,23 @@ def _stored_id(conn: sqlite3.Connection, row: sqlite3.Row, stored: str, stamp: s
                      (stored, stamp, row["touch_id"], row["rfc_message_id"]))
 
 
-def verify_marker(conn: sqlite3.Connection, client: MailClient, *, now: datetime, limit: int = 5) -> dict[str, int]:
-    """Read each marked email this sender recorded `sent` back from Gmail by its Gmail id, once, with no transaction
-    open, then write once. While unproven that is the one first email (phase `checking`); once proven, every later
-    one. The `SENT` label and an `X-Outreach-Id` equal (normalised) to the marker it was claimed with append
-    `marker_verified` (the proof, when it is the first). Anything else Gmail answers (no marker, another one, no
-    `SENT` label, a 404) appends `marker_missing`, which stops sending for good. Either way the Message-ID Gmail
-    stored is recorded when it differs from the one the send recorded. Any other Gmail error writes nothing and
-    ends the round; the next tick tries again. Nothing is read in any other phase. Returns counts."""
+def verify_marker(conn: sqlite3.Connection, client: MailClient, account_id: int, *, now: datetime,
+                  limit: int = 5) -> dict[str, int]:
+    """Read each marked email this account recorded `sent` back from Gmail by its Gmail id, once, with no transaction
+    open, then write once. `client` is that account's own: only its mail is read. While unproven that is the one first
+    email (phase `checking`); once proven, every later one. The `SENT` label and an `X-Outreach-Id` equal
+    (normalised) to the marker it was claimed with append `marker_verified` (the proof, when it is the first).
+    Anything else Gmail answers (no marker, another one, no `SENT` label, a 404) appends `marker_missing`, which stops
+    this account for good. Either way the Message-ID Gmail stored is recorded when it differs from the one the send
+    recorded. Any other Gmail error writes nothing and ends the round; the next tick tries again. Nothing is read in
+    any other phase. Returns counts."""
     if conn.in_transaction:
         raise RuntimeError("verify_marker calls Gmail, so it runs with no transaction open")
     counts = {"verified": 0, "missing": 0, "errors": 0}
-    if phase(conn) not in (CHECKING, PROVEN):
+    if phase(conn, account_id) not in (CHECKING, PROVEN):
         return counts
     results = []
-    for row in conn.execute(_TO_VERIFY, (limit,)).fetchall():
+    for row in conn.execute(_TO_VERIFY, (account_id, limit)).fetchall():
         claimed = normalise_message_id(row["marker"])
         detail = {"gmail_message_id": row["gmail_message_id"], "marker": row["marker"]}
         if not claimed or not row["gmail_message_id"]:

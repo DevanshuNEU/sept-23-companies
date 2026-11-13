@@ -22,7 +22,8 @@ from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import __main__ as cli
 from outreach.mcp import server
 from outreach.net import Response
-from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES, install_authorizer, install_triggers, open_guarded
+from outreach.mcp.guard import (INSERT_ONLY_TABLES, NEVER_TABLES, install_authorizer,
+                                install_triggers, open_guarded)
 from outreach.mcp.tools import Input, ToolSpec
 from outreach.reader.types import FIELDS
 from outreach.store import DEFAULT_PATH, connect
@@ -57,9 +58,11 @@ def spec(name: str) -> ToolSpec:
 
 
 def never_rows(conn, tool: str = "") -> dict[str, str]:
-    """The tables no tool may write, plus the bridge's two for every tool but `log_sent` (the one that inserts there)."""
+    """The tables no tool may write, plus the insert-only ones (the bridge's two, the dead-address list) for every
+    tool but the one that inserts there (`log_sent`, `mark_email_bounced`)."""
     hashes = table_hashes(conn)
-    tables = NEVER_TABLES if tool == "log_sent" else NEVER_TABLES | BRIDGE_TABLES
+    own = set(spec(tool).grants) if tool else set()
+    tables = NEVER_TABLES | (INSERT_ONLY_TABLES - own)
     return {t: hashes[t] for t in tables}
 
 

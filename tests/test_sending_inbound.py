@@ -12,7 +12,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from outreach.drafts.followups import company_map, due_followups, held_survivors
-from outreach.sending import claim, inbound, queue
+from outreach.sending import accounts, claim, inbound, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError
@@ -66,7 +66,7 @@ class Base(unittest.TestCase):
         mid = seed_message(self.db, person, subject=subject or f"Quick question about the platform team {self.n}")
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == mid)
         self.assertEqual(claim.send_one(self.db, self.gmail, q, CFG, now=iso(self.clock()), clock=self.clock,
-                                        rng=self.rng, account=CFG.from_address), "sent")
+                                        rng=self.rng, account=accounts.primary(self.db, CFG)), "sent")
         touch = self.db.execute("SELECT touch_id FROM touch WHERE person_id = ?", (person,)).fetchone()[0]
         return person, touch, self.gmail.sent[-1][1]
 

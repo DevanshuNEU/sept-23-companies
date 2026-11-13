@@ -31,7 +31,7 @@ PINNED = {
                     "review_item": INSERT, "event": INSERT},
     "mark_email_bounced": {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at",
                                                               "revision"})),
-                           "review_item": INSERT, "event": INSERT},
+                           "review_item": INSERT, "event": INSERT, "bounced_address": INSERT},
     "record_research": {"evidence": INSERT, "event": INSERT},
     "save_research": {"research_fact": INSERT, "person_source": INSERT, "event": INSERT},
     "flag_review": {"review_item": INSERT, "event": INSERT},

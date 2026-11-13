@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.drafts.checks import load_banned
-from outreach.sending import claim, proof, queue, tick
+from outreach.sending import accounts, claim, proof, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
@@ -640,7 +640,7 @@ class FirstSendTest(Base):
                 self.assertEqual(report.sent, ())
                 self.assertEqual(self.gmail.sent, [])
                 self.assertEqual(self.claims(), [])
-                self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+                self.assertEqual(proof.phase(self.db, 1), proof.FIRST_SEND)
                 self.assertIn(self.message(mid)["state"], ("approved", "skipped"))
 
     def fill_the_day(self) -> None:
@@ -789,11 +789,11 @@ class LiveShapeTest(Base):
         self.db.execute("UPDATE message SET state = 'approved', approved_at = ?, due_on = ? WHERE message_id = ?",
                         (iso(self.clock()), iso(self.clock())[:10], row[0]))
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == row[0])
-        out = claim.outgoing_for(self.db, q, CFG, "<follow.5@gmail.com>")
+        out = claim.outgoing_for(self.db, q, CFG, "<follow.5@gmail.com>", accounts.primary(self.db, CFG))
         self.assertEqual((out.in_reply_to, out.references), (self.STORED, (self.STORED,)))
 
     def test_the_shape_reads_as_the_first_send_and_nothing_goes_before_resume(self):
-        self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+        self.assertEqual(proof.phase(self.db, 1), proof.FIRST_SEND)
         before = len(self.gmail.calls)
         for _ in range(3):
             report = self.tick()
@@ -803,7 +803,7 @@ class LiveShapeTest(Base):
         self.assertNotIn("message", self.gmail.calls[before:])  # message 5 is never read back
         self.assertNotIn("send", self.gmail.calls)
         self.assertEqual((self.sender()["paused"], self.sender()["pause_kind"]), (1, "hard_block"))  # stays
-        self.assertEqual(proof.phase(self.db), proof.FIRST_SEND)
+        self.assertEqual(proof.phase(self.db, 1), proof.FIRST_SEND)
 
     def test_after_resume_exactly_one_marked_email_goes_then_the_rest_follow(self):
         self.tick()
@@ -816,10 +816,10 @@ class LiveShapeTest(Base):
         self.assertEqual(len(self.gmail.sent), 1)
         out = self.gmail.sent[0][0]
         self.assertEqual(out.marker, json.loads(self.events("claimed")[-1]["detail"])["marker"])
-        self.assertEqual(proof.phase(self.db), proof.CHECKING)
+        self.assertEqual(proof.phase(self.db, 1), proof.CHECKING)
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == self.waiting[1])
         with self.assertRaises(claim.Unproven):  # no second claim, by any path
-            claim.claim(self.db, q, rfc_id="<forced@gmail.com>", now=iso(self.clock()))
+            claim.claim(self.db, q, accounts.primary(self.db, CFG), rfc_id="<forced@gmail.com>", now=iso(self.clock()))
         self.clock.advance(minutes=2)
         self.assertEqual(self.tick().sent, ())  # read back: proven, but the gap after a send holds the next
         self.assertEqual([e["entity_id"] for e in self.events("marker_verified")], [first])
@@ -1174,6 +1174,51 @@ class TransactionTest(Base):
         with self.assertRaises(RuntimeError):
             run_tick(plain, self.deps(), CFG)
         self.assertEqual(self.gmail.calls, [])
+
+
+class AccountTest(Base):
+    """Until the per-account loop (Task A10) the tick has one client, the primary account's (account 1): it settles
+    and reads back only that account's mail. Another account's rows wait for their own client."""
+
+    def setUp(self):
+        super().setUp()
+        rows = accounts.sync(self.db, CFG, iso(MON))
+        self.two = rows["devanshuchi9@gmail.com"]
+        self.gmail2 = FakeGmail(clock=self.clock, account=self.two.cfg.address, id_prefix="b",
+                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+
+    def send_on_two(self, mid: int, failure: BaseException | None = None) -> None:
+        q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == mid)
+        if failure is not None:
+            self.gmail2.fail_next_send(failure, accepted=True)
+            with self.assertRaises(GmailError):
+                claim.send_one(self.db, self.gmail2, q, CFG, now=iso(self.clock()), clock=self.clock, rng=self.rng,
+                               account=self.two)
+            return
+        self.assertEqual(claim.send_one(self.db, self.gmail2, q, CFG, now=iso(self.clock()), clock=self.clock,
+                                        rng=self.rng, account=self.two), "sent")
+
+    def test_a_send_in_doubt_on_account_2_is_never_scanned_by_account_1(self):
+        theirs = self.approve()
+        self.send_on_two(theirs, TimeoutError())
+        mine = self.approve()
+        self.clock.advance(minutes=CFG.reconcile_after_minutes + 5)
+        self.gmail.calls.clear()
+        report = self.tick()
+        self.assertNotIn("find_sent", self.gmail.calls)
+        self.assertEqual(self.message(theirs)["state"], "send_unknown")  # waits for its own client
+        self.assertEqual((report.reconciled["sent"], report.reconciled["failed"]), (0, 0))
+        self.assertEqual(report.sent, (mine,))  # account 1 goes on
+        self.assertEqual(len(self.gmail2.sent), 1)
+
+    def test_a_sent_email_on_account_2_is_not_read_back_by_account_1(self):
+        theirs = self.approve()
+        self.send_on_two(theirs)
+        self.tick()
+        self.assertEqual(self.events("marker_missing"), [])
+        self.assertNotIn(theirs, [e["entity_id"] for e in self.events("marker_verified")])
+        self.assertEqual(proof.phase(self.db, self.two.account_id), proof.CHECKING)
+        self.assertEqual(proof.phase(self.db, 1), proof.PROVEN)
 
 
 if __name__ == "__main__":

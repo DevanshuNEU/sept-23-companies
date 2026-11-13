@@ -10,6 +10,10 @@ a missing or stale row is `unknown`, which only warns.
 
 A banned phrases list that cannot be read blocks every claim (fail closed), but that is not the draft's fault, so
 the message stays `approved`, untouched, and goes out once the list is fixed.
+
+One block is the sender's own, on top of the approve checks: an address on the dead-address list (`bounced_address`:
+it bounced before, from any account, on any person record, in any case) is `bounced_address`, listed first, and is
+never sent to again (#9 multi-sender ruling, 2026-11-12).
 """
 import json
 import re
@@ -17,15 +21,31 @@ import sqlite3
 from collections.abc import Sequence
 
 from outreach.drafts.checks import draft_input, run_checks
+from outreach.sending.claim import bounced_before
 from outreach.sending.queue import Queued
 from outreach.store.atomic import atomic
 from outreach.store.timefmt import iso_utc
 from outreach.store.writes import append_event
 
-__all__ = ["LIST_MISSING", "precheck"]
+__all__ = ["LIST_MISSING", "BOUNCED", "precheck"]
 
 # The one block that is about the sender's own inputs, not the draft.
 LIST_MISSING = "banned_list_missing"
+# An address that bounced before.
+BOUNCED = "bounced_address"
+
+
+def _bounced(conn: sqlite3.Connection, message_id: int) -> dict | None:
+    """The `bounced_address` block when the message's address is on the dead-address list, else None."""
+    row = conn.execute("SELECT p.email FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                       "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (message_id,)).fetchone()
+    address = row["email"] if row is not None else None
+    if not bounced_before(conn, address):
+        return None
+    return {"code": BOUNCED, "severity": "block", "title": "Address bounced before",
+            "detail": f"Mail to {address.strip()} bounced before, so nothing is sent to it again. Find another "
+                      "address for this person, or reach them on LinkedIn.",
+            "fix": None, "spans": []}
 
 
 def precheck(conn: sqlite3.Connection, q: Queued, *, now: str,
@@ -43,6 +63,9 @@ def precheck(conn: sqlite3.Connection, q: Queued, *, now: str,
         if row is None or row["state"] != "approved":
             return None
         found = run_checks(conn, draft_input(conn, q.message_id, now=stamp), banned=banned, now=stamp)
+        bounced = _bounced(conn, q.message_id)
+        if bounced is not None:
+            found = [bounced, *found]
         blocks = [c for c in found if c["severity"] == "block"]
         if not blocks:
             return None

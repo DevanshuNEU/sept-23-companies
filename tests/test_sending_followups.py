@@ -9,7 +9,7 @@ import random
 import unittest
 from datetime import date, datetime
 
-from outreach.sending import claim, queue
+from outreach.sending import accounts, claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import (close_quiet_touches, lapse_followups, plan_followups, stop_planned,
@@ -69,7 +69,7 @@ class Base(unittest.TestCase):
         mid = seed_message(self.db, person, subject="Hello")
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == mid)
         claim.send_one(self.db, gmail, q, CFG, now=iso(at), clock=clock, rng=random.Random(1),
-                       account=CFG.from_address)
+                       account=accounts.primary(self.db, CFG))
         return self.planned(self.touch_of(person))
 
 

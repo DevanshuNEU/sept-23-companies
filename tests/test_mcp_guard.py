@@ -509,6 +509,52 @@ class BridgeGuardTest(GuardCase):
         self.assertEqual(self.db.execute("SELECT count(*) FROM outreach_touch").fetchone()[0], before[1] + 1)
 
 
+class BouncedAddressGuardTest(GuardCase):
+    """`bounced_address` (#9 multi-sender ruling): only mark_email_bounced's connection may add a row, and only a new
+    address marked by Claude with the person it came off. No grant may update the list; nothing may delete from it."""
+
+    GRANTS = {"bounced_address": Grant(insert=True)}
+    ADD = "INSERT INTO bounced_address(address, first_seen_at, source, source_ref) VALUES (?, ?, ?, ?)"
+
+    def setUp(self):
+        super().setUp()
+        self.db.execute(self.ADD, ("old@acme.example", T, "bounce", "9"))
+
+    def count(self) -> int:
+        return self.db.execute("SELECT count(*) FROM bounced_address").fetchone()[0]
+
+    def test_it_left_the_never_list_and_no_grant_may_update_it(self):
+        self.assertNotIn("bounced_address", NEVER_TABLES)
+        self.assertIsNone(NEVER_COLUMNS["bounced_address"])
+        with self.assertRaises(GrantError):
+            guard.check_grants({"bounced_address": Grant(insert=True, update=frozenset({"source"}))})
+
+    def test_a_tool_with_no_insert_grant_is_refused_by_each_layer_alone(self):
+        row = ("new@acme.example", T, "marked", "1")
+        self.assert_trigger_refuses(self.triggers_only(), self.ADD, row)
+        self.assert_not_authorized(self.authorizer_only(), self.ADD, row)
+        self.assertEqual(self.count(), 1)
+
+    def test_only_a_new_marked_address_with_its_person_passes_the_trigger(self):
+        conn = self.triggers_only(self.GRANTS)
+        for row in (("new@acme.example", T, "bounce", "1"), ("new@acme.example", T, "backfill", "1"),
+                    ("new@acme.example", T, "marked", ""), ("OLD@acme.example", T, "marked", "1")):
+            with self.subTest(row=row):
+                self.assert_trigger_refuses(conn, self.ADD, row)
+        self.assert_trigger_refuses(conn, "INSERT OR REPLACE INTO bounced_address(address, first_seen_at, source, "
+                                          "source_ref) VALUES ('old@acme.example', ?, 'marked', '1')", (T,))
+        self.assertEqual(self.db.execute("SELECT source FROM bounced_address").fetchone()[0], "bounce")
+        conn.execute(self.ADD, ("new@acme.example", T, "marked", "1"))
+        self.assertEqual(self.count(), 2)
+
+    def test_an_update_or_delete_is_refused_by_each_layer_alone(self):
+        for sql in ("UPDATE bounced_address SET source = 'marked'", "DELETE FROM bounced_address"):
+            with self.subTest(sql=sql):
+                self.assert_trigger_refuses(self.triggers_only(self.GRANTS), sql)
+                self.assert_not_authorized(self.authorizer_only(self.GRANTS), sql)
+        self.assertEqual(self.count(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -550,3 +596,4 @@ class MoveGuardTest(GuardCase):
             conn = guard.open_guarded({"person": Grant(update=frozenset({"email", "updated_at"}))}, path=self.path)
             self.addCleanup(conn.close)
             conn.execute(sql, (target, self.person))
+

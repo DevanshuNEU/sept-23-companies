@@ -34,7 +34,7 @@ from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.sending.pace import company_paces, default_pace
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
-from outreach.sending import proof
+from outreach.sending import accounts, proof
 from outreach.sending.queue import TIME_REASONS, load_queue
 from outreach.sending.status import queue_projection, queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
@@ -166,7 +166,7 @@ class _Outbox:
         self.people = people_by_ids(conn, {t["person_id"] for t in self.touches})
         self.schedule = queue_schedule(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
         self.projection, self.paused = queue_projection(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
-        self.proof_stage = proof.phase(conn)
+        self.proof_stage = proof.phase(conn, accounts.primary(conn, cfg).account_id)  # one account for now
         self.queue_order = {mid: n for n, mid in enumerate(self.schedule)}
         self.tz = {q.message_id: q.tz for q in load_queue(conn, cfg)}
         self.sends_today = _company_sends_today(conn, self.companies, now, cfg)

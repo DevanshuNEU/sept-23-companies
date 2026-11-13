@@ -34,6 +34,11 @@ doubt is never retried while unproven; reconcile may settle it from Sent by its 
 like any other. A first email that cannot be accounted for stops sending, with a notice. `claim.claim` checks the
 same rule inside its own transaction (`proof.may_claim`).
 
+The proof, the sends in doubt and the read back are per sender account (#9 multi-sender ruling, 2026-11-12). Until
+the per-account loop lands the tick has one client, the primary account's (`accounts.primary`, account 1): it scans
+Sent and reads back only that account's mail, reconciles only its rows, and judges the gate by its proof. Another
+account's sends in doubt and sent mail wait, untouched, for their own client.
+
 A dry run does steps 2 and 4 (but not the imported-mail check or the read back, which write), runs 5, 6 and the
 pre-claim check inside one transaction that is rolled back, never sends, and writes nothing, `job_run` included;
 its notices go nowhere.
@@ -226,6 +231,7 @@ class _Tick:
         self.waiting: dict[str, int] = {}
         self.counts = Counter()
         self.hold: str | None = None  # why nothing may be sent this tick, though a message is ready (inbound)
+        self.read_account: int | None = None  # the account whose Sent the step 4 scans read
 
     # -- the frame ----------------------------------------------------------------------------------------------
 
@@ -427,7 +433,9 @@ class _Tick:
     def _gmail_reads(self) -> tuple[dict, inbound.InboundRead]:
         """Step 4, with no transaction open."""
         found = {}
-        for u in claim.unclear(self.conn):
+        # This tick's one client is this account's; its scans are reconciled against the same account (step 5).
+        account_id = self.read_account = self._account_row().account_id
+        for u in claim.unclear(self.conn, account_id):
             if u.stored is not None:
                 continue  # settled from the ids Gmail kept, no scan needed
             if not u.marked:
@@ -453,10 +461,10 @@ class _Tick:
                 self._line(f"{verified['not_in_sent']} imported email(s) are not in Sent under their Message-ID")
             if verified["errors"]:
                 self._partial("imported mail could not be checked against Gmail; tried again next tick")
-            before = proof.phase(self.conn)
-            checked = proof.verify_marker(self.conn, self.client, now=self.now)
+            before = proof.phase(self.conn, account_id)
+            checked = proof.verify_marker(self.conn, self.client, account_id, now=self.now)
             self.counts["verified"] += checked["verified"]
-            if before == proof.CHECKING and proof.phase(self.conn) == proof.PROVEN:
+            if before == proof.CHECKING and proof.phase(self.conn, account_id) == proof.PROVEN:
                 self._line("the first email is in Sent with the sender's marker, so the rest may follow")
             if checked["missing"]:
                 self._line(f"{checked['missing']} sent email(s) are not in Sent with the sender's marker")
@@ -476,7 +484,7 @@ class _Tick:
         """Step 5, inside the caller's transaction."""
         conn, cfg, now, stamp = self.conn, self.cfg, self.now, self.stamp
         accounts.sync(conn, cfg, stamp)  # the only thing that creates sender_account rows
-        self.reconciled = claim.reconcile(conn, found, now=stamp, cfg=cfg, rng=self.deps.rng)
+        self.reconciled = claim.reconcile(conn, found, self.read_account, now=stamp, cfg=cfg, rng=self.deps.rng)
         self.counts["reconciled"] = self.reconciled["sent"] + self.reconciled["failed"]
         if self.reconciled["errors"]:
             n = self.reconciled["errors"]
@@ -545,7 +553,8 @@ class _Tick:
 
     def _pick(self, old_loaded: bool) -> queue.Queued | None:
         """Step 6."""
-        pause = accounts.pause_of(self.conn, self._account_row().account_id)
+        account_id = self._account_row().account_id
+        pause = accounts.pause_of(self.conn, account_id)
         gate = None
         if pause is not None:
             gate = "sender_paused"
@@ -556,7 +565,7 @@ class _Tick:
         elif old_loaded:
             gate = "old_sender_running"
             self._line("the old mail sender is still loaded, so nothing is sent")
-        stage = proof.phase(self.conn)
+        stage = proof.phase(self.conn, account_id)
         if gate is None and stage not in proof.OPEN:
             gate = "message_id_unproven"
         verdicts = queue.verdicts(self.conn, self.now, self.cfg, day=self.day, gate=gate)
@@ -604,11 +613,15 @@ class _Tick:
         """Step 7."""
         if not self._prechecked(picked):
             return
+        account = self._account_row()
         try:
             result = claim.send_one(self.conn, self.client, picked, self.cfg, now=self.stamp, clock=self.deps.clock,
-                                    rng=self.deps.rng, account=self.account)
+                                    rng=self.deps.rng, account=account)
         except claim.AnotherSendInFlight:
             self._line("another message is being sent, so this tick sends nothing")
+            return
+        except claim.WrongAccount as err:
+            self._partial(f"{_text(err)}; nothing was sent")
             return
         except claim.Unproven:
             self._partial("an email was already claimed while Gmail is not shown to keep the sender's marker, so "
@@ -621,7 +634,7 @@ class _Tick:
             self.sent.append(picked.message_id)
             self.counts["sent"] += 1
             self._line(f"sent message {picked.message_id}")
-            if proof.phase(self.conn) == proof.MISSING:  # its own read back showed the marker dropped
+            if proof.phase(self.conn, account.account_id) == proof.MISSING:  # its own read back showed it dropped
                 self._partial(_PHASE_LINE[proof.MISSING])
                 self._notice(f"first_send_{proof.MISSING}", STOP_TITLE, proof.PHASE_TEXT[proof.MISSING])
         else:

@@ -6,8 +6,9 @@ harness store with a fixed clock: `add_people` for an emailed engineer and a Lin
 the engineer, `save_linkedin_note` for the manager and `flag_review` once. The banned list and me.md are the test
 fixtures, set for the stage only. A tool call that fails stops the stage.
 
-Before the calls it keeps a fingerprint of every table no tool may write (`guard.NEVER_TABLES`, and the bridge's
-`BRIDGE_TABLES`, which only `log_sent` writes) and the last event id; `register` leaves those and the ids the calls returned on the harness as `harness.mcp` (an `McpStage`).
+Before the calls it keeps a fingerprint of every table no tool may write (`guard.NEVER_TABLES`, and the insert-only
+`INSERT_ONLY_TABLES`, which only `log_sent` and `mark_email_bounced` write) and the last event id; `register`
+leaves those and the ids the calls returned on the harness as `harness.mcp` (an `McpStage`).
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from unittest import mock
 from outreach.drafting.brief import brief_id, read_evidence, read_stories
 from outreach.drafting.voice import load_voice_pack
 from outreach.mcp import server
-from outreach.mcp.guard import BRIDGE_TABLES, NEVER_TABLES
+from outreach.mcp.guard import INSERT_ONLY_TABLES, NEVER_TABLES
 
 __all__ = ["register", "McpStage", "COMPANY", "never_fingerprint"]
 
@@ -38,10 +39,10 @@ BODY = ("Hi Eda,\n\nI read your post on how the Draftwell Labs ledger moved off 
 
 
 def never_fingerprint(conn) -> str:
-    """A hash of every row of every table no MCP tool this stage calls may write (the bridge tables too: only
-    `log_sent` writes them, and the stage never calls it)."""
+    """A hash of every row of every table no MCP tool this stage calls may write (the insert-only tables too: only
+    `log_sent` and `mark_email_bounced` write them, and the stage calls neither)."""
     digest = hashlib.sha256()
-    for table in sorted(NEVER_TABLES | BRIDGE_TABLES):
+    for table in sorted(NEVER_TABLES | INSERT_ONLY_TABLES):
         digest.update(table.encode())
         for row in conn.execute(f"SELECT * FROM {table} ORDER BY 1"):
             digest.update(repr(tuple(row)).encode())

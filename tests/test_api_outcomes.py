@@ -648,9 +648,10 @@ class CompanyHold(OutcomeCase):
 
     def claimable(self) -> bool:
         """Whether the claim's own stop re-check would let the queued email go (it never reaches Gmail here)."""
-        from outreach.sending import claim
+        from outreach.sending import accounts, claim
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.queued)
-        taken = claim.claim(self.conn, q, rfc_id="<hold.test@gmail.com>", now=NOW)
+        taken = claim.claim(self.conn, q, accounts.primary(self.conn, self.send_cfg), rfc_id="<hold.test@gmail.com>",
+                            now=NOW)
         if taken:  # put it back: this test only asks whether the claim would go ahead
             self.conn.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (self.queued,))
         return taken
@@ -734,7 +735,7 @@ class ReplierStops(OutcomeCase):
 
     def test_a_linkedin_reply_stops_that_persons_own_email_even_after_the_hold_is_released(self):
         from outreach.drafts.followups import RELEASE_KIND
-        from outreach.sending import claim
+        from outreach.sending import accounts, claim
         t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
         self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
         self.assertEqual(self.reason(self.lena_email), "reply_stop")
@@ -743,7 +744,8 @@ class ReplierStops(OutcomeCase):
                      actor="devanshu", at="2026-11-10T16:00:00Z")  # #11 Task 19's release, when it lands
         self.assertEqual(self.reason(self.lena_email), "reply_stop")
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.lena_email)
-        self.assertFalse(claim.claim(self.conn, q, rfc_id="<lena.1@gmail.com>", now=NOW))
+        self.assertFalse(claim.claim(self.conn, q, accounts.primary(self.conn, self.send_cfg),
+                                     rfc_id="<lena.1@gmail.com>", now=NOW))
 
     def test_a_cleared_reply_does_not_stop_the_persons_email(self):
         t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")

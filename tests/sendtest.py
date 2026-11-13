@@ -143,9 +143,9 @@ def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | 
     claim.leftover_claims(conn, iso(now))
     found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
                             u.rfc_id)
-             for u in claim.unclear(conn)}
+             for u in claim.unclear(conn, _accounts.primary(conn, cfg).account_id)}
     with transaction(conn):
-        claim.reconcile(conn, found, now=iso(now), cfg=cfg, rng=rng)
+        claim.reconcile(conn, found, _accounts.primary(conn, cfg).account_id, now=iso(now), cfg=cfg, rng=rng)
         claim.requeue_failed(conn, now=iso(now), cfg=cfg)
         day = ramp.open_day(conn, _accounts.primary(conn, cfg), now, cfg)
     picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg), now=now, cfg=cfg,
@@ -154,6 +154,6 @@ def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | 
         return None
     try:
         return claim.send_one(conn, client, picked, cfg, now=iso(now), clock=clock, rng=rng,
-                              account=cfg.from_address)
+                              account=_accounts.primary(conn, cfg))
     except GmailError as err:
         return err.kind

@@ -69,7 +69,7 @@ def _gate(conn: sqlite3.Connection, old_sender_loaded: bool, *, ignore_pause: bo
         return "signed_out"
     if old_sender_loaded:
         return "old_sender_running"
-    if proof.phase(conn) not in proof.OPEN:
+    if proof.phase(conn, 1) not in proof.OPEN:  # account 1's proof, as its pause above
         return "message_id_unproven"
     return None
 
@@ -93,7 +93,7 @@ def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
     day = ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg)
     gate = _gate(conn, old_sender_loaded)
     found = queue.verdicts(conn, now, cfg, day=day, gate=gate)
-    if gate is None and proof.phase(conn) == proof.FIRST_SEND:
+    if gate is None and proof.phase(conn, accounts.primary(conn, cfg).account_id) == proof.FIRST_SEND:
         found = queue.first_only(found)
     return {v.message_id: v for v in found}
 
@@ -104,7 +104,8 @@ def queue_projection(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     A pause is not a reason to show nothing: the projection runs as if he resumed now. A sign-in problem, the old
     sender and an unproven Gmail marker (the first email goes alone) are: the queue's own sentence says what is wrong, so nothing is projected."""
     paused = accounts.pause_of(conn, accounts.primary(conn, cfg).account_id) is not None
-    if _gate(conn, old_sender_loaded, ignore_pause=True) is not None or proof.phase(conn) == proof.FIRST_SEND:
+    if _gate(conn, old_sender_loaded, ignore_pause=True) is not None \
+            or proof.phase(conn, accounts.primary(conn, cfg).account_id) == proof.FIRST_SEND:
         return {}, paused
     prepared = queue.prepare(conn, now, cfg, day=ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg))
     return projection.project(prepared, now, cfg), paused
@@ -211,7 +212,7 @@ def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     errors, gmail_message = _gmail_message(conn, account.account_id, today.isoformat())
     schedule = queue_schedule(conn, now, cfg, old_sender_loaded=old_sender_loaded)
     queued = {q.message_id: q for q in queue.load_queue(conn, cfg)}
-    next_send, none_reason = _next_send(schedule, queued, now, proof.phase(conn))
+    next_send, none_reason = _next_send(schedule, queued, now, proof.phase(conn, account.account_id))
     return SendingSnapshot(
         state=state, paused_reason=reason, paused_at=pause.at if pause is not None else None,
         gmail_message=gmail_message, sent_today=signals.counted_sends_on(conn, account.account_id, today, cfg),

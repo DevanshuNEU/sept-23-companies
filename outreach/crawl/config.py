@@ -6,7 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ATS_HOSTS", "BigBoardConfig", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
+__all__ = ["ATS_HOSTS", "BigBoardConfig", "TiersConfig", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
 
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
@@ -26,6 +26,19 @@ _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max
              "watch_interval_s", "watch_per_tick", "watch_min_text_chars", "stale_after_months", "body_refetch_days",
              "outage_grace_s", "check_budget_s", "check_skip_recent_s")
 _NUM_KEYS = ("timeout_s", "default_host_interval_s")
+
+
+@dataclass(frozen=True)
+class TiersConfig:
+    """How long a board on one of `ats` (one request a read) waits after a good read (#251): `hot_s` while a job at
+    his level was first seen there in the last `hot_days`, `dead_s` once nothing new came for `dead_days`, `warm_s`
+    otherwise. Boards on other ATSs keep the floor-and-ceiling rhythm."""
+    hot_s: int = 900
+    warm_s: int = 7200
+    dead_s: int = 86400
+    hot_days: int = 90
+    dead_days: int = 90
+    ats: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,6 +84,7 @@ class CrawlConfig:
     check_ats: tuple[str, ...]  # the ATSs whose every active board a Check now reads (#194)
     ats_off: dict[str, str]  # ATS name -> why its reader is switched off (#46)
     big_board: BigBoardConfig
+    tiers: TiersConfig = TiersConfig()
 
     def reads(self, ats: str) -> bool:
         """False for an ATS whose reader is switched off: its boards are never read, probed or slug-probed."""
@@ -115,11 +129,34 @@ def _load_big_board(table: object, floor_s: int, ceiling_s: int) -> BigBoardConf
                           interval_s=whole("interval_s", floor_s, ceiling_s))
 
 
+def _load_tiers(table: object, name: str) -> TiersConfig:
+    if not isinstance(table, dict):
+        raise ValueError("tiers must be a table")
+    keys = ("hot_s", "warm_s", "dead_s", "hot_days", "dead_days", "ats")
+    unknown = sorted(set(table) - set(keys))
+    if unknown:
+        raise ValueError(f"[tiers] has unknown key(s): {', '.join(unknown)}")
+    for key in keys:
+        if key not in table:
+            raise KeyError(f"tiers.{key} is missing from {name}")
+    for key in keys[:-1]:
+        v = table[key]
+        if not isinstance(v, int) or isinstance(v, bool) or v < 60:
+            raise ValueError(f"tiers.{key} must be a whole number of at least 60, got {v!r}")
+    if not table["hot_s"] <= table["warm_s"] <= table["dead_s"]:
+        raise ValueError("tiers must wait hot_s <= warm_s <= dead_s")
+    ats = table["ats"]
+    if not isinstance(ats, list) or not all(a in ATS_HOSTS for a in ats):
+        raise ValueError(f"tiers.ats must list ATSs the crawler reads, got {ats!r}")
+    return TiersConfig(hot_s=table["hot_s"], warm_s=table["warm_s"], dead_s=table["dead_s"],
+                       hot_days=table["hot_days"], dead_days=table["dead_days"], ats=tuple(dict.fromkeys(ats)))
+
+
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "split_hosts", "workers",
-                "ats_off", "big_board", "check_ats"):
+                "ats_off", "big_board", "check_ats", "tiers"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -196,5 +233,6 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     kwargs["workers"] = dict(workers)
     kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
     kwargs["big_board"] = big
+    kwargs["tiers"] = _load_tiers(data["tiers"], path.name)
     kwargs["check_ats"] = tuple(dict.fromkeys(check_ats))
     return CrawlConfig(**kwargs)

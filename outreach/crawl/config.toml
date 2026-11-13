@@ -103,3 +103,17 @@ min_open = 200
 max_share = 0.10
 quiet_days = 30
 interval_s = 86400
+
+# Speed tiers (#251, #9 job board ruling 2026-11-12 point 6). A board on one of `ats` (one request a read) waits
+# `hot_s` after a good read while a job at his level (engineering, a software role, not outside the US, fit or level
+# not stated) was first seen there in the last `hot_days`; `dead_s` once nothing new came for `dead_days`; `warm_s`
+# otherwise. Only the next read moves (the stored interval stays the normal one); error backoff and the big_board day
+# still apply. Boards on other ATSs keep floor_s to ceiling_s until their newest-first reads land.
+[tiers]
+hot_s = 900
+warm_s = 7200
+dead_s = 86400
+hot_days = 90
+dead_days = 90
+ats = ["greenhouse", "ashby", "lever", "workable", "rippling", "breezy", "recruitee", "jazzhr", "bamboohr",
+       "teamtailor", "pinpoint", "smartrecruiters"]

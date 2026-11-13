@@ -378,3 +378,56 @@ class LowYieldDueTests(StoreTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TierTests(StoreTestCase):
+    """#251: a single-request board is read every 15 minutes while jobs at his level appear there, every 2 hours
+    otherwise, and once a day when nothing new has come for 90 days. Other ATSs keep the old rhythm (None)."""
+
+    def tiered(self, board):
+        from outreach.crawl.cadence import tier_wait_s
+        return tier_wait_s(self.conn, load_board(self.conn, board), NOW, CFG)
+
+    def job(self, board, days_ago, **dec):
+        c = self.conn.execute("SELECT company_id FROM board WHERE board_id = ?", (board,)).fetchone()[0]
+        pid = posting(self.conn, c, board_id=board, first_seen_at=ago(days_ago * DAY), last_seen_at=NOW)
+        decision(self.conn, pid, **dec)
+        return pid
+
+    def test_a_fresh_job_at_his_level_makes_it_hot(self):
+        b = self.board(self.company())
+        self.job(b, 10, level_state="fit")
+        self.assertEqual(self.tiered(b), 900)
+
+    def test_level_not_stated_counts_as_his_level(self):
+        b = self.board(self.company(), ats="ashby")
+        self.job(b, 3, level_state="uncertain")
+        self.assertEqual(self.tiered(b), 900)
+
+    def test_a_senior_other_or_foreign_job_is_warm_not_hot(self):
+        for dec in ({"level_state": "reject"}, {"level_state": "fit", "role": "other"},
+                    {"level_state": "fit", "us": "no"}, {"level_state": "fit", "lane": "not_engineering"}):
+            with self.subTest(dec=dec):
+                b = self.board(self.company())
+                self.job(b, 5, **dec)
+                self.assertEqual(self.tiered(b), 7200)
+
+    def test_nothing_new_for_90_days_is_dead(self):
+        b = self.board(self.company())
+        self.job(b, 120, level_state="fit")
+        self.assertEqual(self.tiered(b), 86400)
+
+    def test_a_new_board_with_no_postings_is_warm(self):
+        b = self.board(self.company(), ats="lever")
+        self.assertEqual(self.tiered(b), 7200)
+
+    def test_workday_keeps_its_rhythm(self):
+        b = self.board(self.company(), ats="workday")
+        self.job(b, 1, level_state="fit")
+        self.assertIsNone(self.tiered(b))
+
+    def test_the_tier_settings(self):
+        self.assertEqual((CFG.tiers.hot_s, CFG.tiers.warm_s, CFG.tiers.dead_s, CFG.tiers.hot_days,
+                          CFG.tiers.dead_days), (900, 7200, 86400, 90, 90))
+        self.assertIn("greenhouse", CFG.tiers.ats)
+        self.assertNotIn("workday", CFG.tiers.ats)

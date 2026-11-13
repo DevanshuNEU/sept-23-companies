@@ -546,7 +546,7 @@ class GreenhouseFlowTests(IngestTestCase):
         board = self.board()
         self.assertEqual((board["last_read"], board["last_read_at"], board["etag"], board["error_streak"]),
                          ("ok", T0, '"A"', 0))
-        self.assertEqual(board["next_read_at"], add_seconds(T0, FLOOR))
+        self.assertEqual(board["next_read_at"], add_seconds(T0, 900))  # #251: a hot board
         self.assertEqual(board["change_interval_s"], FLOOR)
         read, = self.conn.execute("SELECT * FROM board_read").fetchall()
         self.assertEqual((read["result"], read["postings"], read["at"]), ("ok", 3, T0))
@@ -594,7 +594,7 @@ class GreenhouseFlowTests(IngestTestCase):
                          [tuple(r) for r in decisions])
         board = self.board()
         self.assertEqual((board["last_read"], board["etag"]), ("unchanged", '"A"'))
-        self.assertEqual(board["next_read_at"], add_seconds(at(1), out.interval_s))
+        self.assertEqual(board["next_read_at"], add_seconds(at(1), 900))  # #251: a hot board
         self.assertEqual(self.conn.execute("SELECT postings FROM board_read WHERE result = 'unchanged'").fetchone()[0], 3)
 
     def test_a_week_without_a_listing_sends_no_validators(self):
@@ -927,15 +927,25 @@ class DetailBackfillTests(IngestTestCase):
 
 
 class CadenceTests(IngestTestCase):
+    def test_a_board_with_a_new_job_at_his_level_is_read_again_in_15_minutes(self):
+        # #251: the next read moves to the tier's wait; the stored interval stays the normal one.
+        self.read(ok())
+        board = self.board()
+        hot = self.conn.execute("SELECT 1 FROM current_decision WHERE level_state IN ('fit', 'uncertain') "
+                                "AND lane = 'engineering'").fetchone()
+        self.assertIsNotNone(hot)
+        self.assertEqual((board["next_read_at"], board["change_interval_s"]), (add_seconds(T0, 900), FLOOR))
+
     def test_new_engineering_posting_resets_the_interval_to_the_floor(self):
         self.read(ok())
         out = self.read(ok(JOBS, '"B"'), at(30))  # nothing new for 30 days: the interval grows
         self.assertEqual(out.interval_s, 30 * 86400 // 8)
-        self.assertEqual(self.board()["next_read_at"], add_seconds(at(30), 30 * 86400 // 8))
+        # #251: a job at his level came in the last 90 days, so the next read is 15 minutes out whatever the interval
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(30), 900))
         out = self.read(ok(CHANGED, '"C"'), at(31))  # a new engineering posting: first_seen_at is now
         self.assertEqual(out.interval_s, FLOOR)
         board = self.board()
-        self.assertEqual((board["change_interval_s"], board["next_read_at"]), (FLOOR, add_seconds(at(31), FLOOR)))
+        self.assertEqual((board["change_interval_s"], board["next_read_at"]), (FLOOR, add_seconds(at(31), 900)))
 
     def test_error_sets_next_read_at_by_backoff(self):
         self.read(ok())
@@ -990,7 +1000,7 @@ class LowYieldReadTests(IngestTestCase):
     def test_fresh_fit_posting_restores_interval(self):
         self.aged_board()
         out = self.second_read(big_board_jobs(10, 240, extra_eng=1))  # a new engineer, first seen now
-        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), 900))  # #251: hot again
 
     def test_a_board_that_waits_longer_than_a_day_already_keeps_it(self):
         self.aged_board()
@@ -1001,7 +1011,7 @@ class LowYieldReadTests(IngestTestCase):
         self.read(ok(big_board_jobs(10, 140)), at(0))
         self.conn.execute("UPDATE posting SET first_seen_at = ?", (at(-60),))
         self.second_read(big_board_jobs(10, 140))
-        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), FLOOR))
+        self.assertEqual(self.board()["next_read_at"], add_seconds(at(1), 900))  # #251: jobs at his level 60 days ago
 
     def test_empty_read_on_big_board_keeps_normal_wait(self):
         """After a first empty read the postings are still open: the second empty read, which closes them, is not

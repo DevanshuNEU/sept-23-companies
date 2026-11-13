@@ -118,13 +118,23 @@ class SenderAccountsMigrationTest(unittest.TestCase):
         touch = self.db.execute(
             "INSERT INTO touch(person_id, origin, first_sent_at, gmail_thread_id, created_at, updated_at) "
             "VALUES (?, 'import', ?, ?, ?, ?)", (person, sent_at, thread, T, T)).lastrowid
-        if message_state == "drafted":
-            self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, saved_by, created_at, "
-                            "updated_at) VALUES (?, 0, 'drafted', 's', 'b', 'import', ?, ?)", (touch, T, T))
-        elif message_state is not None:
+        if message_state == "sent":
             self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, saved_by, rfc_message_id, "
                             "sent_at, created_at, updated_at) VALUES (?, 0, 'sent', 's', 'b', 'import', ?, ?, ?, ?)",
                             (touch, f"<{touch}@x>", T, T, T))
+        elif message_state is not None:
+            mid = self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, saved_by, created_at, "
+                                  "updated_at) VALUES (?, 0, 'drafted', 's', 'b', 'import', ?, ?)",
+                                  (touch, T, T)).lastrowid
+            if message_state in ("approved", "sending", "send_unknown"):
+                self.db.execute("UPDATE message SET state = 'approved', approved_at = ? WHERE message_id = ?", (T, mid))
+            if message_state in ("sending", "send_unknown"):
+                self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? "
+                                "WHERE message_id = ?", (f"<p{touch}@x>", T, mid))
+            if message_state == "send_unknown":
+                self.db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (mid,))
+            self.assertEqual(self.db.execute("SELECT state FROM message WHERE message_id = ?", (mid,)).fetchone()[0],
+                             message_state)
         return co, touch
 
     def test_an_imported_touch_that_never_sent_keeps_no_account_and_routes_by_lane(self):
@@ -149,6 +159,19 @@ class SenderAccountsMigrationTest(unittest.TestCase):
         found, why = accounts.route(self.db, cfg, unsent, rows)
         self.assertEqual((found.cfg.address, why), (general, "lane"))
         self.assertEqual(accounts.route(self.db, cfg, sent, rows)[1], "thread")
+
+    def test_a_touch_whose_message_may_have_gone_is_account_one(self):
+        # A message claimed (`sending`) or in doubt (`send_unknown`) may already be out: its touch is account 1's.
+        self.seed_sender()
+        unknown_co, unknown = self.imported("Unknown Co", message_state="send_unknown")  # first: one sending at a time
+        sending_co, sending = self.imported("Sending Co", message_state="sending")
+        approved_co, approved = self.imported("Approved Co", message_state="approved")
+        self.migrate()
+        acct = lambda t: self.db.execute("SELECT account_id FROM touch WHERE touch_id = ?", (t,)).fetchone()[0]
+        self.assertEqual((acct(sending), acct(unknown)), (1, 1))
+        self.assertIsNone(acct(approved))
+        pins = {r[0] for r in self.db.execute("SELECT company_id FROM company_sender")}
+        self.assertEqual(pins, {sending_co, unknown_co})
 
     def test_bounced_addresses_backfilled(self):
         co = add_company(self.db, "Bounce Co")

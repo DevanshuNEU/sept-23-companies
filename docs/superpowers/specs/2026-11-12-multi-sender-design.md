@@ -48,7 +48,13 @@ Mail.app cannot set a header. Mail.app is used only where there is no API Knock 
 - **Spread pacing per account** (replaces the fixed 1.5 minute median): after each send, the gap is the minutes left
   until the latest window close among that account's ready messages, divided by the sends it has left today plus one (so
   the last send lands before the close), times a
-  random factor from 0.6 to 1.4, clipped to 2 to 45 minutes. With 15 a day this is about one email every 25 to 40
+  random factor from 0.6 to 1.4, clipped to 2 to 45 minutes.
+- **A late start sends fewer, not faster** (2026-11-13 ruling): before the random factor, the gap is never below the
+  full day's pace, `max(minutes_left / (sends_left + 1), full_day_minutes / (limit + 1))`. `full_day_minutes` is the
+  account's whole window today: from 08:00 New York to the latest close among its ready recipients (the same close
+  `minutes_left` uses; 420 with only New York recipients, 600 with a Los Angeles one). `limit` is the account's
+  limit today. So 30 minutes left with 14 to go and a limit of 15 gives about 26 minutes (420 / 16), not 2; what does
+  not fit before the close waits for the next sending day. With 15 a day this is about one email every 25 to 40
   minutes; with 60, about every 8. The breaks and the pick from the first 5 ready messages stay, but the ready messages are ordered by recipient window
   close first (earliest close first, then queue order), so New York recipients go before Los Angeles ones. The random pick draws only among the ready messages that share
   the earliest close (up to 5, in queue order); later-closing recipients wait until no earlier-closing one is ready.

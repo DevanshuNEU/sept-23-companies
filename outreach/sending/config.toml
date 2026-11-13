@@ -44,8 +44,10 @@ size_band_gap_jitter_minutes = [60, 30, 30, 20, 15]
 size_guessed_big_band = 4
 
 # Spread pacing (#9 multi-sender ruling, 2026-11-12). An account's gap after a send is the minutes left in its window
-# over the sends it has left today, times a random factor from spread_jitter, clipped to spread_gap_minutes, so a day
-# of 15 spreads across the window and does not go out in the first half hour. The sender ticks every 2 minutes, so a
+# over the sends it has left today plus one, never below its full window today (08:00 New York to the latest close of
+# its recipients) over its limit today plus one, times a random factor from spread_jitter, clipped to
+# spread_gap_minutes, so a day of 15 spreads across the window and does not go out in the first half hour, and a late
+# start sends fewer, not faster. The sender ticks every 2 minutes, so a
 # gap lands on the next tick. Now and then (break_chance) the gap is a real break of break_minutes instead.
 spread_jitter = [0.6, 1.4]
 spread_gap_minutes = [2, 45]

@@ -328,14 +328,17 @@ def _account_of(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int) -> acc
 
 def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random, touch_id: int) -> None:
     """The sending account's `next_send_at` becomes `at` plus a spread gap (`human.spread_gap`: the minutes left in
-    its window over the sends it has left today), unless it is already later: a gap never shrinks."""
+    its window over the sends it has left today, never below its full window today over its limit today), unless it
+    is already later: a gap never shrinks."""
     account = _account_of(conn, cfg, touch_id)
     when = as_datetime(at)
     today = cal.ny_date(when, cfg)
-    sends_left = max(ramp.effective_limit(conn, account, today, cfg)
-                     - signals.counted_sends_on(conn, account.account_id, today, cfg), 0)
-    minutes_left = queue.minutes_left(conn, when, cfg, account.cfg.address, accounts.in_play(conn, cfg))
-    candidate = (when + timedelta(minutes=human.spread_gap(minutes_left, sends_left, rng, cfg))).strftime(ISO_FMT)
+    limit = ramp.effective_limit(conn, account, today, cfg)
+    sends_left = max(limit - signals.counted_sends_on(conn, account.account_id, today, cfg), 0)
+    minutes_left, day_minutes = queue.window_minutes(conn, when, cfg, account.cfg.address,
+                                                     accounts.in_play(conn, cfg))
+    gap = human.spread_gap(minutes_left, sends_left, rng, cfg, day_minutes=day_minutes, limit=limit)
+    candidate = (when + timedelta(minutes=gap)).strftime(ISO_FMT)
     current = conn.execute("SELECT next_send_at FROM sender_account WHERE account_id = ?",
                            (account.account_id,)).fetchone()
     if current is None:

@@ -35,7 +35,8 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "Verdict", "AccountDay", "Route",
-           "canonical_company", "load_queue", "window_close", "minutes_left", "minutes_left_for", "Prepared", "prepare",
+           "canonical_company", "load_queue", "window_close", "minutes_left", "minutes_left_for", "day_minutes_for",
+           "window_minutes", "Prepared", "prepare",
            "decide_all", "verdicts", "first_only", "gate_accounts", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
@@ -262,14 +263,9 @@ def _same(address: str | None, account: str) -> bool:
     return address is not None and address.lower() == account.lower()
 
 
-def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
-                     account: str | None = None) -> float:
-    """Minutes from `now` to the latest window close among the recipients that can still be sent today: a message
-    that is `ready`, or that waits only on time (`spacing`, `per_company_gap`, `window` not yet open) and whose wait
-    ends before its window closes. A follow-up due later, a paused or held company, a company at its daily limit
-    and a closed window do not count. With `account` (an address), only that account's messages count. With none,
-    the close in New York. Never below 0."""
-    now = now.astimezone(timezone.utc)
+def _latest_close(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
+                  account: str | None) -> datetime:
+    """The latest window close among the recipients that can still be sent today (see `minutes_left_for`)."""
     by_id = {q.message_id: q for q in queued}
     closes = []
     for v in verdicts:
@@ -285,8 +281,31 @@ def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now:
         if v.reason != "ready" and (v.earliest_at is None or v.earliest_at > close):
             continue
         closes.append(close)
-    close = max(closes, default=window_close(now, None, cfg))
+    return max(closes, default=window_close(now, None, cfg))
+
+
+def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
+                     account: str | None = None) -> float:
+    """Minutes from `now` to the latest window close among the recipients that can still be sent today: a message
+    that is `ready`, or that waits only on time (`spacing`, `per_company_gap`, `window` not yet open) and whose wait
+    ends before its window closes. A follow-up due later, a paused or held company, a company at its daily limit
+    and a closed window do not count. With `account` (an address), only that account's messages count. With none,
+    the close in New York. Never below 0."""
+    now = now.astimezone(timezone.utc)
+    close = _latest_close(verdicts, queued, now, cfg, account)
     return max((close - now).total_seconds() / 60, 0.0)
+
+
+def day_minutes_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
+                    account: str | None = None) -> float:
+    """The account's full sending window today, in minutes, for the floor of `human.spread_gap`: from the window's
+    open in New York (`window_start` on `now`'s New York date) to the same latest close `minutes_left_for` uses. With
+    only New York recipients it is 08:00 to 15:00, 420; a Los Angeles one stretches it to 18:00 New York, 600.
+    Never below 0."""
+    now = now.astimezone(timezone.utc)
+    close = _latest_close(verdicts, queued, now, cfg, account)
+    opens = _local(cal.ny_date(now, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
+    return max((close - opens).total_seconds() / 60, 0.0)
 
 
 def minutes_left(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, account: str,
@@ -294,8 +313,16 @@ def minutes_left(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, accou
     """How long the account's day still has, for `human.spread_gap`: `minutes_left_for` over the account's own
     messages in the approved queue as the sender sees it at `now`. `account` is its address; `accounts` are the
     accounts in play, as for `verdicts`."""
+    return window_minutes(conn, now, cfg, account, accounts)[0]
+
+
+def window_minutes(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, account: str,
+                   accounts: Mapping[str, AccountRow]) -> tuple[float, float]:
+    """`minutes_left` and `day_minutes_for` from one read of the queue: how long the account's day still has, and
+    how long its whole window is today."""
     found = verdicts(conn, now, cfg, accounts, day=None, gate=None)
-    return minutes_left_for(found, load_queue(conn, cfg), now, cfg, account)
+    items = load_queue(conn, cfg)
+    return (minutes_left_for(found, items, now, cfg, account), day_minutes_for(found, items, now, cfg, account))
 
 
 @dataclass(frozen=True)

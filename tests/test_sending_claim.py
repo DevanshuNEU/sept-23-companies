@@ -227,7 +227,10 @@ class RecordSentTest(Base):
         today = cal.ny_date(MON, CFG)
         left = ramp.effective_limit(self.db, account, today, CFG) - signals.counted_sends_on(
             self.db, account.account_id, today, CFG)
-        gap = human.spread_gap(queue.minutes_left(self.db, MON, CFG, account.cfg.address, accounts.in_play(self.db, CFG)), left, random.Random(7), CFG)
+        limit = ramp.effective_limit(self.db, account, today, CFG)
+        minutes_left, day_minutes = queue.window_minutes(self.db, MON, CFG, account.cfg.address,
+                                                         accounts.in_play(self.db, CFG))
+        gap = human.spread_gap(minutes_left, left, random.Random(7), CFG, day_minutes=day_minutes, limit=limit)
         expected = iso(MON + timedelta(minutes=gap))
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
         self.assertEqual(got, expected)
@@ -245,9 +248,24 @@ class RecordSentTest(Base):
         _, mid = self.approve()
         claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(self.clock()), clock=self.clock,
                        rng=MiddleRng(), account=accounts.primary(self.db, cfg))
-        # 16 a day, 2 sent (one follow-up): 14 left, 15 intervals; 09:00 to 15:00 New York is 360 minutes: 24 exactly.
+        # 16 a day, 2 sent (one follow-up): 14 left, 15 intervals; 09:00 to 15:00 New York is 360 minutes: 24. The
+        # full day's pace is 420 minutes over 17 (24.7), which is larger, so it is the gap.
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
-        self.assertEqual(got, iso(MON + timedelta(minutes=24)))
+        self.assertEqual(got, iso(MON + timedelta(minutes=max(360 / 15, 420 / 17))))
+
+    def test_a_late_start_sends_fewer_not_faster(self):
+        from tests import SHIPPED_SEND_CONFIG
+        from tests.sendtest import with_ramp
+        from tests.test_sending_human import MiddleRng
+        cfg = with_ramp(solo(load_config(SHIPPED_SEND_CONFIG)), ramp_start=15, ramp_floor=15)
+        late = MON + timedelta(hours=5, minutes=30)  # 14:30 New York: 30 minutes left
+        clock = FakeClock(late)
+        _, mid = self.approve()
+        claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(late), clock=clock,
+                       rng=MiddleRng(), account=accounts.primary(self.db, cfg))
+        # 14 left over 30 minutes would be 2 minutes; the full day's 420 minutes over 15 + 1 is 26.25.
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
+        self.assertEqual(got, iso(late + timedelta(minutes=26.25)))
 
     def test_a_missing_account_row_raises_and_the_record_rolls_back(self):
         _, mid = self.approve()

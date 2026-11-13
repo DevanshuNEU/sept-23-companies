@@ -7,7 +7,7 @@ recipient's hours, the per-company limit and gap and the daily limit are the sen
 
 Each sending account (`Prepared.senders`) places its own messages with its own daily limit and spacing; the company
 counts and gaps are shared, as in the sender. Two things are estimates. Spacing between sends is random (`human.spread_gap`), so the walk uses its expected
-gap (`human.expected_gap_minutes`: the formula with its factor at 1.0); the first send of a day
+gap (`human.expected_gap_minutes`: the formula, with its full-day floor, at factor 1.0); the first send of a day
 and each company's gap use their fixed offsets. Later days
 use today's limit as it stands (the ramp may allow more, so mail can only come earlier than shown). Read only: the
 store is read once, by `queue.prepare`. Projected times can run up to about 15 minutes early over a day (the real
@@ -59,11 +59,15 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
             sent_by_day[account][day] = sent_by_day[account].get(day, 0) + 1
             pending.remove(q)
             # The sender's rule: minutes left in the window of the account's recipients that can still go today (as
-            # decided at `at`, before this placement) over the account's sends left.
-            left = max(p.days[account].limit - sent_by_day[account][day], 0)
-            minutes_left = queue.minutes_left_for([v for v in found if v.message_id != q.message_id], pending, at, cfg,
-                                                  account)
-            next_send[account] = at + timedelta(minutes=human.expected_gap_minutes(minutes_left, left, cfg))
+            # decided at `at`, before this placement) over the account's sends left, never below its full window
+            # today over its limit (a late start sends fewer, not faster).
+            limit = p.days[account].limit
+            left = max(limit - sent_by_day[account][day], 0)
+            others = [v for v in found if v.message_id != q.message_id]
+            minutes_left = queue.minutes_left_for(others, pending, at, cfg, account)
+            day_minutes = queue.day_minutes_for(others, pending, at, cfg, account)
+            next_send[account] = at + timedelta(minutes=human.expected_gap_minutes(
+                minutes_left, left, cfg, day_minutes=day_minutes, limit=limit))
             continue
         later = [v.earliest_at for v in found
                  if v.reason in queue.TIME_REASONS and v.earliest_at is not None and v.earliest_at > at]

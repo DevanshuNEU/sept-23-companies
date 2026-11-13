@@ -8,8 +8,9 @@ Pure: nothing here reads the clock or the store. Two kinds of randomness:
   gets the same answer: how late the first send of a day starts (`day_start_offset`) and how long a company waits
   between two of its emails (`company_gap`).
 
-Gaps spread the account's day across its window (`spread_gap`): the minutes left over the sends left, with a random
-factor, and the odd real break. Uniform gaps have a flat, even look that no person produces.
+Gaps spread the account's day across its window (`spread_gap`): the minutes left over the sends left, never below the
+full day's pace (so a late start sends fewer, not faster), with a random factor, and the odd real break. Uniform gaps
+have a flat, even look that no person produces.
 """
 import hashlib
 import random
@@ -25,25 +26,41 @@ __all__ = ["spread_gap", "expected_gap_minutes", "choose", "day_start_offset", "
 T = TypeVar("T")
 
 
-def spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: SendConfig) -> float:
+def _base_gap(minutes_left: float, sends_left: int, day_minutes: float, limit: int) -> float:
+    """The gap before the random factor: the minutes left over the sends left plus one, never below the full day's
+    pace (`day_minutes` over `limit` plus one). The floor is the 2026-11-12 ruling that a late start sends fewer, not
+    faster: 30 minutes left with 14 to go is not 14 emails in half an hour. A `limit` of 0 sets no floor."""
+    base = minutes_left / (sends_left + 1)
+    if limit > 0:
+        base = max(base, day_minutes / (limit + 1))
+    return base
+
+
+def spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: SendConfig, *,
+               day_minutes: float = 0.0, limit: int = 0) -> float:
     """Minutes until the account's next send: now and then a break, otherwise the minutes left in its window over the
-    sends it has left today plus one (the gaps still to come, so the last send lands before the close, not on it), times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's
-    sends spread across the window. No sends left gives the high clip."""
+    sends it has left today plus one (the gaps still to come, so the last send lands before the close, not on it),
+    never below the full day's pace (`day_minutes`, the account's whole window today, over its `limit` today plus
+    one), times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's sends spread across
+    the window. No sends left gives the high clip."""
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
     if rng.random() < cfg.break_chance:
         return rng.uniform(*cfg.break_minutes)
-    return min(max(minutes_left / (sends_left + 1) * rng.uniform(*cfg.spread_jitter), low), high)
+    base = _base_gap(minutes_left, sends_left, day_minutes, limit)
+    return min(max(base * rng.uniform(*cfg.spread_jitter), low), high)
 
 
-def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig) -> float:
-    """The gap `spread_gap` has on average, for the projection: the formula with its factor at 1.0 (the middle of
-    `spread_jitter`), clipped. It leaves out the rare break."""
+def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig, *,
+                         day_minutes: float = 0.0, limit: int = 0) -> float:
+    """The gap `spread_gap` has on average, for the projection: the formula (with its full-day floor) at factor 1.0
+    (the middle of `spread_jitter`), clipped. It leaves out the rare break."""
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
-    return min(max(minutes_left / (sends_left + 1) * sum(cfg.spread_jitter) / 2, low), high)
+    base = _base_gap(minutes_left, sends_left, day_minutes, limit)
+    return min(max(base * sum(cfg.spread_jitter) / 2, low), high)
 
 
 def choose(candidates: Sequence[T], rng: random.Random, pool: int) -> T | None:

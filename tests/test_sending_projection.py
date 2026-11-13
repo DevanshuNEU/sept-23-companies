@@ -58,12 +58,13 @@ class ProjectionTest(Base):
         # Each gap is the spread rule at factor 1.0: the minutes left until the window closes (15:00 New York, the
         # recipients are in New York) over the sends left today, clipped.
         limit = queue.prepare(self.db, FRI, CFG, _in_play(self.db, CFG), day=None).limit
+        day = queue.day_minutes_for([], [], FRI, CFG)
         first = timedelta(minutes=human.expected_gap_minutes(
-            queue.minutes_left_for([], [], FRI, CFG), limit - 1, CFG))
+            queue.minutes_left_for([], [], FRI, CFG), limit - 1, CFG, day_minutes=day, limit=limit))
         self.assertEqual(got[mids[0]], FRI)
         self.assertEqual(got[mids[1]], FRI + first)
         second = timedelta(minutes=human.expected_gap_minutes(
-            queue.minutes_left_for([], [], FRI + first, CFG), limit - 2, CFG))
+            queue.minutes_left_for([], [], FRI + first, CFG), limit - 2, CFG, day_minutes=day, limit=limit))
         self.assertEqual(got[mids[2]], FRI + first + second)
 
     def test_daily_limit_holds_flat_for_later_days(self):
@@ -135,7 +136,9 @@ class ShippedPacingTest(Base):
         cfg = dataclasses.replace(CFG, spread_gap_minutes=(2, 45))  # the shipped clip (the scratch one is [2, 3])
         got = self_project(self.db, FRI, cfg)
         limit = queue.prepare(self.db, FRI, cfg, _in_play(self.db, cfg), day=None).limit
-        expected = 234 / (limit - 1 + 1)  # 11:06 to 15:00 is 234 minutes
+        # 11:06 to 15:00 is 234 minutes over the sends left plus one, but never below the full day's pace: 420 minutes
+        # (08:00 to 15:00 New York; a Los Angeles close would make it 600) over the limit plus one.
+        expected = max(234 / (limit - 1 + 1), 420 / (limit + 1))
         self.assertAlmostEqual((got[b] - got[a]).total_seconds() / 60, expected, places=3)
 
     def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
@@ -148,8 +151,9 @@ class ShippedPacingTest(Base):
         _, b = self.approve(company=seed_company(self.db, "B"))
         got = self_project(self.db, FRI, cfg)
         # 16 a day, 1 sent, 1 placed: 14 left, 15 intervals; 11:06 to 15:00 in New York is 234 minutes: 15.6 each.
+        # That is below the full day's pace, 420 minutes over 17 (24.7), so a late start sends fewer: 24.7 it is.
         self.assertEqual(got[a], FRI)
-        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 15.6 * 60, places=3)
+        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 420 / 17 * 60, places=3)
 
 
 def self_project(db, now, cfg):
@@ -191,7 +195,9 @@ class PerAccountProjectionTest(Base):
         got = projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)
         # Both accounts send their first at once: the sponsor account does not wait out the general one's gap.
         self.assertEqual((got[general[0]], got[sponsor[0]]), (FRI, FRI))
-        gap = timedelta(minutes=human.expected_gap_minutes(queue.minutes_left_for([], [], FRI, cfg), 14, cfg))
+        gap = timedelta(minutes=human.expected_gap_minutes(queue.minutes_left_for([], [], FRI, cfg), 14, cfg,
+                                                           day_minutes=queue.day_minutes_for([], [], FRI, cfg),
+                                                           limit=15))
         self.assertEqual(got[general[1]], FRI + gap)
         # The general account's 15 do not use the sponsor account's day: at its limit, the sponsor one still goes.
         for i in range(15):

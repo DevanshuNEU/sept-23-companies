@@ -1117,6 +1117,17 @@ class AccountsQueueTest(Base):
         items = queue.load_queue(self.db, self.cfg)
         self.assertEqual(queue.minutes_left_for(found, items, MON, self.cfg, account=GENERAL), 360.0)
 
+    def test_window_minutes_gives_minutes_left_and_the_full_day_per_account(self):
+        # The full day runs from 08:00 New York to the latest close among the account's recipients that can go today.
+        self.approve()  # New York, general account
+        self.approve(company=self.sponsor_co, tz="America/Los_Angeles")
+        self.assertEqual(queue.window_minutes(self.db, MON, self.cfg, GENERAL, self.rows), (360.0, 420.0))
+        self.assertEqual(queue.window_minutes(self.db, MON, self.cfg, SPONSOR, self.rows), (540.0, 600.0))
+        found = queue.verdicts(self.db, MON, self.cfg, self.rows, day=None, gate=None)
+        items = queue.load_queue(self.db, self.cfg)
+        self.assertEqual(queue.day_minutes_for(found, items, MON, self.cfg, account=SPONSOR), 600.0)
+        self.assertEqual(queue.day_minutes_for([], [], MON, self.cfg), 420.0)
+
     def test_first_only_keeps_the_account(self):
         _, general = self.approve()
         _, other = self.approve(company=seed_company(self.db, "Other"))

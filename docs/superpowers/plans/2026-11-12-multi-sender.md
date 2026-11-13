@@ -17,7 +17,7 @@
 - Every test runs on scratch settings (`tests/__init__.py`); no test calls Gmail, Mail.app or `osascript`. Mail.app is reached only through an injected runner that tests replace.
 - Accounts: `devanshurajesh@gmail.com` (id 1, kind `gmail`, lane none, reads only), `devanshuchi9@gmail.com` (kind `gmail`, lane `general`, start 15, step 3, floor 15, ceiling 40), `chicholikar.d@northeastern.edu` (kind `mailapp`, Mail.app account `Exchange`, lane `sponsor`, start 15, step 3, floor 15, ceiling 60). Display name on every account: `Devanshu Chicholikar`.
 - Window: weekdays 08:00 to 15:00 recipient local time. Holidays: 2026-11-26, 2026-11-27, 2026-12-24, 2026-12-25, 2026-12-31, 2027-01-01.
-- Spread gap: `minutes_left / (sends_left + 1) * U(0.6, 1.4)`, clipped to `[2, 45]` minutes; breaks and the pick from the first 5 stay.
+- Spread gap: `max(minutes_left / (sends_left + 1), full_day_minutes / (limit + 1)) * U(0.6, 1.4)`, clipped to `[2, 45]` minutes, where `full_day_minutes` is the account's window today (08:00 New York to the latest close among its ready recipients) and `limit` its limit today, so a late start sends fewer, not faster (2026-11-13 ruling); breaks and the pick from the first 5 stay.
 - Follow-ups: `followup_business_days = [7]`; follow-ups count toward the account's day.
 - Hard pause of one account at 2% or more of its last 100 first emails bounced, once 30 are sent.
 - `send_day.send_limit` CHECK stays `BETWEEN 0 AND 200`; `HARD_CEILING = 200` stays.

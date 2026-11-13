@@ -73,11 +73,13 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual(paused, 0, "the scripted resume cleared the pause")
         for n, row in enumerate(self.r.days, start=1):
             if n not in (4, 8):
-                # Earliest-close-first picking and the (sends_left + 1) divisor keep days full: nine of the ten days reach
-                # 100%. Day 1 (20) sends 18: the random pick from the first 5 left two New York and five London
-                # recipients behind when their windows closed, and the day ended before the queue ran out.
+                # Earliest-close-first picking and the (sends_left + 1) divisor keep days full. Day 1 (20) sends 18: its
+                # 28 approved emails sit in 7 companies, so at the end every message left is a closed window (5 London
+                # and 2 New York, whose companies had used their gap and daily limit while the window was open), the
+                # company limit or the company gap: the queue ran out of ready recipients. Day 8 is the hard block.
                 self.assertLessEqual(row.sent, row.start_limit, f"day {n} ({row.day})")
-                self.assertGreaterEqual(row.sent, 0.9 * row.start_limit, f"day {n} ({row.day}) is nearly full")
+                self.assertGreaterEqual(row.sent, (0.9 if n == 1 else 0.95) * row.start_limit,
+                                        f"day {n} ({row.day}) is nearly full")
                 self.assertEqual(row.outcome, "clean", f"day {n}")
 
     def test_two_weeks_per_company_spacing(self):
@@ -218,6 +220,15 @@ class SpreadAcrossWindowTest(unittest.TestCase):
         self.assertGreaterEqual(times[0], ny(D[1], "08:00"))
         self.assertLessEqual(sum(1 for t in times if t < ny(D[1], "10:00")), 5, [t.strftime("%H:%M") for t in times])
         self.assertGreater(times[-1], ny(D[1], "13:00"), [t.strftime("%H:%M") for t in times])
+
+    def test_alternating_new_york_and_los_angeles_send_all_fifteen_on_every_seed(self):
+        from tests.sendtest import with_ramp
+        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+        for seed in range(1, 11):
+            result = simulate(short(1, [morning(1, 15)], companies=30, people=1,
+                                    zones=("America/New_York", "America/Los_Angeles")), seed=seed, cfg=cfg)
+            self.addCleanup(result.close)
+            self.assertEqual(len(result.sends), 15, f"seed {seed}")
 
 
 class StopRulesTest(unittest.TestCase):

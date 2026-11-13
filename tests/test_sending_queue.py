@@ -124,6 +124,17 @@ class HumanPacingTest(Base):
         picked = queue.pick(list(verdicts.values()), items, random.Random(1), 1, now=now, cfg=CFG)
         self.assertEqual(picked.message_id, ny_id)
 
+    def test_pick_draws_only_among_the_earliest_close(self):
+        # Two New York recipients and four Los Angeles ones, a pool of 5: every draw is a New York one.
+        for i in range(4):
+            self.approve(company=seed_company(self.db, f"LA{i}"), tz="America/Los_Angeles")
+        nyc = [self.approve(company=seed_company(self.db, f"NYC{i}"), tz="America/New_York")[1] for i in range(2)]
+        now = ny(2, 14, 50)
+        verdicts = list(self.verdicts_at(now).values())
+        items = queue.load_queue(self.db)
+        picked = {queue.pick(verdicts, items, random.Random(s), 5, now=now, cfg=CFG).message_id for s in range(80)}
+        self.assertEqual(picked, set(nyc))
+
     def test_pick_with_an_rng_varies_inside_the_pool(self):
         import random
         ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(8)]

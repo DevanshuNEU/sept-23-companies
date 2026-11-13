@@ -50,7 +50,8 @@ Mail.app cannot set a header. Mail.app is used only where there is no API Knock 
   the last send lands before the close), times a
   random factor from 0.6 to 1.4, clipped to 2 to 45 minutes. With 15 a day this is about one email every 25 to 40
   minutes; with 60, about every 8. The breaks and the pick from the first 5 ready messages stay, but the ready messages are ordered by recipient window
-  close first (earliest close first, then queue order), so New York recipients go before Los Angeles ones.
+  close first (earliest close first, then queue order), so New York recipients go before Los Angeles ones. The random pick draws only among the ready messages that share
+  the earliest close (up to 5, in queue order); later-closing recipients wait until no earlier-closing one is ready.
 - Company size bands (2026-11-12, #229) stay as they are and count across all accounts (one account per company makes
   that automatic).
 

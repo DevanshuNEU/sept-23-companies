@@ -204,10 +204,10 @@ class SourceFailing(AlarmCase):
 
 
 class BoardsOverdue(AlarmCase):
-    def overdue(self, n, *, interval=3600, behind_s=7200, prefix="o", active=1):
+    def overdue(self, n, *, interval=3600, behind_s=7200, prefix="o", active=1, ats="greenhouse", token="{prefix}{i}"):
         company = seed_company(self.conn, f"Overdue {prefix}")
         for i in range(n):
-            board = seed_board(self.conn, company, "greenhouse", f"{prefix}{i}")
+            board = seed_board(self.conn, company, ats, token.format(prefix=prefix, i=i))
             self.conn.execute(
                 "UPDATE board SET next_read_at = ?, change_interval_s = ?, active = ? WHERE board_id = ?",
                 (ago(hours=behind_s / 3600), interval, active, board))
@@ -221,6 +221,13 @@ class BoardsOverdue(AlarmCase):
     def test_49_is_quiet(self):
         self.overdue(49)
         self.assertEqual(self.kinds(), [])
+
+    def test_plain_icims_boards_are_not_read_so_never_overdue(self):
+        # #220: the icims reader reads Jibe sites only; a *.icims.com board keeps whatever next_read_at it had.
+        self.overdue(50, ats="icims", token="careers-{prefix}{i}.icims.com")
+        self.assertEqual(self.kinds(), [])
+        self.overdue(50, ats="icims", token="careers.{prefix}{i}.com", prefix="j")
+        self.assertEqual(self.kinds(), ["boards_overdue"])
 
     def test_a_board_inside_its_interval_is_not_overdue(self):
         self.overdue(50, interval=4 * 3600, behind_s=3600)

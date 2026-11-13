@@ -7,7 +7,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-__all__ = ["Validators", "JobRef", "ReadResult", "Adapter", "ids_fingerprint", "valid_token", "BOARD_ATS"]
+__all__ = ["Validators", "JobRef", "ReadResult", "Adapter", "ids_fingerprint", "valid_token", "BOARD_ATS",
+           "plain_icims", "PLAIN_ICIMS_SQL"]
 
 
 @dataclass(frozen=True)
@@ -105,9 +106,20 @@ def valid_token(ats: str, token: str) -> bool:
     """The one board-token grammar every stream shares (plan, Shared formats).
 
     Workday `<tenant>.wd<N>/<site>`, Oracle `<host>/<siteNumber>` (site kept as the ATS spells it), iCIMS the lower-case
-    board host (a `*.icims.com` site or a Jibe site's own host), and every other ATS a lower-case slug with no `%`. An ATS name outside `board.ats` (`BOARD_ATS`) is
-    never valid, so a misspelled name fails loudly instead of quietly getting the slug grammar.
+    board host (a `*.icims.com` site or a Jibe site's own host, #220), and every other ATS a lower-case slug with no
+    `%`. An ATS name outside `board.ats` (`BOARD_ATS`) is never valid, so a misspelled name fails loudly instead of
+    quietly getting the slug grammar.
     """
     if not isinstance(token, str) or ats not in BOARD_ATS:
         return False
     return _GRAMMAR.get(ats, _SLUG).fullmatch(token) is not None
+
+
+def plain_icims(ats: str, token: str) -> bool:
+    """A board on a plain `*.icims.com` site (#220). The icims reader reads Jibe sites only, so the crawler never reads,
+    gates or schedules such a board, and find_boards still gives its company a watched page."""
+    return ats == "icims" and isinstance(token, str) and token.lower().endswith(".icims.com")
+
+
+# `plain_icims` in SQL, on a board table aliased `b`.
+PLAIN_ICIMS_SQL = "(b.ats = 'icims' AND lower(b.token) LIKE '%.icims.com')"

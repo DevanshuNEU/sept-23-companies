@@ -96,10 +96,22 @@ class FeedSeedTest(unittest.TestCase):
 
     def test_an_ats_the_crawler_does_not_read_is_never_asked(self):
         self.listing("smartrecruiters", "acme", "Acme")  # switched off for robots.txt
-        self.listing("icims", "careers-acme.icims.com", "Acme")  # no reader
+        self.listing("icims", "careers-acme.icims.com", "Acme")  # a plain iCIMS site: the icims reader reads Jibe only
         self.assertNotIn("smartrecruiters", reading_ats(self.cfg))
         self.assertIsNone(self.seed())
         self.assertEqual(self.client.requests, [])
+
+    def test_a_jibe_site_the_feed_links_is_gated_and_added(self):
+        # #220: careers.jhuapl.edu/jobs/<id>?icims=1 is an iCIMS Jibe site; its host is the board token.
+        from pathlib import Path
+
+        from outreach.crawl.ats.icims import list_url
+        saved = json.loads((Path(__file__).parent / "fixtures" / "crawl" / "icims_jibe_jobs.json").read_text())
+        self.listing("icims", "careers.jhuapl.edu", "Johns Hopkins APL")
+        self.routes = {list_url("careers.jhuapl.edu", 1): json_response({**saved, "totalCount": 3})}
+        report = self.seed()
+        self.assertEqual((report.read, report.promoted), (1, 1))
+        self.assertIsNotNone(self.one("SELECT 1 FROM board WHERE ats = 'icims' AND token = 'careers.jhuapl.edu'"))
 
     def test_inactive_and_tokenless_listings_are_skipped(self):
         self.listing("greenhouse", "acme", "Acme", active=0)

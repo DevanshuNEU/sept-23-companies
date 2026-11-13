@@ -18,6 +18,7 @@ import sqlite3
 from collections.abc import Callable, Collection
 from datetime import datetime, timedelta
 
+from outreach.crawl.base import plain_icims
 from outreach.net import HttpClient
 from outreach.sources.ats_seed import SeedConfig, SeedReport, _gate_rows, _Row, load_seed_config
 from outreach.sources.boards import SUPPORTED_ATS, BoardRef
@@ -47,7 +48,7 @@ def _listed(conn: sqlite3.Connection, ats: Collection[str]) -> list[tuple[BoardR
             ref = BoardRef(r["ats"], r["token"])
         except ValueError:  # a link whose token is not a board token
             continue
-        if (ref.ats, ref.token.lower()) in seen:
+        if (ref.ats, ref.token.lower()) in seen or plain_icims(ref.ats, ref.token):  # a plain iCIMS site: no reader
             continue
         seen.add((ref.ats, ref.token.lower()))
         out.append((ref, r["company_name"].strip(), r["url"]))

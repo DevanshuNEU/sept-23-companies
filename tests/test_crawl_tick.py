@@ -27,7 +27,7 @@ from outreach.crawl.tick import (
     AlreadyRunning, TickReport, ensure_ruleset_current, read_company_boards, resolve_combiner, run_tick, tick_lock)
 from outreach.net import Response
 from outreach.rules import RulesetNotCurrent, ruleset_version
-from tests.fakes import FakeClient, feed_off, status_response, text_response, with_greenhouse_details
+from tests.fakes import FakeClient, feed_off, json_response, status_response, text_response, with_greenhouse_details
 from tests.storetest import fresh_store, seed_board, seed_company
 
 FIXTURES = Path(__file__).parent / "fixtures" / "crawl"
@@ -151,13 +151,25 @@ class SelectionTests(TickCase):
         self.assertEqual(self.row(due)["last_read"], "ok")
 
     def test_a_board_with_no_adapter_is_not_touched(self):
-        bid = self.board("acme-icims.icims.com", ats="icims")
+        bid = self.board("acme", ats="gem")
         report = self.tick({})
         self.assertEqual(self.client.requests, [])
         self.assertEqual(report.read, 0)
         row = self.row(bid)
         self.assertIsNone(row["last_read"])
         self.assertIsNone(row["next_read_at"])
+
+    def test_a_plain_icims_board_is_not_touched_and_a_jibe_board_is_read(self):
+        # #220: the icims reader reads Jibe sites only. A *.icims.com board stays as it was: no read, no error streak.
+        from outreach.crawl.ats.icims import list_url
+        plain = self.board("acme-icims.icims.com", ats="icims")
+        jibe = self.board("careers.jhuapl.edu", ats="icims")
+        saved = json.loads((Path(__file__).parent / "fixtures" / "crawl" / "icims_jibe_jobs.json").read_text())
+        report = self.tick({list_url("careers.jhuapl.edu", 1): json_response({**saved, "totalCount": 3})})
+        self.assertEqual(self.client.requests, [list_url("careers.jhuapl.edu", 1)])
+        self.assertEqual(report.read, 1)
+        self.assertEqual((self.row(plain)["last_read"], self.row(plain)["next_read_at"]), (None, None))
+        self.assertEqual(self.row(jibe)["last_read"], "ok")
 
     def test_plan_company_boards_are_read_first(self):
         a = self.board("alpha")

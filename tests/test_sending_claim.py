@@ -227,6 +227,36 @@ class RecordSentTest(Base):
         self.assertTrue(MON + timedelta(minutes=CFG.spread_gap_minutes[0]) <= parse(got)
                         <= MON + timedelta(minutes=max(CFG.spread_gap_minutes[1], CFG.break_minutes[1])))
 
+    def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
+        from tests import SHIPPED_SEND_CONFIG
+        from tests.sendtest import with_ramp
+        from tests.test_sending_human import MiddleRng
+        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=16, ramp_floor=15)
+        done = self.person()
+        seed_sent(self.db, done, at=MON - timedelta(days=7))
+        seed_sent(self.db, done, at=MON - timedelta(minutes=20), seq=1)  # a follow-up already sent today
+        _, mid = self.approve()
+        claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(self.clock()), clock=self.clock,
+                       rng=MiddleRng(), account=cfg.from_address)
+        # 16 a day, 2 sent (one follow-up): 14 left, 15 intervals; 09:00 to 15:00 New York is 360 minutes: 24 exactly.
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
+        self.assertEqual(got, iso(MON + timedelta(minutes=24)))
+
+    def test_a_missing_account_row_raises_and_the_record_rolls_back(self):
+        _, mid = self.approve()
+        q = self.queued(mid)
+        self.db.execute("PRAGMA foreign_keys = OFF")
+        self.db.execute("DELETE FROM sender_account")
+        with self.assertRaises(LookupError):
+            self.send(mid, q)
+
+    def test_a_touch_with_no_account_counts_as_account_one(self):
+        person, mid = self.approve()
+        self.send(mid)
+        touch = self.touch(person)
+        self.assertIsNone(touch["account_id"])
+        self.assertEqual(claim._account_of(self.db, CFG, touch["touch_id"]).account_id, 1)
+
     def test_a_reconciled_record_never_moves_next_send_at_earlier(self):
         _, mid = self.approve()
         self.gmail.fail_next_send(GmailError("server", 503))

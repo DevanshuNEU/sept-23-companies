@@ -7,8 +7,9 @@ from outreach.sending import accounts as _accounts
 from outreach.sending import calendar as cal
 from outreach.sending import human, projection, queue, ramp
 from outreach.sending.config import load_config
+from tests import SHIPPED_SEND_CONFIG
 from outreach.sending import status
-from tests.sendtest import prove, put_day, with_ramp
+from tests.sendtest import prove, put_day, seed_message, seed_sent, with_ramp
 from tests.storetest import seed_company
 from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
@@ -57,11 +58,11 @@ class ProjectionTest(Base):
         # recipients are in New York) over the sends left today, clipped.
         limit = queue.prepare(self.db, FRI, CFG, day=None).limit
         first = timedelta(minutes=human.expected_gap_minutes(
-            queue.minutes_left_among([NY], FRI, CFG), limit - 1, CFG))
+            queue.minutes_left_for([], [], FRI, CFG), limit - 1, CFG))
         self.assertEqual(got[mids[0]], FRI)
         self.assertEqual(got[mids[1]], FRI + first)
         second = timedelta(minutes=human.expected_gap_minutes(
-            queue.minutes_left_among([NY], FRI + first, CFG), limit - 2, CFG))
+            queue.minutes_left_for([], [], FRI + first, CFG), limit - 2, CFG))
         self.assertEqual(got[mids[2]], FRI + first + second)
 
     def test_daily_limit_holds_flat_for_later_days(self):
@@ -113,6 +114,46 @@ class ProjectionTest(Base):
         got = self.project()
         self.assertTrue(0 < len(got) < 100)
         self.assertLessEqual(max(got.values()), FRI + timedelta(days=projection.MAX_DAYS))
+
+
+class ShippedPacingTest(Base):
+    def test_a_mixed_zone_queue_projects_the_earliest_close_first(self):
+        _, la = self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")  # approved first
+        _, east = self.approve(company=seed_company(self.db, "East"))
+        got = self_project(self.db, FRI, CFG)
+        self.assertEqual(got[east], FRI)
+        self.assertGreater(got[la], FRI)
+
+    def test_the_gap_after_a_placement_follows_the_ready_recipients_only(self):
+        # One LA follow-up due next week does not stretch the New York day to the Los Angeles close.
+        _, a = self.approve(company=seed_company(self.db, "A"))
+        _, b = self.approve(company=seed_company(self.db, "B"))
+        la = self.person(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
+        seed_sent(self.db, la, at=ny(2, 8) - timedelta(days=7))
+        seed_message(self.db, la, seq=1, due_on="2026-11-13")
+        cfg = dataclasses.replace(CFG, spread_gap_minutes=(2, 45))  # the shipped clip (the scratch one is [2, 3])
+        got = self_project(self.db, FRI, cfg)
+        limit = queue.prepare(self.db, FRI, cfg, day=None).limit
+        expected = 234 / (limit - 1 + 1)  # 11:06 to 15:00 is 234 minutes
+        self.assertAlmostEqual((got[b] - got[a]).total_seconds() / 60, expected, places=3)
+
+    def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
+        cfg = dataclasses.replace(with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=16, ramp_floor=15),
+                                  day_start_jitter_minutes=0, pick_pool=1, per_company_gap_jitter_minutes=0)
+        person = self.person(company=seed_company(self.db, "Done"))
+        seed_sent(self.db, person, at=ny(6, 8) - timedelta(days=7))
+        seed_sent(self.db, person, at=ny(6, 8, 30), seq=1)  # a follow-up already sent today
+        _, a = self.approve(company=seed_company(self.db, "A"))
+        _, b = self.approve(company=seed_company(self.db, "B"))
+        got = self_project(self.db, FRI, cfg)
+        # 16 a day, 1 sent, 1 placed: 14 left, 15 intervals; 11:06 to 15:00 in New York is 234 minutes: 15.6 each.
+        self.assertEqual(got[a], FRI)
+        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 15.6 * 60, places=3)
+
+
+def self_project(db, now, cfg):
+    day = ramp.open_day(db, _accounts.primary(db, cfg), now, cfg)
+    return projection.project(queue.prepare(db, now, cfg, day=day), now, cfg)
 
 
 class StatusProjectionTest(Base):

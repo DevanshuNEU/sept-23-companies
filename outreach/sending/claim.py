@@ -258,10 +258,13 @@ def email_context(conn: sqlite3.Connection, person_id: int, company_id: int, *, 
 # -- recording --------------------------------------------------------------------------------------------------
 
 def _account_of(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int) -> accounts.AccountRow:
-    """The account that sends this touch: its own, or the primary account while the touch has none yet."""
+    """The account that sent this touch (`touch.account_id`; none counts as account 1, as in `signals`). LookupError
+    when it has no row or its address is not in the config."""
     row = conn.execute("SELECT account_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
-    account = accounts.by_id(conn, cfg, row[0]) if row is not None and row[0] is not None else None
-    return account or accounts.primary(conn, cfg)
+    account = accounts.by_id(conn, cfg, row[0] if row is not None else None)
+    if account is None:
+        raise LookupError(f"touch {touch_id} has no sending account in the config")
+    return account
 
 
 def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random, touch_id: int) -> None:
@@ -276,7 +279,9 @@ def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Ra
     candidate = (when + timedelta(minutes=human.spread_gap(minutes_left, sends_left, rng, cfg))).strftime(ISO_FMT)
     current = conn.execute("SELECT next_send_at FROM sender_account WHERE account_id = ?",
                            (account.account_id,)).fetchone()
-    if current is not None and (current[0] is None or candidate > current[0]):
+    if current is None:
+        raise LookupError(f"sender_account {account.account_id} has no row, so its next send cannot be set")
+    if current[0] is None or candidate > current[0]:
         conn.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = ?", (candidate, account.account_id))
 
 

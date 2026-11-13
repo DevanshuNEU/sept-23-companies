@@ -23,7 +23,7 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "Verdict", "canonical_company",
-           "load_queue", "minutes_left", "minutes_left_among", "Prepared", "prepare", "decide_all", "verdicts", "first_only", "pick"]
+           "load_queue", "window_close", "minutes_left", "minutes_left_for", "Prepared", "prepare", "decide_all", "verdicts", "first_only", "pick"]
 
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
@@ -196,25 +196,46 @@ def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
     return sends
 
 
-def minutes_left_among(zones: Iterable[ZoneInfo | None], now: datetime, cfg: SendConfig) -> float:
-    """Minutes from `now` to the latest window close (`window_end`, in each recipient's own time, on today's New York
-    date) among `zones`; a zone that is unknown is skipped. With none known, the close in New York. Never below 0."""
+def window_close(now: datetime, zone: ZoneInfo | None, cfg: SendConfig) -> datetime:
+    """The moment the recipient's window closes on the local date it is at `now` (`window_end` there; New York when
+    the zone is unknown). Readiness checks the recipient's own date, so this does too: a Tokyo recipient at 19:00
+    Monday in New York is on Tuesday and closes Tuesday 15:00 Tokyo time."""
+    zone = zone or ZoneInfo(cfg.day_tz)
+    return _local(now.astimezone(zone).date(), cfg.window_end, zone)
+
+
+# The waits that still end inside today's window: the message goes today if its wait ends before the window closes.
+_STILL_TODAY = frozenset({"spacing", "per_company_gap", "window"})
+
+
+def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig) -> float:
+    """Minutes from `now` to the latest window close among the recipients that can still be sent today: a message
+    that is `ready`, or that waits only on time (`spacing`, `per_company_gap`, `window` not yet open) and whose wait
+    ends before its window closes. A follow-up due later, a paused or held company, a company at its daily limit
+    and a closed window do not count. With none, the close in New York. Never below 0."""
     now = now.astimezone(timezone.utc)
-    today = cal.ny_date(now, cfg)
-    closes = [_local(today, cfg.window_end, zone) for zone in zones if zone is not None]
-    close = max(closes, default=_local(today, cfg.window_end, ZoneInfo(cfg.day_tz)))
+    by_id = {q.message_id: q for q in queued}
+    closes = []
+    for v in verdicts:
+        q = by_id.get(v.message_id)
+        if q is None or (v.reason != "ready" and v.reason not in _STILL_TODAY):
+            continue
+        zone = cal.recipient_zone(q.tz)
+        if zone is None:
+            continue
+        close = window_close(now, zone, cfg)
+        if v.reason != "ready" and (v.earliest_at is None or v.earliest_at > close):
+            continue
+        closes.append(close)
+    close = max(closes, default=window_close(now, None, cfg))
     return max((close - now).total_seconds() / 60, 0.0)
 
 
 def minutes_left(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, account: str) -> float:
-    """How long the account's day still has, for `human.spread_gap`: minutes from `now` to the latest window close
-    among the time zones of its approved recipients that have an address (`minutes_left_among`). `account` is its
-    address; until accounts have their own queues (the per-account loop) the one sending account owns every
-    approved message, so it does not filter yet."""
-    zones = [cal.recipient_zone(row[0]) for row in conn.execute(
-        "SELECT DISTINCT p.tz FROM message m JOIN touch t ON t.touch_id = m.touch_id "
-        "JOIN person p ON p.person_id = t.person_id WHERE m.state = 'approved' AND COALESCE(p.email, '') != ''")]
-    return minutes_left_among(zones, now, cfg)
+    """How long the account's day still has, for `human.spread_gap` (`minutes_left_for` over the approved queue as
+    the sender sees it at `now`). `account` is its address; until accounts have their own queues (the per-account
+    loop) the one sending account owns every approved message, so it does not filter yet."""
+    return minutes_left_for(verdicts(conn, now, cfg, day=None, gate=None), load_queue(conn, cfg), now, cfg)
 
 
 @dataclass(frozen=True)
@@ -388,10 +409,8 @@ def pick(verdicts: list[Verdict], queue: list[Queued], rng: random.Random | None
     if now is not None and cfg is not None:
         # Only the ready messages whose window closes first (absolute time, today's date) are candidates, in queue order:
         # a New York recipient goes before a Los Angeles one, so nobody is stranded when their window closes.
-        today = cal.ny_date(now.astimezone(timezone.utc), cfg)
-
         def close(q: Queued) -> datetime:
-            return _local(today, cfg.window_end, cal.recipient_zone(q.tz) or ZoneInfo(cfg.day_tz))
+            return window_close(now, cal.recipient_zone(q.tz), cfg)
         if candidates:
             earliest = min(close(q) for q in candidates)
             candidates = [q for q in candidates if close(q) == earliest]

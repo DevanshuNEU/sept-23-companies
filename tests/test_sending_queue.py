@@ -143,6 +143,51 @@ class HumanPacingTest(Base):
         self.assertEqual(picked, set(ids[:3]))
 
 
+class MinutesLeftTest(Base):
+    def left(self, now=MON) -> float:
+        return queue.minutes_left(self.db, now, CFG, CFG.from_address)
+
+    def test_only_recipients_that_can_go_today_set_the_close(self):
+        # NY-only ready mail; one LA follow-up due next week and one LA company that is paused do not move the close.
+        self.approve()
+        la = self.person(tz="America/Los_Angeles")
+        seed_sent(self.db, la, at=ny(2, 8) - timedelta(days=7))
+        seed_message(self.db, la, seq=1, due_on="2026-11-09")
+        paused = seed_company(self.db, "Paused")
+        self.db.execute("UPDATE company SET status = 'working', paused_at = '2026-11-01T12:00:00Z' "
+                        "WHERE company_id = ?", (paused,))
+        self.approve(company=paused, tz="America/Los_Angeles")
+        self.assertEqual(self.left(MON), 360.0)  # 09:00 to 15:00 in New York
+
+    def test_a_recipient_that_can_go_today_sets_the_close(self):
+        self.approve()
+        self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
+        self.assertEqual(self.left(MON), 540.0)  # to 18:00 New York, the Los Angeles close
+
+    def test_a_company_at_its_daily_limit_does_not_count(self):
+        limited = seed_company(self.db, "Limited")
+        self.sent_at(limited, ny(2, 8, 30), n=CFG.per_company_daily)
+        self.approve(company=limited, tz="America/Los_Angeles")
+        self.approve()
+        self.assertEqual(self.left(MON), 360.0)
+
+    def test_a_tokyo_recipient_closes_on_their_own_date(self):
+        # 19:00 Monday in New York is 09:00 Tuesday in Tokyo: ready, and the window closes Tuesday 15:00 Tokyo time.
+        self.approve(tz="Asia/Tokyo")
+        now = ny(2, 19)
+        self.assertEqual(self.reason(self.db.execute("SELECT message_id FROM message").fetchone()[0], now), "ready")
+        self.assertEqual(self.left(now), 360.0)
+
+    def test_pick_uses_the_recipients_own_date_for_the_close(self):
+        _, tokyo = self.approve(tz="Asia/Tokyo")
+        _, la = self.approve(tz="America/Los_Angeles")
+        now = ny(2, 19)  # Tokyo closes in 6 hours, Los Angeles (16:00 Monday there) in 2
+        verdicts = list(self.verdicts_at(now).values())
+        picked = queue.pick(verdicts, queue.load_queue(self.db), random.Random(1), 5, now=now, cfg=CFG)
+        self.assertEqual({v.message_id: v.reason for v in verdicts}, {tokyo: "ready", la: "window"})
+        self.assertEqual(picked.message_id, tokyo)
+
+
 class PrepareTest(Base):
     def test_decide_all_equals_verdicts_for_the_whole_queue(self):
         other = seed_company(self.db, "Other")

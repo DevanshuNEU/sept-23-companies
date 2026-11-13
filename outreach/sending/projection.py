@@ -9,7 +9,9 @@ Two things are estimates. Spacing between sends is random (`human.spread_gap`), 
 gap (`human.expected_gap_minutes`: the formula with its factor at 1.0); the first send of a day
 and each company's gap use their fixed offsets. Later days
 use today's limit as it stands (the ramp may allow more, so mail can only come earlier than shown). Read only: the
-store is read once, by `queue.prepare`.
+store is read once, by `queue.prepare`. Projected times can run up to about 15 minutes early over a day (the real
+sender ticks every 2 minutes and each gap lands on the next tick), and a claim in doubt (`sending`, `send_unknown`)
+counts as a send.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -37,18 +39,17 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
     while pending and at <= end:
         found = queue.decide_all(p, at, cfg, gate=None, pending=pending, sends=sends, sent_by_day=sent_by_day,
                                  next_send=next_send, limit=p.limit)
-        ready = next((v.message_id for v in found if v.reason == "ready"), None)
-        if ready is not None:
-            q = next(q for q in pending if q.message_id == ready)
-            placed[ready] = at
+        q = queue.pick(found, pending, now=at, cfg=cfg)  # the sender's pick: earliest window close, then queue order
+        if q is not None:
+            placed[q.message_id] = at
             sends.setdefault(q.company_id, []).append((at, q.seq == 0))
             day = cal.ny_date(at, cfg)
             sent_by_day[day] = sent_by_day.get(day, 0) + 1
             pending.remove(q)
-            # The sender's rule: minutes left in the window of the recipients still queued over the sends left.
+            # The sender's rule: minutes left in the window of the recipients that can still go today (as decided
+            # at `at`, before this placement) over the sends left.
             left = max(p.limit - sent_by_day[day], 0)
-            zones = [cal.recipient_zone(name) for name in {r.tz for r in pending}]
-            minutes_left = queue.minutes_left_among(zones, at, cfg)
+            minutes_left = queue.minutes_left_for([v for v in found if v.message_id != q.message_id], pending, at, cfg)
             next_send = at + timedelta(minutes=human.expected_gap_minutes(minutes_left, left, cfg))
             continue
         later = [v.earliest_at for v in found

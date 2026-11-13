@@ -54,14 +54,19 @@ def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
           accounts: dict[str, AccountRow]) -> tuple[AccountRow | None, str]:
     """The account that sends this touch, and why: thread, pinned, lane, (None, thread_missing) or (None, lane_waits).
 
-    thread_missing: the touch's account is not in `accounts`. A pin to an account that does not send (or is not in
-    config) counts as no pin. The company is followed through `merged_into`; a pin on the raw id still counts."""
+    thread_missing: the touch's account is not in `accounts`. A touch with a Gmail thread but no account was sent
+    before touches carried one, so its thread is account 1's (as everywhere else a NULL account is). A pin to an
+    account that does not send (or is not in config) counts as no pin. The company is followed through
+    `merged_into`; a pin on the raw id still counts."""
     touch = conn.execute(
-        "SELECT t.account_id, p.company_id FROM touch t JOIN person p ON p.person_id = t.person_id "
+        "SELECT t.account_id, t.gmail_thread_id, p.company_id FROM touch t JOIN person p ON p.person_id = t.person_id "
         "WHERE t.touch_id = ?", (touch_id,)).fetchone()
     by_id = {a.account_id: a for a in accounts.values()}
-    if touch["account_id"] is not None:
-        found = by_id.get(touch["account_id"])
+    thread_account = touch["account_id"]
+    if thread_account is None and touch["gmail_thread_id"]:
+        thread_account = 1
+    if thread_account is not None:
+        found = by_id.get(thread_account)
         return (found, "thread") if found is not None else (None, "thread_missing")
     cid = canonical_company(conn, touch["company_id"])
     pin = conn.execute("SELECT account_id FROM company_sender WHERE company_id IN (?, ?) "

@@ -74,9 +74,12 @@ def _gate(conn: sqlite3.Connection, old_sender_loaded: bool, *, ignore_pause: bo
     return None
 
 
-def reason_text(reason: str, stage: str) -> str:
-    """The sentence for a queue reason; `message_id_unproven` says where the first email stands (`stage`, a
-    `proof` phase)."""
+def reason_text(reason: str, stage: str, text: str | None = None) -> str:
+    """The sentence for a queue reason: the verdict's own `text` when it has one (`lane_waits` names the account it
+    waits for), else `message_id_unproven` says where the first email stands (`stage`, a `proof` phase), else the
+    reason's own line."""
+    if text:
+        return text
     if reason == "message_id_unproven":
         return proof.PHASE_TEXT.get(stage, REASON_TEXT[reason])
     return REASON_TEXT[reason]
@@ -187,7 +190,7 @@ def _next_send(schedule: dict[int, Verdict], queued: dict[int, queue.Queued], no
     if not schedule:
         return None, NOTHING_APPROVED
     waiting = next((v for v in schedule.values() if v.reason not in STOP_REASONS), None)
-    return None, reason_text(waiting.reason, stage) if waiting is not None else ALL_STOPPED
+    return None, reason_text(waiting.reason, stage, waiting.text) if waiting is not None else ALL_STOPPED
 
 
 def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,

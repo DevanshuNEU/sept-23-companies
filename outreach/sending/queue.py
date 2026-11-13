@@ -221,18 +221,24 @@ def _stop_reasons(rows: list[sqlite3.Row], companies: dict[int, sqlite3.Row], co
     return stops
 
 
+# One send to a company: when, whether it was a first email, and the account it went from.
+Send = tuple[datetime, bool, int]
+
+
 def _company_sends(conn: sqlite3.Connection, companies: dict[int, sqlite3.Row],
-                   since: str) -> dict[int, list[tuple[datetime, bool]]]:
+                   since: str) -> dict[int, list[Send]]:
     """When each surviving company was sent to from `since` on, each send with whether it was a first email (the
-    per-company limit counts only those; the gap counts every send). A claimed message that may have gone out
-    (`sending`, `send_unknown`) counts at its claim time: better one wait too many than one send too many."""
-    sends: dict[int, list[tuple[datetime, bool]]] = {}
+    per-company limit counts only those; the gap counts every send) and its account (a touch with none is account
+    1's). A claimed message that may have gone out (`sending`, `send_unknown`) counts at its claim time: better one
+    wait too many than one send too many."""
+    sends: dict[int, list[Send]] = {}
     for row in conn.execute(
-            "SELECT p.company_id, m.seq, CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
+            "SELECT p.company_id, m.seq, COALESCE(t.account_id, 1) AS account_id, "
+            "CASE m.state WHEN 'sent' THEN m.sent_at ELSE m.claimed_at END AS at "
             "FROM message m JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
             "WHERE m.state IN ('sent', 'sending', 'send_unknown') AND at >= ?", (since,)):
         survivor = resolve_company(companies, row["company_id"])[-1]
-        sends.setdefault(survivor, []).append((_utc(row["at"]), row["seq"] == 0))
+        sends.setdefault(survivor, []).append((_utc(row["at"]), row["seq"] == 0, row["account_id"]))
     return sends
 
 
@@ -300,7 +306,7 @@ class Prepared:
     not_before: dict[int, date]
     companies: dict[int, sqlite3.Row]
     held: frozenset[int]
-    sends: dict[int, list[tuple[datetime, bool]]]
+    sends: dict[int, list[Send]]
     # The primary account's (`cfg.from_address`) day, for the callers that still read one account (status, tests).
     sent_today: int
     limit: int
@@ -334,19 +340,25 @@ def _account_day(conn: sqlite3.Connection, account: AccountRow, today: date, cfg
 
 
 def _route(conn: sqlite3.Connection, cfg: SendConfig, q: Queued, accounts: Mapping[str, AccountRow]) -> Route:
-    """`accounts.route` for one message, with the sentence for a message no sending account can take."""
+    """`accounts.route` for one message, with the sentence for a message no sending account can take: it names the
+    account it waits for."""
     account, why = _accounts.route(conn, cfg, q.touch_id, dict(accounts))
-    if why == "thread_missing" or (account is not None and not account.cfg.sends):
-        if account is not None:
-            address = account.cfg.address
-        else:
-            row = conn.execute("SELECT a.address, t.account_id FROM touch t LEFT JOIN sender_account a "
-                               "ON a.account_id = t.account_id WHERE t.touch_id = ?", (q.touch_id,)).fetchone()
-            address = row["address"] or f"account {row['account_id']}"
-        return Route(None, f"This thread was started from {address}, which does not send now, so this email waits.")
+    if account is not None and not account.cfg.sends:  # a thread on an account that rests
+        return Route(None, f"Waits: its thread is on {account.cfg.address}, which only reads now.")
+    if why == "thread_missing":
+        row = conn.execute("SELECT a.address, COALESCE(t.account_id, 1) AS account_id FROM touch t LEFT JOIN "
+                           "sender_account a ON a.account_id = COALESCE(t.account_id, 1) WHERE t.touch_id = ?",
+                           (q.touch_id,)).fetchone()
+        address = row["address"] or f"account {row['account_id']}"
+        return Route(None, f"Waits: its thread is on {address}, which is not set up to send now.")
     if account is None:
-        return Route(None, f"No account sends the {_accounts.lane_of(conn, q.company_id)} lane yet, so this email "
-                           "waits.")
+        lane = _accounts.lane_of(conn, q.company_id)
+        named = next((a for a in cfg.accounts if a.lane == lane), None)
+        if named is None:
+            return Route(None, "Waits: no account is set up to send to this company yet.")
+        if not named.sends:
+            return Route(None, f"Waits for {named.address}, which does not send yet.")
+        return Route(None, f"Waits for {named.address}, which is not set up to send yet.")
     return Route(account.cfg.address)
 
 
@@ -394,7 +406,7 @@ def prepare(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
 
 
 def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None, pending: list[Queued],
-               sends: dict[int, list[tuple[datetime, bool]]],
+               sends: dict[int, list[Send]],
                sent_by_day: Mapping[str, Mapping[date, int]] | None = None,
                next_send: Mapping[str, datetime | None] | None = None) -> list[Verdict]:
     """One verdict per message of `pending` (in its order) as of `now`, with `sends` (every account's, by company),
@@ -428,9 +440,10 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
     for q in pending:
         route = p.routes[q.message_id]
         if route.account is None:
-            day_full, day_opens, free_at, block = False, None, None, None
+            day_full, day_opens, free_at, block, account_id = False, None, None, None, None
         else:
             day_full, day_opens, free_at, block = own[route.account]
+            account_id = p.days[route.account].account_id
         if p.paused:
             block = "sender_paused"  # his pause stops every account
         reason, at = _decide(
@@ -439,7 +452,7 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
             no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
             not_before=p.not_before.get(q.message_id),
             company_pace=p.paces.get(q.company_id) or pace.default_pace(cfg), block=block,
-            no_account=route.account is None)
+            no_account=route.account is None, account_id=account_id)
         out.append(Verdict(q.message_id, reason, at, account=route.account,
                            text=route.text if reason == "lane_waits" else None))
     return out
@@ -467,11 +480,11 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
 
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
-            today: date, day_full: bool, sends: list[tuple[datetime, bool]], day_begins: datetime,
+            today: date, day_full: bool, sends: list[Send], day_begins: datetime,
             day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None, company_pace: CompanyPace | None = None, block: str | None = None,
-            no_account: bool = False) -> tuple[str, datetime | None]:
+            no_account: bool = False, account_id: int | None = None) -> tuple[str, datetime | None]:
     company_pace = company_pace or pace.default_pace(cfg)
     if q.message_id in stops:
         return stops[q.message_id], None
@@ -504,10 +517,14 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if day_full:
         return "daily_limit", tomorrow
     # #9, 2026-10-31: the per-company limit is first emails only; a follow-up neither counts nor waits for it. The
-    # limit and the gap are the company's size band (#229).
-    if q.seq == 0 and sum(1 for at, first in sends if first and at >= day_begins) >= company_pace.daily:
-        return "per_company_limit", tomorrow
-    last = max((at for at, _ in sends), default=None)
+    # limit and the gap are the company's size band (#229), counted over every account's sends. A company never gets
+    # first emails from two accounts on one New York day (multi-sender review focus 3): once one account sent (or
+    # claimed) a first email there today, a first email from another account waits for the next sending day.
+    if q.seq == 0:
+        firsts = [aid for at, first, aid in sends if first and at >= day_begins]
+        if len(firsts) >= company_pace.daily or (account_id is not None and any(a != account_id for a in firsts)):
+            return "per_company_limit", tomorrow
+    last = max((at for at, _, _ in sends), default=None)
     if last is not None and now < last + human.company_gap(q.company_id, last, cfg, company_pace):
         return "per_company_gap", last + human.company_gap(q.company_id, last, cfg, company_pace)
     if not cal.in_window(now, zone, cfg):

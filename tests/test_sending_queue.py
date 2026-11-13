@@ -905,7 +905,7 @@ class AccountsQueueTest(Base):
         found = self.found(cfg=cfg, rows=rows)
         self.assertEqual((found[sponsor].reason, found[sponsor].account, found[sponsor].earliest_at),
                          ("lane_waits", None, None))
-        self.assertIn("sponsor", found[sponsor].text)
+        self.assertEqual(found[sponsor].text, f"Waits for {SPONSOR}, which does not send yet.")
         self.assertEqual(found[general].reason, "ready")
         self.assertEqual(found[stopped].reason, "company_closed")  # a stop still says stopped
         self.assertIn("lane_waits", queue.REASONS)
@@ -924,19 +924,63 @@ class AccountsQueueTest(Base):
         rows = {a: r for a, r in self.rows.items() if a != SPONSOR}
         found = self.found(rows=rows)
         self.assertEqual((found[on_resting].reason, found[on_resting].account), ("lane_waits", None))
-        self.assertIn(GMAIL, found[on_resting].text)
+        self.assertEqual(found[on_resting].text, f"Waits: its thread is on {GMAIL}, which only reads now.")
         self.assertEqual((found[on_gone].reason, found[on_gone].account), ("lane_waits", None))
-        self.assertIn(SPONSOR, found[on_gone].text)
+        self.assertEqual(found[on_gone].text, f"Waits: its thread is on {SPONSOR}, which is not set up to send now.")
+
+    def test_a_thread_with_no_account_is_account_1s(self):
+        # A first email sent before touches carried an account (NULL) went from account 1: its follow-up stays
+        # there and does not move to the general account by lane or pin.
+        person = self.person()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=7))
+        followup = seed_message(self.db, person, seq=1, due_on="2026-11-02")
+        _accounts.pin(self.db, self.company, self.ids[GENERAL], "rule", "2026-11-02T12:00:00Z")
+        touch = self.touch_of(person)
+        row, why = _accounts.route(self.db, self.cfg, touch, self.rows)
+        self.assertEqual((row.account_id, why), (self.ids[GMAIL], "thread"))
+        verdict = self.found()[followup]
+        self.assertEqual((verdict.reason, verdict.account), ("lane_waits", None))
+        self.assertEqual(verdict.text, f"Waits: its thread is on {GMAIL}, which only reads now.")
 
     def test_company_band_counts_every_account(self):
         cfg = lanes_cfg(per_company_daily=2)
         _, queued = self.approve()  # a general company in the 2 a day band
-        self.sent_by(GMAIL, self.company, ny(2, 8, 5))  # one first email today, from the resting account
+        self.sent_by(GENERAL, self.company, ny(2, 8, 5))  # one first email today
         now = ny(2, 11)
         self.assertEqual(self.found(now, cfg=cfg)[queued].reason, "ready")  # one more may go
         self.sent_by(GENERAL, self.company, ny(2, 9, 30))
         verdict = self.found(now, cfg=cfg)[queued]
         self.assertEqual((verdict.reason, verdict.account), ("per_company_limit", GENERAL))  # not two
+
+    def test_first_emails_from_two_accounts_never_on_one_day(self):
+        # The moment the pin moves from the resting account: it sent a first email to the company today, so the
+        # general account's first email there waits for the next business day, though the band has room.
+        cfg = lanes_cfg(per_company_daily=2)
+        _, queued = self.approve()
+        self.sent_by(GMAIL, self.company, ny(2, 8, 5))
+        verdict = self.found(ny(2, 11), cfg=cfg)[queued]
+        self.assertEqual((verdict.reason, verdict.earliest_at, verdict.account),
+                         ("per_company_limit", ny(3, 8, 0), GENERAL))
+        self.assertEqual(self.found(ny(3, 9), cfg=cfg)[queued].reason, "ready")  # a new day
+        # A follow-up never waits for it: it goes from its own thread's account.
+        thread = self.person()
+        seed_sent(self.db, thread, at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GENERAL])
+        followup = seed_message(self.db, thread, seq=1, due_on="2026-11-02")
+        self.assertEqual(self.found(ny(2, 11), cfg=cfg)[followup].reason, "ready")
+
+    def test_a_first_email_in_doubt_or_at_a_merged_company_counts_for_its_account(self):
+        cfg = lanes_cfg(per_company_daily=3)
+        survivor, duplicate = seed_company(self.db, "Survivor"), seed_company(self.db, "Duplicate")
+        self.merge(duplicate, survivor)
+        _, queued = self.approve(company=survivor)
+        # A first email to the duplicate, claimed today from the resting account and not settled yet.
+        person = self.person(company=duplicate)
+        claimed = seed_message(self.db, person)
+        self.db.execute("UPDATE touch SET account_id = ? WHERE person_id = ?", (self.ids[GMAIL], person))
+        self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = '<x@y.z>', claimed_at = ? "
+                        "WHERE message_id = ?", (stamp(ny(2, 8, 5)), claimed))
+        self.db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (claimed,))
+        self.assertEqual(self.found(ny(2, 11), cfg=cfg)[queued].reason, "per_company_limit")
 
     def test_window_0800_1500_recipient_time(self):
         _, la = self.approve(tz="America/Los_Angeles")

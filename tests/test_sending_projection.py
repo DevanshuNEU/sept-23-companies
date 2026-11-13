@@ -176,10 +176,6 @@ class StatusProjectionTest(Base):
         self.assertEqual(status.queue_projection(self.db, FRI, CFG, old_sender_loaded=True), ({}, False))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PerAccountProjectionTest(Base):
     """With every account in play, each sending account's queue is projected with its own limit and spacing."""
 
@@ -211,3 +207,7 @@ class PerAccountProjectionTest(Base):
         self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?",
                         (rows[SPONSOR].account_id,))
         self.assertNotIn(sponsor[0], projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg))
+
+
+if __name__ == "__main__":
+    unittest.main()

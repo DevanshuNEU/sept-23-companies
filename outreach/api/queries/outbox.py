@@ -83,12 +83,13 @@ def _ny(iso: str, cfg: SendConfig) -> datetime:
     return moment(iso).astimezone(ZoneInfo(cfg.day_tz))
 
 
-def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN) -> str:
+def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN,
+                  text: str | None = None) -> str:
     """`Sends 10:42 ET` when it is ready, `Sends after 11:05 ET` later today, `Sends tomorrow`, `Sends Wed Nov 11`;
     a wait with no time (and every stop) is the queue's own sentence (`status.reason_text`: a wait on the
-    marker proof says where the first email stands, `stage`)."""
+    marker proof says where the first email stands, `stage`; a verdict's own `text` wins)."""
     if when is None or (reason != "ready" and reason not in TIME_REASONS):
-        return reason_text(reason, stage)
+        return reason_text(reason, stage, text)
     at, today = _ny(when, cfg), _ny(now, cfg).date()
     if at.date() == today:
         clock = f"{at.hour}:{at.minute:02d} ET"
@@ -196,7 +197,8 @@ class _Outbox:
         sent = self.sends_today.get(survivor, 0)
         projected = self.projection.get(m["message_id"])
         clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
-                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage)))
+                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage,
+                                                    verdict.text)))
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
                         projected_at=projected.strftime(ISO_FMT) if projected is not None else None,
                         projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,

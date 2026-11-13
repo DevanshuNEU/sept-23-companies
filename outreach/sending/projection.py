@@ -54,7 +54,7 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
                 break
         if q is not None:
             placed[q.message_id] = at
-            sends.setdefault(q.company_id, []).append((at, q.seq == 0))
+            sends.setdefault(q.company_id, []).append((at, q.seq == 0, p.days[account].account_id))
             day = cal.ny_date(at, cfg)
             sent_by_day[account][day] = sent_by_day[account].get(day, 0) + 1
             pending.remove(q)

@@ -389,5 +389,15 @@ class ScheduleTest(Base):
         self.assertFalse(self.db.in_transaction)
 
 
+
+class ReasonTextTest(unittest.TestCase):
+    def test_a_verdicts_own_sentence_wins(self):
+        from outreach.api.queries.outbox import schedule_text
+        from outreach.sending.status import reason_text
+        own = "Waits for chicholikar.d@northeastern.edu, which does not send yet."
+        self.assertEqual(reason_text("lane_waits", proof.PROVEN, own), own)
+        self.assertEqual(reason_text("lane_waits", proof.PROVEN), queue.REASON_TEXT["lane_waits"])
+        self.assertEqual(schedule_text("lane_waits", None, "2026-11-02T14:00:00Z", load_config(), text=own), own)
+
 if __name__ == "__main__":
     unittest.main()

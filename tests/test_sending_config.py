@@ -89,7 +89,7 @@ class SendConfigTest(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             cfg.from_name = "x"
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 34)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 35)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
@@ -276,6 +276,9 @@ class SendConfigTest(unittest.TestCase):
         self.refused("spread_gap_minutes", spread_gap_minutes="[45, 2]")
         self.refused("spread_gap_minutes", spread_gap_minutes="[0, 45]")
         self.refused("spread_gap_minutes", spread_gap_minutes="[2]")
+        self.refused("spread_floor_slack", spread_floor_slack="1")
+        self.refused("spread_floor_slack", spread_floor_slack="0")
+        self.assertEqual(load_config(SHIPPED_SEND_CONFIG).spread_floor_slack, 0.75)
 
 
 if __name__ == "__main__":

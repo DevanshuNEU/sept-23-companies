@@ -41,6 +41,7 @@ class SendConfig:
     day_tz: str
     spread_jitter: tuple[float, float]
     spread_gap_minutes: tuple[int, int]
+    spread_floor_slack: float
     clean_bounce_rate: float
     bounce_days: int
     stop_replies_hard: int
@@ -96,7 +97,7 @@ COUNT_KEYS = ("bounce_days", "stop_replies_hard",
               "prune_noop_after_days", "pick_pool")
 # Whole numbers that may be zero.
 WHOLE_KEYS = ("per_company_gap_minutes", "day_start_jitter_minutes", "per_company_gap_jitter_minutes")
-RATE_KEYS = ("clean_bounce_rate", "break_chance")
+RATE_KEYS = ("clean_bounce_rate", "break_chance", "spread_floor_slack")
 TEXT_KEYS = ("from_name", "day_tz", "old_sender_label")
 
 

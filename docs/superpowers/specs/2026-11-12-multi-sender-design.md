@@ -49,12 +49,16 @@ Mail.app cannot set a header. Mail.app is used only where there is no API Knock 
   until the latest window close among that account's ready messages, divided by the sends it has left today plus one (so
   the last send lands before the close), times a
   random factor from 0.6 to 1.4, clipped to 2 to 45 minutes.
-- **A late start sends fewer, not faster** (2026-11-13 ruling): before the random factor, the gap is never below the
-  full day's pace, `max(minutes_left / (sends_left + 1), full_day_minutes / (limit + 1))`. `full_day_minutes` is the
-  account's whole window today: from 08:00 New York to the latest close among its ready recipients (the same close
-  `minutes_left` uses; 420 with only New York recipients, 600 with a Los Angeles one). `limit` is the account's
-  limit today. So 30 minutes left with 14 to go and a limit of 15 gives about 26 minutes (420 / 16), not 2; what does
-  not fit before the close waits for the next sending day. With 15 a day this is about one email every 25 to 40
+- **A late start sends fewer, not faster** (2026-11-13 ruling): before the random factor, the gap is never below a
+  share of the full day's pace, `max(minutes_left / (sends_left + 1), slack * full_day_minutes / (limit + 1))`.
+  `full_day_minutes` is the account's whole window today, in absolute time: from the earliest window open (08:00
+  local) to the latest close among its recipients that can go today (the same set `minutes_left` uses). New York only
+  is 420, Los Angeles only is 420 (11:00 to 18:00 New York), the two mixed is 600. `limit` is the account's limit
+  today. `slack` is 0.75 (`spread_floor_slack`): the largest of 0.75, 0.7 and 0.6 with which every simulated full day
+  (15 a day, approved at 07:00, seeds 1 to 20, New York, Los Angeles, Chicago and the New York and Los Angeles mix)
+  still sends all 15. It leaves room for the day-start offset, tick rounding and the random factor. So 30 minutes
+  left with 14 to go and a limit of 15 gives about 20 minutes (0.75 x 420 / 16), not 2, and a start at 14:30 New York
+  sends at most 3 that day; what does not fit before the close waits for the next sending day. With 15 a day this is about one email every 25 to 40
   minutes; with 60, about every 8. The breaks and the pick from the first 5 ready messages stay, but the ready messages are ordered by recipient window
   close first (earliest close first, then queue order), so New York recipients go before Los Angeles ones. The random pick draws only among the ready messages that share
   the earliest close (up to 5, in queue order); later-closing recipients wait until no earlier-closing one is ready.

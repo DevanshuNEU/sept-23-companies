@@ -265,11 +265,12 @@ def _same(address: str | None, account: str) -> bool:
     return address is not None and address.lower() == account.lower()
 
 
-def _latest_close(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
-                  account: str | None) -> datetime:
-    """The latest window close among the recipients that can still be sent today (see `minutes_left_for`)."""
+def _windows_today(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
+                   account: str | None) -> list[tuple[datetime, datetime]]:
+    """The window (open, close) of each recipient that can still be sent today, on the recipient's own local date
+    (see `minutes_left_for`); New York's alone when there is none."""
     by_id = {q.message_id: q for q in queued}
-    closes = []
+    out = []
     for v in verdicts:
         q = by_id.get(v.message_id)
         if q is None or (v.reason != "ready" and v.reason not in _STILL_TODAY):
@@ -282,8 +283,11 @@ def _latest_close(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: da
         close = window_close(now, zone, cfg)
         if v.reason != "ready" and (v.earliest_at is None or v.earliest_at > close):
             continue
-        closes.append(close)
-    return max(closes, default=window_close(now, None, cfg))
+        out.append((_local(now.astimezone(zone).date(), cfg.window_start, zone), close))
+    if not out:
+        zone = ZoneInfo(cfg.day_tz)
+        out.append((_local(now.astimezone(zone).date(), cfg.window_start, zone), window_close(now, None, cfg)))
+    return out
 
 
 def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
@@ -294,19 +298,19 @@ def minutes_left_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now:
     and a closed window do not count. With `account` (an address), only that account's messages count. With none,
     the close in New York. Never below 0."""
     now = now.astimezone(timezone.utc)
-    close = _latest_close(verdicts, queued, now, cfg, account)
+    close = max(c for _, c in _windows_today(verdicts, queued, now, cfg, account))
     return max((close - now).total_seconds() / 60, 0.0)
 
 
 def day_minutes_for(verdicts: Iterable[Verdict], queued: Iterable[Queued], now: datetime, cfg: SendConfig,
                     account: str | None = None) -> float:
-    """The account's full sending window today, in minutes, for the floor of `human.spread_gap`: from the window's
-    open in New York (`window_start` on `now`'s New York date) to the same latest close `minutes_left_for` uses. With
-    only New York recipients it is 08:00 to 15:00, 420; a Los Angeles one stretches it to 18:00 New York, 600.
-    Never below 0."""
+    """The account's full sending window today, in minutes, for the floor of `human.spread_gap`: from the earliest
+    window open (`window_start`, local) to the latest close among the same recipients `minutes_left_for` counts, in
+    absolute time. New York only is 08:00 to 15:00, 420; Los Angeles only is 11:00 to 18:00 New York, 420; the two
+    mixed is 08:00 to 18:00 New York, 600. Never below 0."""
     now = now.astimezone(timezone.utc)
-    close = _latest_close(verdicts, queued, now, cfg, account)
-    opens = _local(cal.ny_date(now, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
+    windows = _windows_today(verdicts, queued, now, cfg, account)
+    opens, close = min(o for o, _ in windows), max(c for _, c in windows)
     return max((close - opens).total_seconds() / 60, 0.0)
 
 

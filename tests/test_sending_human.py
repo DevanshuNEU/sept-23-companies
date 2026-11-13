@@ -62,9 +62,13 @@ class SpreadGapTest(unittest.TestCase):
 
     def test_a_late_start_sends_fewer_not_faster(self):
         # 30 minutes left and 14 sends left would be 2 minute gaps; the full day's pace (a 420 minute window over a
-        # limit of 15, plus one) is the floor before the factor, so the gap stays about 26 minutes.
-        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), CFG, day_minutes=420, limit=15), 26.25)
-        self.assertEqual(human.expected_gap_minutes(30, 14, CFG, day_minutes=420, limit=15), 26.25)
+        # limit of 15, plus one: 26.25) times the slack is the floor before the factor.
+        self.assertEqual(CFG.spread_floor_slack, 0.75)
+        floor = 0.75 * 420 / 16
+        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), CFG, day_minutes=420, limit=15), floor)
+        self.assertEqual(human.expected_gap_minutes(30, 14, CFG, day_minutes=420, limit=15), floor)
+        whole = dataclasses.replace(CFG, spread_floor_slack=0.9999)
+        self.assertAlmostEqual(human.spread_gap(30, 14, MiddleRng(), whole, day_minutes=420, limit=15), 26.25, places=2)
         # Early in the day the minutes left over the sends left is the larger, and it still rules.
         self.assertEqual(human.spread_gap(300, 9, MiddleRng(), CFG, day_minutes=420, limit=15), 30.0)
         self.assertEqual(human.expected_gap_minutes(300, 9, CFG, day_minutes=420, limit=15), 30.0)
@@ -72,7 +76,7 @@ class SpreadGapTest(unittest.TestCase):
         rng = random.Random(3)
         no_breaks = dataclasses.replace(CFG, break_chance=0.0)
         gaps = [human.spread_gap(30, 14, rng, no_breaks, day_minutes=420, limit=15) for _ in range(2000)]
-        self.assertTrue(all(26.25 * 0.6 - 1e-9 <= g <= 26.25 * 1.4 + 1e-9 for g in gaps))
+        self.assertTrue(all(floor * 0.6 - 1e-9 <= g <= floor * 1.4 + 1e-9 for g in gaps))
 
     def test_the_mean_draw_is_the_expected_gap(self):
         rng = random.Random(5)

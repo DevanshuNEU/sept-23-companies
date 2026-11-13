@@ -328,7 +328,7 @@ def _account_of(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int) -> acc
 
 def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random, touch_id: int) -> None:
     """The sending account's `next_send_at` becomes `at` plus a spread gap (`human.spread_gap`: the minutes left in
-    its window over the sends it has left today, never below its full window today over its limit today), unless it
+    its window over the sends it has left today, never below a share of its full window today over its limit today), unless it
     is already later: a gap never shrinks."""
     account = _account_of(conn, cfg, touch_id)
     when = as_datetime(at)

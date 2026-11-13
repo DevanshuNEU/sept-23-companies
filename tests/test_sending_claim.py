@@ -249,9 +249,9 @@ class RecordSentTest(Base):
         claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(self.clock()), clock=self.clock,
                        rng=MiddleRng(), account=accounts.primary(self.db, cfg))
         # 16 a day, 2 sent (one follow-up): 14 left, 15 intervals; 09:00 to 15:00 New York is 360 minutes: 24. The
-        # full day's pace is 420 minutes over 17 (24.7), which is larger, so it is the gap.
+        # floor, 0.75 of 420 minutes over 17 (18.5), is lower, so 24 it is.
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
-        self.assertEqual(got, iso(MON + timedelta(minutes=max(360 / 15, 420 / 17))))
+        self.assertEqual(got, iso(MON + timedelta(minutes=max(360 / 15, 0.75 * 420 / 17))))
 
     def test_a_late_start_sends_fewer_not_faster(self):
         from tests import SHIPPED_SEND_CONFIG
@@ -263,9 +263,9 @@ class RecordSentTest(Base):
         _, mid = self.approve()
         claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(late), clock=clock,
                        rng=MiddleRng(), account=accounts.primary(self.db, cfg))
-        # 14 left over 30 minutes would be 2 minutes; the full day's 420 minutes over 15 + 1 is 26.25.
+        # 14 left over 30 minutes would be 2 minutes; the floor is 0.75 of 420 minutes over 15 + 1, 19.7.
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
-        self.assertEqual(got, iso(late + timedelta(minutes=26.25)))
+        self.assertEqual(got, iso(late + timedelta(minutes=0.75 * 420 / 16)))
 
     def test_a_missing_account_row_raises_and_the_record_rolls_back(self):
         _, mid = self.approve()

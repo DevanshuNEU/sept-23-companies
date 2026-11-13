@@ -136,9 +136,10 @@ class ShippedPacingTest(Base):
         cfg = dataclasses.replace(CFG, spread_gap_minutes=(2, 45))  # the shipped clip (the scratch one is [2, 3])
         got = self_project(self.db, FRI, cfg)
         limit = queue.prepare(self.db, FRI, cfg, _in_play(self.db, cfg), day=None).limit
-        # 11:06 to 15:00 is 234 minutes over the sends left plus one, but never below the full day's pace: 420 minutes
-        # (08:00 to 15:00 New York; a Los Angeles close would make it 600) over the limit plus one.
-        expected = max(234 / (limit - 1 + 1), 420 / (limit + 1))
+        # 11:06 to 15:00 is 234 minutes over the sends left plus one, but never below the floor: 0.75 of the full
+        # day, 420 minutes (08:00 to 15:00 New York; counting the Los Angeles follow-up would make it 600), over the
+        # limit plus one.
+        expected = max(234 / (limit - 1 + 1), cfg.spread_floor_slack * 420 / (limit + 1))
         self.assertAlmostEqual((got[b] - got[a]).total_seconds() / 60, expected, places=3)
 
     def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
@@ -151,9 +152,9 @@ class ShippedPacingTest(Base):
         _, b = self.approve(company=seed_company(self.db, "B"))
         got = self_project(self.db, FRI, cfg)
         # 16 a day, 1 sent, 1 placed: 14 left, 15 intervals; 11:06 to 15:00 in New York is 234 minutes: 15.6 each.
-        # That is below the full day's pace, 420 minutes over 17 (24.7), so a late start sends fewer: 24.7 it is.
+        # That is below the floor, 0.75 of 420 minutes over 17 (18.5), so a late start sends fewer: 18.5 it is.
         self.assertEqual(got[a], FRI)
-        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 420 / 17 * 60, places=3)
+        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 0.75 * 420 / 17 * 60, places=3)
 
 
 def self_project(db, now, cfg):

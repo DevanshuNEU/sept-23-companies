@@ -231,6 +231,41 @@ class SpreadAcrossWindowTest(unittest.TestCase):
             self.assertEqual(len(result.sends), 15, f"seed {seed}")
 
 
+class FullDayFloorTest(unittest.TestCase):
+    """The late-start floor (2026-11-13 ruling) never costs a full day its limit: shipped config, 15 a day, approved at
+    07:00, seeds 1 to 20, in every zone mix. A start at 14:30 New York sends at most 3 that day."""
+
+    @staticmethod
+    def cfg():
+        from tests.sendtest import with_ramp
+        return with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+
+    def counts(self, zones, approve_at="07:00"):
+        cfg, out = self.cfg(), []
+        for seed in range(1, 21):
+            result = simulate(short(1, [Event(ny(D[1], approve_at), "approve", {"count": 15})], companies=30,
+                                    people=1, zones=zones), seed=seed, cfg=cfg)
+            out.append(sum(1 for s in result.sends if ny_date(s.at) == D[1]))
+            result.close()
+        return out
+
+    def test_new_york_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/New_York",)), [15] * 20)
+
+    def test_los_angeles_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/Los_Angeles",)), [15] * 20)
+
+    def test_chicago_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/Chicago",)), [15] * 20)
+
+    def test_new_york_and_los_angeles_mixed_send_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/New_York", "America/Los_Angeles")), [15] * 20)
+
+    def test_a_start_at_14_30_new_york_sends_at_most_three_that_day(self):
+        got = self.counts(("America/New_York",), approve_at="14:30")
+        self.assertTrue(all(1 <= n <= 3 for n in got), got)
+
+
 class EverySendingAccountTest(unittest.TestCase):
     """Two accounts send at once (Task A11): the general lane from devanshuchi9, the sponsor lane from a third Gmail
     account standing in for Northeastern. Each runs its own ramp and its own day; a company hears from one only."""

@@ -26,13 +26,15 @@ __all__ = ["spread_gap", "expected_gap_minutes", "choose", "day_start_offset", "
 T = TypeVar("T")
 
 
-def _base_gap(minutes_left: float, sends_left: int, day_minutes: float, limit: int) -> float:
-    """The gap before the random factor: the minutes left over the sends left plus one, never below the full day's
-    pace (`day_minutes` over `limit` plus one). The floor is the 2026-11-12 ruling that a late start sends fewer, not
-    faster: 30 minutes left with 14 to go is not 14 emails in half an hour. A `limit` of 0 sets no floor."""
+def _base_gap(minutes_left: float, sends_left: int, day_minutes: float, limit: int, slack: float) -> float:
+    """The gap before the random factor: the minutes left over the sends left plus one, never below `slack` times the
+    full day's pace (`day_minutes` over `limit` plus one). The floor is the 2026-11-13 ruling that a late start sends
+    fewer, not faster: 30 minutes left with 14 to go is not 14 emails in half an hour. The slack (under 1) leaves room
+    for the day-start offset, tick rounding and the random factor, so a full day still sends its limit. A `limit` of
+    0 sets no floor."""
     base = minutes_left / (sends_left + 1)
     if limit > 0:
-        base = max(base, day_minutes / (limit + 1))
+        base = max(base, slack * day_minutes / (limit + 1))
     return base
 
 
@@ -40,15 +42,15 @@ def spread_gap(minutes_left: float, sends_left: int, rng: random.Random, cfg: Se
                day_minutes: float = 0.0, limit: int = 0) -> float:
     """Minutes until the account's next send: now and then a break, otherwise the minutes left in its window over the
     sends it has left today plus one (the gaps still to come, so the last send lands before the close, not on it),
-    never below the full day's pace (`day_minutes`, the account's whole window today, over its `limit` today plus
-    one), times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's sends spread across
+    never below `spread_floor_slack` times the full day's pace (`day_minutes`, the account's whole window today, over
+    its `limit` today plus one), times a random factor from `spread_jitter`, clipped to `spread_gap_minutes`, so a day's sends spread across
     the window. No sends left gives the high clip."""
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
     if rng.random() < cfg.break_chance:
         return rng.uniform(*cfg.break_minutes)
-    base = _base_gap(minutes_left, sends_left, day_minutes, limit)
+    base = _base_gap(minutes_left, sends_left, day_minutes, limit, cfg.spread_floor_slack)
     return min(max(base * rng.uniform(*cfg.spread_jitter), low), high)
 
 
@@ -59,7 +61,7 @@ def expected_gap_minutes(minutes_left: float, sends_left: int, cfg: SendConfig, 
     low, high = cfg.spread_gap_minutes
     if sends_left <= 0:
         return float(high)
-    base = _base_gap(minutes_left, sends_left, day_minutes, limit)
+    base = _base_gap(minutes_left, sends_left, day_minutes, limit, cfg.spread_floor_slack)
     return min(max(base * sum(cfg.spread_jitter) / 2, low), high)
 
 

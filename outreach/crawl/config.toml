@@ -56,6 +56,9 @@ body_refetch_days = 30
 
 [host_interval_s]
 "greenhouse.io" = 0.05
+# Greenhouse's EU API host on its own bucket (2026-11-13): it has no DNS record, so a 404 board's EU try fails, and
+# sharing the US bucket those failures opened the breaker on every Greenhouse board.
+"eu.greenhouse.io" = 0.5
 "lever.co" = 1.0
 "ashbyhq.com" = 0.1
 "smartrecruiters.com" = 0.2

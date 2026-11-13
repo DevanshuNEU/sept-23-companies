@@ -1095,6 +1095,23 @@ class AccountsQueueTest(Base):
                         (self.ids[SPONSOR],))
         self.assertEqual(self.found()[sponsor].reason, "signed_out")
 
+    def test_a_signed_out_wait_names_its_account(self):
+        # One account signed out while another is fine: the row says which account, not that Gmail is signed out.
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?",
+                        (self.ids[GENERAL],))
+        found = self.found()
+        self.assertEqual((found[general].reason, found[general].text),
+                         ("signed_out", f"Waits: {GENERAL} is not signed in."))
+        self.assertEqual((found[sponsor].reason, found[sponsor].text), ("ready", None))
+        # The tick's own sign-in (gate_accounts) names it the same way.
+        self.db.execute("UPDATE sender_account SET auth_state = 'ok'")
+        gated = {v.message_id: v for v in queue.gate_accounts(list(self.found().values()), {SPONSOR: "signed_out"})}
+        self.assertEqual((gated[sponsor].reason, gated[sponsor].text),
+                         ("signed_out", f"Waits: {SPONSOR} is not signed in."))
+        self.assertEqual((gated[general].reason, gated[general].text), ("ready", None))
+
     def test_his_pause_holds_every_account_and_a_stop_still_says_stopped(self):
         _, general = self.approve()
         _, sponsor = self.approve(company=self.sponsor_co)

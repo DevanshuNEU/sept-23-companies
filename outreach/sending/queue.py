@@ -51,6 +51,7 @@ TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window"
 REASON_TEXT = {
     "ready": "Ready to send.",
     "sender_paused": "Sending is paused.",
+    # The verdict's own `text` names the account when the message has one (`signed_out_text`).
     "signed_out": "Gmail is signed out, so nothing can be sent.",
     "old_sender_running": "The old mail sender is still running, so the new one waits.",
     # While Gmail is not shown to keep the sender's marker (the code keeps its first name), the words depend on
@@ -106,7 +107,8 @@ class Verdict:
     reason: str
     earliest_at: datetime | None
     account: str | None = None  # the address of the account that sends it; None when none can (`lane_waits`)
-    text: str | None = None  # its own sentence, when `REASON_TEXT` is not enough (`lane_waits`, `inbound_unread`)
+    # its own sentence, when `REASON_TEXT` is not enough (`lane_waits`, `inbound_unread`, `signed_out`)
+    text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -531,6 +533,8 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
         text = route.text if reason == "lane_waits" else None
         if reason == "inbound_unread":
             text = f"Waits: replies on {unread} could not be read yet."
+        if reason == "signed_out" and route.account is not None:
+            text = signed_out_text(route.account)
         out.append(Verdict(q.message_id, reason, at, account=route.account, text=text))
     return out
 
@@ -621,6 +625,11 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     return "ready", None
 
 
+def signed_out_text(address: str) -> str:
+    """A `signed_out` verdict's own sentence: it names the account, since another may be signed in and sending."""
+    return f"Waits: {address} is not signed in."
+
+
 def first_only(verdicts: list[Verdict], account: str | None = None) -> list[Verdict]:
     """The verdicts while one first email may go before Gmail is proven to keep the sender's marker (`proof`): the
     first `ready` message in queue order (else the time wait that ends first) keeps its verdict, and every other
@@ -651,7 +660,8 @@ def gate_accounts(verdicts: list[Verdict], gates: Mapping[str | None, str | None
     for v in verdicts:
         gate = folded.get(v.account.lower() if v.account is not None else None)
         if gate is not None and v.reason not in STOP_REASONS and v.reason != "sender_paused":
-            v = dataclasses.replace(v, reason=gate, earliest_at=None, text=None)
+            text = signed_out_text(v.account) if gate == "signed_out" and v.account is not None else None
+            v = dataclasses.replace(v, reason=gate, earliest_at=None, text=text)
         out.append(v)
     for address in first_send:
         out = first_only(out, address)

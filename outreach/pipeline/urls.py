@@ -125,10 +125,19 @@ def _jazzhr(token: str, segments: list[str]) -> BoardKey | None:
     return _key("jazzhr", token, _id(segments, 1))
 
 
+def _jibe(host: str, segments: list[str], query: dict[str, list[str]]) -> BoardKey | None:
+    """An iCIMS Jibe site on the company's own host (#220): `/jobs/<number>?icims=1`. The host is the board token."""
+    if "1" not in query.get("icims", []) or segments[:1] != ["jobs"] or len(segments) != 2:
+        return None
+    native = _id(segments, 1, _DIGITS)
+    return _key("icims", host, native) if native else None
+
+
 def board_key(url: str) -> BoardKey | None:
     """The board and job a link names, or None when the site is not one Knock reads.
 
-    Any host with a numeric `gh_jid` query is a Greenhouse posting with no known board. Locale segments (`en-US`) are
+    Any host with a numeric `gh_jid` query is a Greenhouse posting with no known board, and any host with `/jobs/<number>`
+    and an `icims=1` query is an iCIMS Jibe site (#220). Locale segments (`en-US`) are
     skipped. A link to a board with no job gives a key with `native_id` None.
     """
     if not isinstance(url, str) or not url.strip():
@@ -170,7 +179,7 @@ def board_key(url: str) -> BoardKey | None:
     elif _AMAZON_HOST.fullmatch(host):
         found = _amazon(segments)
     else:
-        found = None
+        found = _jibe(host, segments, query)
     if found is not None:
         return found
     jid = (query.get("gh_jid") or [""])[0]

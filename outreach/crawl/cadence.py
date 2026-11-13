@@ -16,7 +16,7 @@ from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.config import CrawlConfig
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "low_yield", "plan_company_ids", "due_boards",
+__all__ = ["tier_wait_s", "next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "low_yield", "plan_company_ids", "due_boards",
            "switched_off_boards"]
 
 # Ruling 5: an erroring board waits 6, 12, then 24 hours and stays at 24. The 7-day ceiling is for quiet boards only.
@@ -75,6 +75,32 @@ def low_yield(conn: sqlite3.Connection, board_id: int, now: str, cfg: CrawlConfi
         "WHERE p.board_id = :board AND p.closed_at IS NULL", {"board": board_id, "fresh": fresh_since}).fetchone()
     open_n, us_eng_n, fresh_n = row
     return open_n >= big.min_open and us_eng_n / open_n < big.max_share and fresh_n == 0
+
+
+# A job at his level first seen on the board since :since (#251): engineering, a software role, not outside the US, and
+# fit or level not stated, under the current ruleset. Read through posting_board_open, by board.
+_HOT_SQL = ("SELECT 1 FROM posting p JOIN decision d ON d.posting_id = p.posting_id "
+            "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
+            "WHERE p.board_id = :board AND p.first_seen_at >= :since AND d.lane = 'engineering' "
+            "AND COALESCE(d.role, 'software') = 'software' AND d.us <> 'no' "
+            "AND COALESCE(d.level_state, CASE WHEN d.level_ok = 1 THEN 'fit' "
+            "WHEN d.level_tier IN ('not_stated', 'open') THEN 'uncertain' ELSE 'reject' END) IN ('fit', 'uncertain') "
+            "LIMIT 1")
+
+
+def tier_wait_s(conn: sqlite3.Connection, board: BoardRow, now: str, cfg: CrawlConfig) -> int | None:
+    """Seconds a board waits after a good read under the speed tiers (#251), or None when its ATS is not tiered.
+    Hot (`cfg.tiers.hot_s`): a job at his level first seen there in the last `hot_days`. Dead (`dead_s`): nothing new
+    for `dead_days`. Warm (`warm_s`): the rest."""
+    t = cfg.tiers
+    if board.ats not in t.ats:
+        return None
+    since = add_seconds(now, -t.hot_days * 86400)
+    if conn.execute(_HOT_SQL, {"board": board.board_id, "since": since}).fetchone():
+        return t.hot_s
+    if last_new_age_s(conn, board, now) > t.dead_days * 86400:
+        return t.dead_s
+    return t.warm_s
 
 
 def plan_company_ids(conn: sqlite3.Connection, today: str) -> frozenset[int]:

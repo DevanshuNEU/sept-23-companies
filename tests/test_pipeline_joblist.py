@@ -289,6 +289,16 @@ class StaffingTests(JobListCase):
         self.job(alias)
         self.assertEqual(self.all_ids(), set())
 
+    def test_a_product_company_with_placement_in_its_name_stays(self):
+        pid = self.job(self.company("Placements.io"))
+        self.assertEqual(self.all_ids(), {pid})
+
+    def test_an_alias_name_never_hides_the_company_it_was_merged_into(self):
+        acme, alias = self.company("Acme"), self.company("Acme Recruiting")
+        merge(self.conn, alias, acme)
+        pid = self.job(acme)
+        self.assertEqual(self.all_ids(), {pid})
+
     def test_tier_3_is_maybe_staffing_unless_promoted(self):
         tier3, promoted = self.company(), self.company()
         for cid, flag in ((tier3, 0), (promoted, 1)):

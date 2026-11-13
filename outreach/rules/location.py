@@ -40,16 +40,22 @@ class _Patterns:
         self.us_possible = phrases(loc["us_possible"])
 
 
+def _fold(text: str) -> str:
+    """The text without accents ("México" is "Mexico", #257), for the non-US lists only."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
 def _read_part(part: str, p: _Patterns) -> str:
     found_state = p.state_names.search(part) is not None
     rest = p.state_names.sub(" ", part)  # a state name is set aside before any country is read
     if p.us_marks.search(rest) or p.us_bare.search(rest):
         return "yes"  # "Remote - US & Canada": naming the US beats a non-US country in the same part
-    if p.non_us.search(rest):
+    plain = _fold(rest)  # #257: the non-US lists also match accented spellings ("México"); the US lists never do,
+    if p.non_us.search(plain):  # so Costa Rica's "San José" never reads as San Jose, CA
         return "no"  # a state code, state name or US city does not beat one ("Toronto, CA", "Tbilisi, Georgia")
     if found_state or p.state_code.search(rest) or p.us_cities.search(rest):
         return "yes"
-    if p.shared.search(rest):
+    if p.shared.search(plain):
         return "no"
     return "unknown"
 
@@ -66,7 +72,7 @@ def _read_country(country: str, p: _Patterns) -> str | None:
         return "yes" if country.upper() in _US_COUNTRY_CODES else "no"
     if p.country_marks.fullmatch(country) or p.us_marks.search(country) or p.us_bare.search(country):
         return "yes"
-    if p.non_us.search(country):
+    if p.non_us.search(_fold(country)):
         return "no"
     return None
 
@@ -85,16 +91,9 @@ def _title_names_non_us_country(title: str, p: _Patterns) -> bool:
         if _read_part(seg, p) == "yes":
             return False
         bare = p.fillers.sub(" ", p.state_names.sub(" ", seg)).strip(" \t.-")
-        if bare and p.countries.fullmatch(bare):
+        if bare and p.countries.fullmatch(_fold(bare)):
             found = True
     return found
-
-
-def _fold(text: str | None) -> str | None:
-    """The text without accents ("México" is "Mexico", #257), so the word lists, written plain, match either way."""
-    if text is None:
-        return None
-    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 def us_status(location: str, country: str | None, cfg: Config, title: str | None = None) -> str:
@@ -104,7 +103,6 @@ def us_status(location: str, country: str | None, cfg: Config, title: str | None
     non-US country reads no. Any other country is no evidence, so the location text decides (a country the lists do
     not know is never a "no" on its own). When all of those say nothing, a title that names a non-US country and no US
     place reads no ("Software Engineer II (Venezuela)"); a title never overrides what the location or country said."""
-    location, country, title = _fold(location), _fold(country), _fold(title)
     p = _Patterns(cfg)
     read = None
     if country is not None and country.strip():

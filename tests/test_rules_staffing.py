@@ -26,6 +26,12 @@ class ForClientTest(unittest.TestCase):
             with self.subTest(body=body[:30]):
                 self.assertFalse(for_client(body, self.cfg))
 
+    def test_client_facing_words_are_not_a_recruiter(self):
+        for body in ("We are hiring a backend engineer for our client-facing advisors.",
+                     "You will build tools for our client portal."):
+            with self.subTest(body=body[:30]):
+                self.assertFalse(for_client(body, self.cfg))
+
     def test_only_the_opening_counts(self):
         body = "x" * 400 + " Our client is a startup."
         self.assertFalse(for_client(body, self.cfg))

@@ -107,6 +107,12 @@ class UsStatusTest(unittest.TestCase):
         self.assertEqual(us_status("San José, CA", None, self.cfg), "yes")
         self.assertEqual(us_status("Remote", "México", self.cfg), "no")
 
+    def test_folding_never_makes_a_us_city(self):
+        # #257 review: Costa Rica's San José is not San Jose, CA.
+        self.assertEqual(us_status("San José", "Costa Rica", self.cfg), "no")
+        self.assertEqual(us_status("Heredia, San José", "CR", self.cfg), "no")
+        self.assertEqual(us_status("San José", None, self.cfg), "unknown")
+
     def test_a_region_beside_north_america_stays_possible(self):
         # #250 review: "North America" may be the US, so a non-US region next to it never makes the posting "no".
         for loc in ("Remote - North America or South America", "Remote - Americas (North America, Latin America)",

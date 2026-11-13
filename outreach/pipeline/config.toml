@@ -18,9 +18,8 @@ known = [
   "Raydar", "True Talent Solutions Partners", "Pragmatike", "DistantJob", "OnHires", "Lavendo", "Bee Genius",
   "CodeRoad",
 ]
-name_words = [
-  "staffing", "recruiting", "recruitment", "recruiters", "headhunter", "headhunters", "talent solutions",
-  "talent partners", "search partners", "placement", "placements",
-]
+# Only words that name a staffing business outright: "placement" or "search partners" also name product companies
+# (Placements.io), so they are left out.
+name_words = ["staffing", "recruiting", "recruitment", "talent solutions"]
 client_min = 3
 client_share = 0.5

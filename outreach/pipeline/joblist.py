@@ -322,8 +322,9 @@ def staffing_ids(conn: sqlite3.Connection, canon: dict[int, int] | None = None,
     cfg = load_pipeline_config().staffing if cfg is None else cfg
     known = {n.casefold() for n in cfg.known}
     words = phrases(list(cfg.name_words))
+    # Names are judged on the surviving company only: an alias's name never hides what it was merged into.
     firms = {cid for cid, name in conn.execute("SELECT company_id, name FROM company")
-             if name.strip().casefold() in known or words.search(name)}
+             if canon.get(cid, cid) == cid and (name.strip().casefold() in known or words.search(name))}
     totals: dict[int, list[int]] = {}
     for cid, n, k in conn.execute(_CLIENT_SQL):
         t = totals.setdefault(canon.get(cid, cid), [0, 0])

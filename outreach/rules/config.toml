@@ -247,7 +247,7 @@ allowed = [
 [staffing]
 client_phrases = [
   "our client is", "our client, a", "our client, an", "our client has", "my client",
-  "on behalf of our client", "on behalf of a client", "a client of ours", "for our client",
+  "on behalf of our client", "on behalf of a client", "a client of ours",
 ]
 client_window_chars = 400
 

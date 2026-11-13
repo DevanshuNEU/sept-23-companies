@@ -70,12 +70,25 @@ def companies_today(remaining: int, cfg: PlanConfig) -> int:
     return max(0, min(cfg.get("queue", "companies_per_day"), remaining // cfg.get("queue", "requests_per_company")))
 
 
+def _sending_rows(conn: sqlite3.Connection):
+    """The accounts that send (`sends = true` in the sending config) as the sender reads them (`accounts.in_play`:
+    an account with no row yet gets the id it will have), and the sending config."""
+    from outreach.sending import accounts
+    from outreach.sending.config import load_config as load_send_config
+    send_cfg = load_send_config()
+    return accounts.sending(accounts.in_play(conn, send_cfg)), send_cfg
+
+
 def current_send_limit(conn: sqlite3.Connection, today: date, cfg: PlanConfig) -> int:
-    """Today's `send_day.send_limit`, else the latest earlier row's, else `email.start_limit`. The seam #14's ramp
-    fills: this plan only reads what the ramp wrote."""
-    row = conn.execute("SELECT send_limit FROM send_day WHERE day <= ? ORDER BY day DESC LIMIT 1",
-                       (today.isoformat(),)).fetchone()
-    return row[0] if row else cfg.get("email", "start_limit")
+    """The sum over the accounts that send of each one's effective limit today (`ramp.effective_limit`, the number the
+    sender itself sends by: its day's row clamped to the account's ramp, else what the ramp gives it, one level lower
+    on a warning). A stale row above the ceiling (the old flat 200) reads as the ceiling. An account that rests
+    (account 1 since the multi-sender switch) adds nothing; `email.start_limit` only when no account sends."""
+    from outreach.sending import ramp
+    rows, send_cfg = _sending_rows(conn)
+    if not rows:
+        return cfg.get("email", "start_limit")
+    return sum(ramp.effective_limit(conn, row, today, send_cfg) for row in rows)
 
 
 def email_capacity(conn: sqlite3.Connection, today: date, cfg: PlanConfig, *,
@@ -86,7 +99,10 @@ def email_capacity(conn: sqlite3.Connection, today: date, cfg: PlanConfig, *,
         "SELECT COUNT(*) FROM message WHERE state IN ('approved', 'sending', 'send_unknown') "
         "OR (state IN ('planned', 'drafted') AND seq >= 1 AND due_on <= ?) "
         "OR (state = 'sent' AND sent_at >= ? AND sent_at < ?)", (today.isoformat(), start, end)).fetchone()[0]
-    paused = bool(conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()[0])
+    # His pause closes the slots, and so does a hard block on every account that sends.
+    rows, _ = _sending_rows(conn)
+    paused = bool(conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()[0]) or (bool(rows) and all(
+        row.paused for row in rows))
     limit = limit_fn(conn, today, cfg)
     slots = 0 if paused else min(cfg.get("email", "rows_max"), max(0, limit - committed))
     return EmailCapacity(send_limit=limit, committed=committed, paused=paused, slots=slots)

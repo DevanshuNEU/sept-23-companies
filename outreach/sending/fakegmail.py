@@ -78,12 +78,16 @@ def _subject_key(subject: str) -> str:
 
 
 class FakeGmail(MailClient):
-    """In-memory Gmail. `probe(method_name)` runs at the start of every client method, before it does anything."""
+    """In-memory Gmail. `probe(method_name)` runs at the start of every client method, before it does anything.
+    `id_prefix` starts every id this mailbox makes (Gmail ids, thread ids, the Message-IDs it stores), so two fakes in
+    one test (two sender accounts) never make the same Message-ID, as two real mailboxes never do."""
 
     def __init__(self, *, clock: Callable[[], datetime], account: str = "devanshurajesh@gmail.com",
-                 probe: Callable[[str], None] | None = None, reconcile_after_minutes: int | None = None):
+                 probe: Callable[[str], None] | None = None, reconcile_after_minutes: int | None = None,
+                 id_prefix: str = ""):
         self.clock = clock
         self.account = account
+        self.id_prefix = id_prefix
         self.probe = probe
         self.settle_minutes = settle_minutes(reconcile_after_minutes)
         self.sent: list[tuple[Outgoing, Sent, datetime]] = []
@@ -217,7 +221,7 @@ class FakeGmail(MailClient):
         headers = {"content-type": 'text/plain; charset="utf-8"'}
         if self.rewrite_message_ids:
             self._next_rfc += 1
-            stored_id = f"<rewritten{self._next_rfc}@mail.gmail.com>"
+            stored_id = f"<{self.id_prefix}rewritten{self._next_rfc}@mail.gmail.com>"
             if self.keep_original_id:
                 headers["x-google-original-message-id"] = m.message_id
         headers["message-id"] = stored_id
@@ -311,11 +315,11 @@ class FakeGmail(MailClient):
 
     def _new_thread(self) -> str:
         self._next_thread += 1
-        return f"t{self._next_thread}"
+        return f"{self.id_prefix}t{self._next_thread}"
 
     def _new_rfc(self, domain: str) -> str:
         self._next_rfc += 1
-        return f"<in{self._next_rfc}@{domain}>"
+        return f"<{self.id_prefix}in{self._next_rfc}@{domain}>"
 
     def _reply_headers(self, to: Sent, from_addr: str, extra: Mapping[str, str] | None) -> dict[str, str]:
         domain = parseaddr(from_addr)[1].rpartition("@")[2] or "example.com"
@@ -337,7 +341,8 @@ class FakeGmail(MailClient):
                headers: Mapping[str, str], snippet: str, at: datetime | None) -> MessageMeta:
         self._next_message += 1
         when = at or self.clock()
-        meta = MessageMeta(gmail_message_id=f"m{self._next_message}", thread_id=thread_id, from_addr=from_addr,
+        meta = MessageMeta(gmail_message_id=f"{self.id_prefix}m{self._next_message}", thread_id=thread_id,
+                           from_addr=from_addr,
                            to_addr=to_addr, subject=subject, internal_ms=int(when.timestamp() * 1000),
                            labels=labels, headers=dict(headers), snippet=snippet)
         self._messages[meta.gmail_message_id] = meta

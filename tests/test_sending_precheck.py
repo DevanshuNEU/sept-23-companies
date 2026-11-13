@@ -10,15 +10,15 @@ import random
 import unittest
 
 from outreach.drafts.checks import load_banned
-from outreach.sending import claim, queue
+from outreach.sending import accounts, claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.precheck import precheck
-from tests.sendtest import MON, iso, seed_email_person, seed_message
+from tests.sendtest import MON, iso, seed_email_person, seed_message, solo
 from tests.storetest import fresh_store, seed_company
 from tests.test_drafts_checks import FIXTURE_BANNED
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 DASH = chr(0x2014)  # an em dash, written as a code point so this file has none
 
 
@@ -59,7 +59,7 @@ class Base(unittest.TestCase):
         if blocks is not None:
             return blocks
         return claim.send_one(self.db, self.gmail, q, CFG, now=now, clock=self.clock, rng=self.rng,
-                              account=CFG.from_address)
+                              account=accounts.primary(self.db, CFG))
 
     def message(self, message_id: int):
         return self.db.execute("SELECT * FROM message WHERE message_id = ?", (message_id,)).fetchone()
@@ -177,6 +177,33 @@ class PrecheckTest(Base):
         finally:
             self.db.execute("ROLLBACK")
         self.assertEqual(self.message(mid)["state"], "approved")
+
+    def test_bounced_address_refused_at_precheck(self):
+        """An address that ever bounced, from any account, on any person record, is never sent to again (#9
+        multi-sender ruling). The list ignores case."""
+        for source in ("bounce", "marked", "backfill"):
+            with self.subTest(source=source):
+                self.setUp()
+                person, mid = self.approve()
+                address = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0]
+                self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES (?, ?, ?)",
+                                (address.upper(), iso(MON), source))
+                q = self.queued(mid)
+                blocks = self.step(q)
+                self.assertEqual([b["code"] for b in blocks], ["bounced_address"])
+                self.assertIn(address, blocks[0]["detail"])
+                self.assertNotIn(DASH, blocks[0]["title"] + blocks[0]["detail"])
+                row = self.message(mid)
+                self.assertEqual((row["state"], row["revision"]), ("drafted", q.revision + 1))
+                self.assertIn("bounced_address", [c["code"] for c in json.loads(row["checks"])])
+                self.assertEqual(self.events(mid, "send_blocked")[0]["codes"], ["bounced_address"])
+                self.assertEqual(self.gmail.sent, [])
+
+    def test_an_address_that_never_bounced_goes(self):
+        _, mid = self.approve()
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES ('other@acme.co', ?, "
+                        "'bounce')", (iso(MON),))
+        self.assertEqual(self.step(self.queued(mid)), "sent")
 
 
 if __name__ == "__main__":

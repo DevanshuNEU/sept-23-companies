@@ -2,10 +2,12 @@
 `mail/`, and that file is not changed.
 
 Secrets live outside the project, in ~/Library/Application Support/outreach-mail/ (OUTREACH_GMAIL_DIR overrides it):
-  client_secret.json   the OAuth "Desktop app" client downloaded from Google Cloud Console
-  token.json           written by sign-in (mode 600); holds the refresh token
+  client_secret.json   the OAuth "Desktop app" client downloaded from Google Cloud Console (one for every account)
+  token.json           account 1's token, written by sign-in (mode 600); holds the refresh token
+  <address>/token.json each other Gmail account's own token (or the account's `token_dir` in the sending config)
 
-The token is the old mailer's: the same folder, file and scopes, so the switch needs no new sign-in.
+Account 1's token is the old mailer's: the same folder, file and scopes, so the switch needs no new sign-in. Another
+account signs in with `python -m outreach.sending auth --account <address>` (`token_dir_for` says where it goes).
 Scopes: gmail.send (send approved emails) and gmail.metadata (read headers, to notice replies and bounces).
 Neither can read a message body or delete anything. users.history.list, users.messages.list (without `q`),
 messages.get and threads.get with format=metadata all accept gmail.metadata (Gmail API reference).
@@ -45,8 +47,9 @@ from outreach.sending.mail import (MARKER_HEADER, META_HEADERS, ORIGINAL_ID_HEAD
                                    check_outgoing, classify_http, miss_is_proof, normalise_message_id, page_reaches,
                                    scrub, settle_minutes)
 
-__all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "build_mime", "new_message_id", "GmailClient",
-           "check_auth_location", "authorize", "main"]
+__all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "token_dir_for", "sign_in_command", "build_mime",
+           "new_message_id",
+           "GmailClient", "check_auth_location", "authorize", "sign_in", "main"]
 
 DEFAULT_DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
 CLIENT_FILE, TOKEN_FILE = "client_secret.json", "token.json"
@@ -104,10 +107,41 @@ def is_default_dir(directory: str) -> bool:
     return os.path.exists(candidate) and os.path.exists(real) and os.path.samefile(candidate, real)
 
 
+def _in_default_dir(directory: str) -> bool:
+    """True when `directory` is the real secrets folder or a folder inside it (another account's token folder)."""
+    path = _normalise(directory)
+    while True:
+        if is_default_dir(path):
+            return True
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+
+
 def check_auth_location(directory: str | None = None) -> None:
-    """Signing in writes the real token, so it happens only from the live checkout (a scratch folder is fine)."""
-    if is_default_dir(directory or gmail_dir()):
+    """Signing in writes the real token, so it happens only from the live checkout (a scratch folder is fine). A
+    folder inside the real secrets folder (another account's token folder) is the real folder too."""
+    if _in_default_dir(directory or gmail_dir()):
         live_checkout.require_live("Gmail sign-in into the real secrets folder")
+
+
+def token_dir_for(cfg, address: str, base: str | None = None) -> str:
+    """The folder of an account's `token.json`: the first account block (account 1) keeps the secrets folder itself
+    (`base`, default `gmail_dir()`), as the old mailer did; every other Gmail account has `<base>/<address>/`, or its
+    own `token_dir` when the config sets one. ValueError for an address not in `cfg` or a Mail.app account (it has
+    no Gmail token)."""
+    base = base or gmail_dir()
+    for index, acct in enumerate(cfg.accounts):
+        if acct.address.lower() != address.lower():
+            continue
+        if acct.kind != "gmail":
+            raise ValueError(f"{acct.address} is a Mail.app account, so it has no Gmail token")
+        if acct.token_dir:
+            return os.path.expanduser(acct.token_dir)
+        return base if index == 0 else os.path.join(base, acct.address)
+    raise ValueError(f"{address} is not an account in the sending config "
+                     f"({', '.join(a.address for a in cfg.accounts)})")
 
 
 # -- the message ------------------------------------------------------------------------------------------------
@@ -186,27 +220,38 @@ def _google_error(err: urllib.error.HTTPError) -> str:
         err.close()
 
 
-def _token(directory: str) -> str:
-    """Every Gmail call reads the token here, so this is the one place the live-checkout rule is enforced."""
+def sign_in_command(cfg, address: str) -> str:
+    """How he signs this account in: account 1 (the first account block) with the plain command, every other Gmail
+    account with `--account`, so a hint never sends him to overwrite another account's token."""
+    if cfg.accounts and cfg.accounts[0].address.lower() == address.lower():
+        return "python -m outreach.sending auth"
+    return f"python -m outreach.sending auth --account {address}"
+
+
+def _token(directory: str, token_dir: str | None = None, sign_in: str = SIGN_IN) -> str:
+    """Every Gmail call reads the token here, so this is the one place the live-checkout rule is enforced. The OAuth
+    client is in `directory`; the token is in `token_dir` (the account's own folder; default `directory`), and an
+    account never falls back to another account's token. `sign_in` is that account's own sign-in command, named in
+    every sign-in error."""
     if not live_checkout.is_live():
         raise SystemExit(f"the real Gmail token is only used from the live checkout ({live_checkout.LIVE_ROOT})")
-    path = os.path.join(directory, TOKEN_FILE)
+    path = os.path.join(token_dir or directory, TOKEN_FILE)
     try:
         with open(path) as f:
             tok = json.load(f)
     except FileNotFoundError:
-        raise GmailError("auth", None, f"not signed in to Gmail; run: {SIGN_IN}") from None
+        raise GmailError("auth", None, f"not signed in to Gmail; run: {sign_in}") from None
     except (OSError, ValueError):
-        raise GmailError("auth", None, f"the Gmail token file is unreadable; run: {SIGN_IN}") from None
+        raise GmailError("auth", None, f"the Gmail token file is unreadable; run: {sign_in}") from None
     if not isinstance(tok, dict) or not (tok.get("access_token") or tok.get("refresh_token")):
-        raise GmailError("auth", None, f"the Gmail token file holds no token; run: {SIGN_IN}")
+        raise GmailError("auth", None, f"the Gmail token file holds no token; run: {sign_in}")
     try:
         expires_at = float(tok.get("expires_at", 0))
     except (TypeError, ValueError):
         expires_at = 0.0
     if time.time() >= expires_at or not tok.get("access_token"):
         if not tok.get("refresh_token"):
-            raise GmailError("auth", None, f"the Gmail token has no refresh token; run: {SIGN_IN}")
+            raise GmailError("auth", None, f"the Gmail token has no refresh token; run: {sign_in}")
         try:
             c = _client(directory)
         except (OSError, ValueError, AttributeError):
@@ -301,16 +346,18 @@ class GmailClient(MailClient):
     `token_provider` runs before every call either way (by default `_token`, the live-checkout gate), and is only
     accepted with a transport. `clock` (aware now) is for tests of find_sent's timing."""
 
-    def __init__(self, directory: str | None = None, *, transport: Transport | None = None,
+    def __init__(self, directory: str | None = None, *, token_dir: str | None = None,
+                 sign_in: str = SIGN_IN, transport: Transport | None = None,
                  token_provider: Callable[[], str] | None = None, clock: Callable[[], datetime] | None = None,
                  reconcile_after_minutes: int | None = None):
         if token_provider is not None and transport is None:
             raise ValueError("a token_provider replaces the real token only with a fake transport")
         self.directory = _normalise(directory or gmail_dir())
-        if is_default_dir(self.directory):
+        self.token_dir = _normalise(token_dir) if token_dir else self.directory  # this account's token folder
+        if is_default_dir(self.directory) or _in_default_dir(self.token_dir):
             live_checkout.require_live("the real Gmail client")
         self._transport = transport
-        self._token_provider = token_provider or (lambda: _token(self.directory))
+        self._token_provider = token_provider or (lambda: _token(self.directory, self.token_dir, sign_in))
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.settle_minutes = settle_minutes(reconcile_after_minutes)
 
@@ -454,8 +501,11 @@ class GmailClient(MailClient):
 
 # -- sign-in ----------------------------------------------------------------------------------------------------
 
-def authorize(directory: str) -> None:
-    """Browser sign-in with PKCE and a loopback redirect. Run by him, once, from the live checkout."""
+def authorize(directory: str, token_dir: str | None = None, *, expect: str | None = None) -> None:
+    """Browser sign-in with PKCE and a loopback redirect. Run by him, once per account, from the live checkout. The
+    OAuth client is read from `directory`; the token is written into `token_dir` (default `directory`). With
+    `expect`, a sign-in as another address says so (the tick would refuse that token as `wrong_account`)."""
+    token_dir = token_dir or directory
     c = _client(directory)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -496,24 +546,36 @@ def authorize(directory: str) -> None:
     except urllib.error.HTTPError as err:
         raise SystemExit(f"Google sign-in failed: {_google_error(err)}") from None
     tok["expires_at"] = time.time() + float(tok.get("expires_in", 3600)) - 60
-    os.makedirs(directory, exist_ok=True)
-    _write_private(os.path.join(directory, TOKEN_FILE), tok)
+    os.makedirs(token_dir, exist_ok=True)
+    _write_private(os.path.join(token_dir, TOKEN_FILE), tok)
     if live_checkout.is_live():
-        print("Signed in as", GmailClient(directory).profile().email)
+        email = GmailClient(directory, token_dir=token_dir).profile().email
+        print("Signed in as", email)
+        if expect and email.lower() != expect.lower():
+            print(f"That is not {expect}. Sign in again and pick {expect} in the browser; until then nothing is read "
+                  "or sent with this token.")
     else:
-        print("Signed in; the token is saved in", directory)
+        print("Signed in; the token is saved in", token_dir)
+
+
+def sign_in(token_dir: str | None = None, directory: str | None = None, *, expect: str | None = None) -> int:
+    """Sign one account in: the OAuth client from `directory` (default `gmail_dir()`), the token into `token_dir`
+    (default the same folder, account 1's). Live checkout only for the real secrets folder or any folder in it."""
+    directory = directory or gmail_dir()
+    token_dir = token_dir or directory
+    check_auth_location(directory)
+    check_auth_location(token_dir)
+    if not os.path.exists(os.path.join(directory, CLIENT_FILE)):
+        raise SystemExit(f"Put your OAuth client file at:\n  {os.path.join(directory, CLIENT_FILE)}")
+    authorize(directory, token_dir, expect=expect)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     cmd = args[0] if args else ""
     if cmd == "auth":
-        directory = gmail_dir()
-        check_auth_location(directory)
-        if not os.path.exists(os.path.join(directory, CLIENT_FILE)):
-            raise SystemExit(f"Put your OAuth client file at:\n  {os.path.join(directory, CLIENT_FILE)}")
-        authorize(directory)
-        return 0
+        return sign_in()
     if cmd == "whoami":
         try:
             print(GmailClient().profile().email)

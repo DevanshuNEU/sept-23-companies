@@ -244,7 +244,15 @@ class JobRuns(ApiCase):
         self.set_now("2026-11-10T23:30:00Z")  # Tuesday 18:30 in New York
         self.assertEqual(self.health()["sender"]["state"], "outside_window")
         self.set_now(NOW)
+        from outreach.sending import accounts
+        from outreach.sending.config import load_config
+        general = accounts.sync(self.conn, load_config(), NOW)["devanshuchi9@gmail.com"].account_id
         self.sender(auth_state="signed_out")
+        # The tick writes a sign-in on the account's own row as well as on sender row 1. Account 1 only reads now,
+        # so its sign-in alone stops no sending; the sending account's does.
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")
+        self.assertEqual(self.health()["sender"]["state"], "running")
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?", (general,))
         self.assertEqual(self.health()["sender"]["state"], "signed_out")
         self.sender(paused=1, pause_kind="by_you", paused_at=NOW)
         self.assertEqual(self.health()["sender"]["state"], "paused_by_you")

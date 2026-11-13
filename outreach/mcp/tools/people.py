@@ -19,6 +19,10 @@ source that breaks the person_source rules rejects every person and writes nothi
   stop the add, which is flagged `same_name_as:<id>`. An address and a profile of two different people is
   `two_people`.
 
+An address on the dead-address list (`bounced_address`: it bounced before, from any account, in any case) refuses the
+whole call with `bounced_address` and writes nothing: it never comes back on a new person or as a new address (#9
+multi-sender ruling, 2026-11-12).
+
 The address, profile and name keys come from `outreach.sources.keys`, which the history import (#17) matches people
 with too, so a person the import brought in is the person this tool finds.
 """
@@ -39,7 +43,8 @@ from outreach.sources.keys import EMAIL, linkedin_key
 from outreach.sources.keys import person_name_key as name_key
 from outreach.store import append_event, transaction
 
-__all__ = ["TOOLS", "PersonIn", "SourceIn", "clean_people", "record_people", "linkedin_key", "said_no_ids"]
+__all__ = ["TOOLS", "PersonIn", "SourceIn", "clean_people", "record_people", "linkedin_key", "said_no_ids",
+           "refuse_bounced"]
 
 class SourceIn(Input):
     kind: Literal["profile", "team", "context", "email", "post"]
@@ -104,6 +109,14 @@ def _clean(i: int, p: PersonIn) -> dict:
                       "Give email_basis with kind email, or use another kind.")
     return {"name": name, "title": p.title.strip(), "role_kind": p.role_kind, "email": email, "linkedin": linkedin,
             "profile_text": (p.profile_text or "").strip(), "notes": (p.notes or "").strip(), "sources": p.sources}
+
+
+def refuse_bounced(conn: sqlite3.Connection, email: str | None, who: str) -> None:
+    """ToolError `bounced_address` when `email` bounced before (the dead-address list, any case). Read only."""
+    if email and conn.execute("SELECT 1 FROM bounced_address WHERE address = ?", (email,)).fetchone():
+        raise ToolError("bounced_address", f"{who}: {email} bounced before, so it is never used again.",
+                        "Find another address for them, or add them with their LinkedIn profile only. Nothing was "
+                        "written.")
 
 
 def _namesakes(conn: sqlite3.Connection, want: dict, family_ids: list[int]) -> list[sqlite3.Row]:
@@ -255,6 +268,8 @@ def record_people(ctx: Ctx, company_id: int, wanted: list[dict]) -> dict:
     if survivor in no_go_companies:
         raise ToolError("company_no_go", f"{main['name']} is on the no-go list, so no one is added there.",
                         "Nothing goes to anyone at a no-go company. Tell Devanshu if that should change.")
+    for i, want in enumerate(wanted):  # the whole call, before any write
+        refuse_bounced(conn, want["email"], f"people.{i} ({want['name']})")
     ids = family.members(survivor)
     results = []
     for i, want in enumerate(wanted):

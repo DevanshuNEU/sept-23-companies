@@ -11,13 +11,14 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending.config import load_config
+from tests import SHIPPED_SEND_CONFIG
 from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, ny, simulate
 
-# Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and for slow,
-# steady pacing of 4 to 9 minutes, since its bounces and limits sit at fixed positions in the day. The shipped human pacing
-# is checked in test_sending_human and test_sending_queue.
-CFG = dataclasses.replace(load_config(), followup_business_days=(7,), gap_minutes=(4, 9), gap_median_minutes=5.5,
-                          gap_spread=0.2, break_chance=0.0)
+# Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and with no
+# breaks, since its bounces and limits sit at fixed positions in the day. Gaps are the shipped spread pacing (the scratch
+# config shortens its clip for the tick tests, so the shipped [2, 45] is set here); the shipped
+# breaks are checked in test_sending_human, the window in test_sending_calendar.
+CFG = dataclasses.replace(load_config(), followup_business_days=(7,), break_chance=0.0001, spread_gap_minutes=(2, 45))
 NY = ZoneInfo("America/New_York")
 MON = date(2026, 11, 2)
 D = {n: date(2026, 11, 2) + timedelta(days=d) for n, d in
@@ -53,7 +54,8 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual([row.start_limit for row in self.r.days], [20, 30, 40, 50, 40, 50, 60, 70, 60, 70])
         self.assertEqual(len(rows), 10)
         warn = rows[D[4]]  # Thursday 2026-11-05: a policy bounce at 11:00
-        self.assertEqual((warn.outcome, warn.effective_limit, warn.sent), ("warning", 40, 40))
+        self.assertEqual((warn.outcome, warn.effective_limit), ("warning", 40))
+        self.assertEqual(warn.sent, 40)
         self.assertEqual([e["kind"] for e in events(self.r, "policy_rejection")], ["policy_rejection"])
         block = rows[D[8]]  # Wednesday 2026-11-11: Gmail answers 429 at 13:00
         self.assertEqual(block.outcome, "hard_block")
@@ -71,7 +73,13 @@ class TwoWeeksTest(unittest.TestCase):
         self.assertEqual(paused, 0, "the scripted resume cleared the pause")
         for n, row in enumerate(self.r.days, start=1):
             if n not in (4, 8):
-                self.assertEqual(row.sent, row.start_limit, f"day {n} ({row.day}) is kept full")
+                # Earliest-close-first picking and the (sends_left + 1) divisor keep days full. Day 1 (20) sends 18: its
+                # 28 approved emails sit in 7 companies, so at the end every message left is a closed window (5 London
+                # and 2 New York, whose companies had used their gap and daily limit while the window was open), the
+                # company limit or the company gap: the queue ran out of ready recipients. Day 8 is the hard block.
+                self.assertLessEqual(row.sent, row.start_limit, f"day {n} ({row.day})")
+                self.assertGreaterEqual(row.sent, (0.9 if n == 1 else 0.95) * row.start_limit,
+                                        f"day {n} ({row.day}) is nearly full")
                 self.assertEqual(row.outcome, "clean", f"day {n}")
 
     def test_two_weeks_per_company_spacing(self):
@@ -101,16 +109,16 @@ class TwoWeeksTest(unittest.TestCase):
             local = s.at.astimezone(ZoneInfo(s.zone))
             self.assertLess(local.weekday(), 5, s)
             self.assertTrue(CFG.window_start <= local.time() <= CFG.window_end, f"{s.person} at {local}")
-        # The stored gap is cut to whole seconds, so allow a second under the shortest gap.
+        # The stored gap is cut to whole seconds, so allow a second under the shortest gap. A break is longer still.
         ordered = sorted(s.at for s in self.r.sends)
         for a, b in zip(ordered, ordered[1:]):
-            self.assertGreaterEqual(b - a, timedelta(minutes=CFG.gap_minutes[0]) - timedelta(seconds=1))
+            self.assertGreaterEqual(b - a, timedelta(minutes=CFG.spread_gap_minutes[0]) - timedelta(seconds=1))
         self.assertTrue({"America/Los_Angeles", "Europe/London"} <= {s.zone for s in self.r.sends})
 
     def test_two_weeks_follow_up_dates(self):
         conn = self.r.conn
         first_day = [s for s in self.r.sends if s.seq == 0 and ny_date(s.at) == D[1]]
-        self.assertEqual(len(first_day), 20)
+        self.assertTrue(15 <= len(first_day) <= 20, "the day's limit is 20 and spread pacing can leave a few unsent")
         for s in first_day:
             info = self.r.people[s.person]
             row = conn.execute("SELECT due_on FROM message WHERE touch_id = ? AND seq = 1", (info.touch_id,)).fetchone()
@@ -124,7 +132,13 @@ class TwoWeeksTest(unittest.TestCase):
                 due = row["due_on"]
             self.assertEqual(due, "2026-11-11", s.person)
         followups = [s for s in self.r.sends if s.seq == 1]
-        self.assertEqual(len(followups), 18, "20 first emails, one replied and one bounced")
+        # Every first email but the replied one and the bounced one has a follow-up drafted and approved on day 8. The
+        # queue is first come, first served and the days' first emails are approved earlier, so some wait their turn.
+        by_state = dict(conn.execute("SELECT state, COUNT(*) FROM message WHERE seq = 1 AND touch_id IN "
+                                     "(SELECT touch_id FROM touch WHERE origin = 'sender') GROUP BY state").fetchall())
+        self.assertEqual(by_state.get("sent", 0) + by_state.get("approved", 0), len(first_day) - 2, by_state)
+        self.assertEqual(len(followups), by_state.get("sent", 0))
+        self.assertGreater(len(followups), 0)
         firsts = {s.person: s for s in self.r.sends if s.seq == 0}
         for s in followups:
             self.assertGreaterEqual(ny_date(s.at), D[8], s.person)
@@ -134,7 +148,7 @@ class TwoWeeksTest(unittest.TestCase):
         per_day = Counter(ny_date(s.at) for s in self.r.sends)
         for row in self.r.days:
             self.assertEqual(row.sent, per_day[row.day], "a follow-up counts toward its day's sends")
-        self.assertTrue(any(ny_date(s.at) == D[8] for s in followups))
+        # They queue behind the first emails approved on days 1 to 7, so none need go out on day 8 itself.
 
     def test_two_weeks_company_hold_on_reply(self):
         conn, info = self.r.conn, self.r.people["c2p0"]
@@ -189,6 +203,99 @@ def morning(n: int, count: int) -> Event:
     return Event(ny(D[n], "07:00"), "approve", {"count": count})
 
 
+class SpreadAcrossWindowTest(unittest.TestCase):
+    """One account at 15 a day, recipients split between New York and Los Angeles, one Monday (spec: Window and pacing)."""
+
+    def test_fifteen_spread_across_window(self):
+        from tests.sendtest import with_ramp
+        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+        # Eight New York companies then seven Los Angeles ones, approved in that order: the New York ones go while
+        # their window is open, and the day runs on until Los Angeles closes (18:00 New York).
+        scenario = short(1, [morning(1, 15)], companies=15, people=1,
+                         zones=("America/New_York",) * 8 + ("America/Los_Angeles",) * 7)
+        result = simulate(scenario, seed=7, cfg=cfg)
+        self.addCleanup(result.close)
+        times = sorted(s.at.astimezone(NY) for s in result.sends)
+        self.assertEqual(len(times), 15)
+        self.assertGreaterEqual(times[0], ny(D[1], "08:00"))
+        self.assertLessEqual(sum(1 for t in times if t < ny(D[1], "10:00")), 5, [t.strftime("%H:%M") for t in times])
+        self.assertGreater(times[-1], ny(D[1], "13:00"), [t.strftime("%H:%M") for t in times])
+
+    def test_alternating_new_york_and_los_angeles_send_all_fifteen_on_every_seed(self):
+        from tests.sendtest import with_ramp
+        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+        for seed in range(1, 11):
+            result = simulate(short(1, [morning(1, 15)], companies=30, people=1,
+                                    zones=("America/New_York", "America/Los_Angeles")), seed=seed, cfg=cfg)
+            self.addCleanup(result.close)
+            self.assertEqual(len(result.sends), 15, f"seed {seed}")
+
+
+class FullDayFloorTest(unittest.TestCase):
+    """The late-start floor (2026-11-13 ruling) never costs a full day its limit: shipped config, 15 a day, approved at
+    07:00, seeds 1 to 20, in every zone mix. A start at 14:30 New York sends at most 3 that day."""
+
+    @staticmethod
+    def cfg():
+        from tests.sendtest import with_ramp
+        return with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+
+    def counts(self, zones, approve_at="07:00"):
+        cfg, out = self.cfg(), []
+        for seed in range(1, 21):
+            result = simulate(short(1, [Event(ny(D[1], approve_at), "approve", {"count": 15})], companies=30,
+                                    people=1, zones=zones), seed=seed, cfg=cfg)
+            out.append(sum(1 for s in result.sends if ny_date(s.at) == D[1]))
+            result.close()
+        return out
+
+    def test_new_york_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/New_York",)), [15] * 20)
+
+    def test_los_angeles_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/Los_Angeles",)), [15] * 20)
+
+    def test_chicago_only_sends_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/Chicago",)), [15] * 20)
+
+    def test_new_york_and_los_angeles_mixed_send_fifteen_on_every_seed(self):
+        self.assertEqual(self.counts(("America/New_York", "America/Los_Angeles")), [15] * 20)
+
+    def test_a_start_at_14_30_new_york_sends_at_most_three_that_day(self):
+        got = self.counts(("America/New_York",), approve_at="14:30")
+        self.assertTrue(all(1 <= n <= 3 for n in got), got)
+
+
+class EverySendingAccountTest(unittest.TestCase):
+    """Two accounts send at once (Task A11): the general lane from devanshuchi9, the sponsor lane from a third Gmail
+    account standing in for Northeastern. Each runs its own ramp and its own day; a company hears from one only."""
+
+    def test_the_simulation_runs_every_sending_account(self):
+        neu = "chicholikar.d@northeastern.edu"
+        cfg = dataclasses.replace(CFG, accounts=tuple(
+            dataclasses.replace(a, kind="gmail", mailapp_account=None, sends=True) if a.address == neu else a
+            for a in CFG.accounts))
+        scenario = dataclasses.replace(short(2, [morning(1, 40), morning(2, 40)], companies=40, people=1),
+                                       sponsors=frozenset(range(0, 40, 2)))
+        result = simulate(scenario, seed=3, cfg=cfg)
+        self.addCleanup(result.close)
+        by_account = Counter(s.account for s in result.sends)
+        self.assertEqual(set(by_account), {"devanshuchi9@gmail.com", neu})
+        for s in result.sends:
+            self.assertEqual(s.account, neu if s.company % 2 == 0 else "devanshuchi9@gmail.com", s)
+        self.assertEqual(set(result.account_days), {"devanshuchi9@gmail.com", neu})
+        for address, rows in result.account_days.items():
+            self.assertEqual([r.sent for r in rows],
+                             [sum(1 for s in result.sends if s.account == address and ny_date(s.at) == r.day)
+                              for r in rows], address)
+            self.assertTrue(all(r.sent <= r.effective_limit for r in rows), address)
+        self.assertEqual(result.days, result.account_days["devanshuchi9@gmail.com"])
+        companies = defaultdict(set)
+        for s in result.sends:
+            companies[s.company].add(s.account)
+        self.assertTrue(all(len(a) == 1 for a in companies.values()))
+
+
 class StopRulesTest(unittest.TestCase):
     def run_scenario(self, scenario: Scenario):
         result = simulate(scenario, cfg=CFG)
@@ -200,7 +307,9 @@ class StopRulesTest(unittest.TestCase):
             "SELECT kind FROM event WHERE entity = 'sender' ORDER BY event_id")]
 
     def paused(self, result):
-        return result.conn.execute("SELECT paused, pause_kind FROM sender WHERE sender_id = 1").fetchone()
+        # The account that sends (the general lane): account 1 rests, so its pauses are the sending account's.
+        return result.conn.execute("SELECT paused, pause_kind FROM sender_account WHERE address = ?",
+                                   (result.cfg.lane_account("general").address,)).fetchone()
 
     def after(self, result, at: datetime) -> list:
         return [s for s in result.sends if s.at >= at]
@@ -210,14 +319,17 @@ class StopRulesTest(unittest.TestCase):
         r = self.run_scenario(short(2, [morning(1, 40), morning(2, 40), Event(ny(D[2], "11:00"), "bounce", {"nth": 0}),
                                         Event(ny(D[2], "11:00"), "bounce", {"nth": 1})]))
         self.assertIn("bounce_warning", self.kinds(r))
-        self.assertEqual(self.paused(r)["paused"], 0)
+        # 2 bounces in the account's first 80 emails is 2.5%, past the hard rule (2% once 30 are sent): the account
+        # pauses on its own row (multi-sender design, per-account stops).
+        self.assertIn("bounce_rate_hard", self.kinds(r))
+        self.assertEqual(tuple(self.paused(r)), (1, "hard_block"))
         day = r.days[1]
-        self.assertEqual((day.outcome, day.effective_limit), ("warning", 20))
+        self.assertEqual((day.outcome, day.effective_limit), ("hard_block", 20))
         self.assertEqual(self.after(r, ny(D[2], "11:04")), [], "the day is already past its lowered limit")
 
-    def test_a_high_bounce_rate_never_pauses(self):
+    def test_a_bounce_before_30_are_sent_never_pauses(self):
         r = self.run_scenario(short(1, [morning(1, 40), Event(ny(D[1], "10:00"), "bounce", {"nth": 0})]))
-        self.assertNotIn("hard_bounce_rate", self.kinds(r))
+        self.assertNotIn("bounce_rate_hard", self.kinds(r))
         self.assertEqual(self.paused(r)["paused"], 0)
         self.assertEqual(r.notices, [])
 

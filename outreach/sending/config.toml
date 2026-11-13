@@ -1,37 +1,29 @@
 # The sending engine's numbers (#14). Every value comes from issue #9 or the plan's "Decisions" section.
 # Keep each key on one line: tests replace single lines of this file.
 
-# One sender: #9 "devanshurajesh@gmail.com via the Gmail API. No second account or domain."
-from_address = "devanshurajesh@gmail.com"
+# Display name on every sender account.
 from_name = "Devanshu Chicholikar"
 
 # The sender's day (send_day.day, daily counts) is this zone's date.
 day_tz = "America/New_York"
 
-# Send limit (#9, 2026-11-12, #227): flat 200 a day. Start, floor and ceiling are all 200, so no warning lowers it and
-# no clean day raises it. To bring the adaptive ramp back, set start and floor to 20 (the send_day CHECK, 200, is the
-# ceiling).
-ramp_start = 200
-ramp_step = 10
-ramp_ceiling = 200
-ramp_floor = 200
-
 # A day is clean when bounces are under 2% over the last 3 days (#9).
 clean_bounce_rate = 0.02
 bounce_days = 3
 
-# No hard block on the bounce rate (#9, 2026-10-30): Apollo's addresses are not guaranteed, so bounces are normal.
+# Hard block on the bounce rate (#9 multi-sender ruling, 2026-11-12): 2% of an account's last 100 first emails, once 30 are sent, pauses that account.
 
 # Hard block: two "asked to stop" tags within 7 days.
 stop_replies_hard = 2
 stop_replies_days = 7
 
-# Window (#9): weekdays (0 is Monday), 08:30 to 16:30 recipient local time, both ends inclusive.
-window_start = "08:30"
-window_end = "16:30"
+# Window (#9 multi-sender ruling, 2026-11-12): weekdays (0 is Monday), 08:00 to 15:00 recipient local time, both ends
+# inclusive.
+window_start = "08:00"
+window_end = "15:00"
 weekdays = [0, 1, 2, 3, 4]
-# Dates ("2026-11-26") that are not business days. Empty by default.
-holidays = []
+# Dates ("2026-11-26") that are not business days: Thanksgiving and the day after, and the Christmas and New Year days.
+holidays = ["2026-11-26", "2026-11-27", "2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01"]
 
 # People per company: a company's band (below) sets its first emails a day and its gap. These three keys are the
 # default band, for a company with no size on file and no sign of being big (#9, 2026-11-12, #229): 2 first emails a
@@ -51,14 +43,17 @@ size_band_gap_jitter_minutes = [60, 30, 30, 20, 15]
 # open US postings) takes this band (1 is the first): 4, the 501 to 1,000 band.
 size_guessed_big_band = 4
 
-# Human pacing (#9, 2026-11-06; median 1.5 since 2026-11-12, #227). The gap after a send is log-normal around
-# gap_median_minutes (gap_spread is its width), clipped to gap_minutes, and now and then (break_chance) a real break of
-# break_minutes. The sender ticks every 2 minutes, so a gap lands on the next tick. With recipients across the US
-# zones the window runs about 11 hours on the New York clock, and the simulation sends 200 a day at median 1.5
-# (tests/test_send_limit_200.py); recipients all in one zone fit fewer.
-gap_minutes = [1, 25]
-gap_median_minutes = 1.5
-gap_spread = 0.6
+# Spread pacing (#9 multi-sender ruling, 2026-11-12). An account's gap after a send is the minutes left in its window
+# over the sends it has left today plus one, never below spread_floor_slack times its full window today (the earliest
+# 08:00 local to the latest 15:00 local among the recipients that can go today) over its limit today plus one, times
+# a random factor from spread_jitter, clipped to spread_gap_minutes, so a day of 15 spreads across the window and does
+# not go out in the first half hour, and a late start sends fewer, not faster. The slack (0.75, the largest of 0.75,
+# 0.7 and 0.6 with which every simulated full day still sends its limit) leaves room for the day-start offset, tick
+# rounding and the random factor. The sender ticks every 2 minutes, so a
+# gap lands on the next tick. Now and then (break_chance) the gap is a real break of break_minutes instead.
+spread_jitter = [0.6, 1.4]
+spread_gap_minutes = [2, 45]
+spread_floor_slack = 0.75
 break_chance = 0.04
 break_minutes = [10, 25]
 # The next send is one of the first pick_pool ready messages, not strictly the oldest.
@@ -68,8 +63,8 @@ day_start_jitter_minutes = 25
 # A company's gap is per_company_gap_minutes plus up to this many (a different amount after each send).
 per_company_gap_jitter_minutes = 60
 
-# Follow-ups (#9, 2026-10-31): 4, at 3, 7, 14 and 21 business days after the first email; at most 4 (message.seq 0 to 4).
-followup_business_days = [3, 7, 14, 21]
+# Follow-ups (#9 multi-sender ruling, 2026-11-12): one, 7 business days after the first email (message.seq allows up to 4).
+followup_business_days = [7]
 # A follow-up nobody approved or skipped this many business days after it was due lapses (planned or drafted).
 followup_lapse_business_days = 5
 # An open touch with nothing queued closes no_reply this many business days after its last sent message.
@@ -88,3 +83,39 @@ inbound_meta_cap = 200
 old_sender_label = "com.devanshu.outreach-mail-sender"
 # The sender deletes its own ok no-op job_run rows older than this.
 prune_noop_after_days = 14
+
+# Sender accounts (#9 multi-sender ruling, 2026-11-12). One block per account, in this order; keep each key on one
+# line. `lane` is the audience the account serves ("sponsor" or "general", unset for none), at most one sending account
+# per lane. `sends = false` keeps an account out of the sender. Each account has its own ramp: start, step, floor and
+# ceiling (the ceiling stays at or under the hard 200). The first block is the old sender; it no longer sends.
+# These blocks stay last: a TOML key after a [[account]] header would belong to that block.
+[[account]]
+address = "devanshurajesh@gmail.com"
+kind = "gmail"
+sends = false
+ramp_start = 15
+ramp_step = 3
+ramp_floor = 15
+ramp_ceiling = 40
+
+[[account]]
+address = "devanshuchi9@gmail.com"
+kind = "gmail"
+lane = "general"
+sends = true
+ramp_start = 15
+ramp_step = 3
+ramp_floor = 15
+ramp_ceiling = 40
+
+# Sends through Mail.app on the Northeastern account. Off until Phase B.
+[[account]]
+address = "chicholikar.d@northeastern.edu"
+kind = "mailapp"
+mailapp_account = "Exchange"
+lane = "sponsor"
+sends = false
+ramp_start = 15
+ramp_step = 3
+ramp_floor = 15
+ramp_ceiling = 60

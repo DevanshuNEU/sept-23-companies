@@ -21,8 +21,9 @@ ScheduleReason = Literal[
     "ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
     "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
     "company_held",
-    "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "company_closed", "no_go",
-    "reply_stop", "touch_done",
+    "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "lane_waits",
+    "inbound_unread",
+    "company_closed", "no_go", "reply_stop", "touch_done",
 ]
 Seq = Literal[0, 1, 2, 3, 4]
 FollowupSeq = Literal[1, 2, 3, 4]
@@ -54,6 +55,26 @@ class NextSend(Wire):
     company_name: str
 
 
+# outreach.sending.status.ACCOUNT_STATES, spelled out so the schema lists them (a test pins the two together).
+AccountState = Literal["sending", "paused_by_you", "paused_hard_block", "signed_out", "reading_only",
+                       "not_sending_yet"]
+AuthState = Literal["unknown", "ok", "signed_out", "wrong_account", "app_closed"]
+
+
+class AccountStatus(Wire):
+    """One sender account on the strip: its line is `address` then `text` ("4 of 15 today")."""
+    address: str
+    lane: Literal["sponsor", "general"] | None
+    sends: bool
+    state: AccountState
+    text: str
+    paused: bool
+    pause_reason: str
+    auth_state: AuthState
+    sent_today: int
+    limit: int
+
+
 class SendingStatus(Wire):
     state: SenderState
     paused_reason: str
@@ -70,6 +91,7 @@ class SendingStatus(Wire):
     next_send: NextSend | None
     none_reason: str | None
     revision: int
+    accounts: list[AccountStatus]  # every account in config order; sentToday and limitToday sum the sending ones
 
 
 class PauseSendingBody(WireRequest):
@@ -177,6 +199,13 @@ class HeldMessage(Wire):
     due_on: str | None
 
 
+class FromAccount(Wire):
+    """The account an email goes from: the touch's own once sent; before that, the one the sender would pick, or
+    no address and the sentence for what it waits for."""
+    address: str | None
+    text: str
+
+
 class OutboxDetail(Wire):
     as_of: str
     item: OutboxItem
@@ -189,7 +218,8 @@ class OutboxDetail(Wire):
     saved_at: str
     followups: list[OutboxFollowup]
     first_sent_at: str | None
-    gmail_thread_url: str | None
+    from_account: FromAccount
+    gmail_thread_url: str | None  # the thread in the touch's own Gmail account; None for a Mail.app account
     reply: OutboxReply | None
     touch_revision: int
     held: list[HeldMessage]

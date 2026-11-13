@@ -43,7 +43,21 @@ class PeopleData:
     messages_by_touch: dict[int, list[sqlite3.Row]] = field(default_factory=lambda: defaultdict(list))
     inbound_by_touch: dict[int, list[sqlite3.Row]] = field(default_factory=lambda: defaultdict(list))
     linkedin_by_person: dict[int, list[sqlite3.Row]] = field(default_factory=lambda: defaultdict(list))
-    sender_account: str = ""
+    sender_account: str = ""  # the address the old single sender signed in as: account 1's, when it has no row
+    addresses: dict[int, str] = field(default_factory=dict)  # sender_account id to its address
+
+
+def sender_addresses(conn: sqlite3.Connection) -> tuple[dict[int, str], str]:
+    """Every sender account's address by id, and the old single sender's address (account 1's fallback)."""
+    row = conn.execute("SELECT account FROM sender WHERE sender_id = 1").fetchone()
+    addresses = dict(conn.execute("SELECT account_id, address FROM sender_account").fetchall())
+    return addresses, row["account"] if row else ""
+
+
+def from_address(data: PeopleData, touch) -> str:
+    """The address the touch's emails went from: its own account (a touch with none was sent by account 1)."""
+    account_id = touch["account_id"] if touch["account_id"] is not None else 1
+    return data.addresses.get(account_id) or (data.sender_account if account_id == 1 else "")
 
 
 def load(conn: sqlite3.Connection, company_ids, *, bodies: bool) -> PeopleData:
@@ -75,8 +89,7 @@ def load(conn: sqlite3.Connection, company_ids, *, bodies: bool) -> PeopleData:
         params,
     ):
         data.linkedin_by_person[e["person_id"]].append(e)
-    row = conn.execute("SELECT account FROM sender WHERE sender_id = 1").fetchone()
-    data.sender_account = row["account"] if row else ""
+    data.addresses, data.sender_account = sender_addresses(conn)
     return data
 
 
@@ -172,10 +185,12 @@ def touch_summary(touch, messages) -> str:
 
 
 def thread(data: PeopleData, touch) -> list[dict]:
-    """Sent emails and what came back, in time order (a draft is not part of the thread until it goes out)."""
+    """Sent emails and what came back, in time order (a draft is not part of the thread until it goes out). A sent
+    email is from the touch's own account."""
+    sender = from_address(data, touch)
     out = [
         (m["sent_at"], 0, {"seq": m["seq"], "direction": "out", "subject": m["subject"], "body": m["body"],
-                           "at": m["sent_at"], "from": data.sender_account})
+                           "at": m["sent_at"], "from": sender})
         for m in data.messages_by_touch.get(touch["touch_id"], []) if m["state"] == "sent" and m["sent_at"]
     ]
     out += [

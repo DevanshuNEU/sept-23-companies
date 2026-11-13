@@ -22,8 +22,8 @@ from outreach.api.errors import ApiProblem
 from outreach.api.models.checks import Check
 from outreach.api.models.company import CompanyRef, ThreadMessage
 from outreach.api.models.outbox import (
-    ClosedBreakdown, CompareMatch, CompareSide, DraftCompare, HeldMessage, NextDue, OutboxCounts, OutboxDetail,
-    OutboxFollowup, OutboxHook, OutboxItem, OutboxReply, OutboxView, Schedule,
+    ClosedBreakdown, CompareMatch, CompareSide, DraftCompare, FromAccount, HeldMessage, NextDue, OutboxCounts,
+    OutboxDetail, OutboxFollowup, OutboxHook, OutboxItem, OutboxReply, OutboxView, Schedule,
 )
 from outreach.api.queries import people as people_queries
 from outreach.api.queries.company import CLOSE_WORDS, Holds, company_holds, person_ref, rank_postings, role_to_name
@@ -34,8 +34,8 @@ from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.sending.pace import company_paces, default_pace
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
-from outreach.sending import proof
-from outreach.sending.queue import TIME_REASONS, load_queue
+from outreach.sending import accounts, proof
+from outreach.sending.queue import TIME_REASONS, load_queue, route_line
 from outreach.sending.status import queue_projection, queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
 
@@ -46,7 +46,9 @@ WAITING = ("drafted", "approved")  # what a hold keeps back: the emails listed o
 CLAIMED = ("sending", "send_unknown")
 STATE_GROUP = {"drafted": "review", "planned": "review", "approved": "approved", "sending": "sending",
                "send_unknown": "checking", "sent": "sent"}
-GMAIL_THREAD = "https://mail.google.com/mail/u/0/#all/{}"
+# A thread opens in the Gmail account that sent it; with no account on record, the first signed-in one.
+GMAIL_THREAD = "https://mail.google.com/mail/?authuser={address}#all/{thread}"
+GMAIL_THREAD_ANY = "https://mail.google.com/mail/u/0/#all/{}"
 PREVIEW_CHARS = 140
 COMPARE_MIN_MATCH = 12  # shorter shared stretches are words in common, not copied text
 NOT_SHOWN = "planned"
@@ -83,12 +85,13 @@ def _ny(iso: str, cfg: SendConfig) -> datetime:
     return moment(iso).astimezone(ZoneInfo(cfg.day_tz))
 
 
-def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN) -> str:
+def schedule_text(reason: str, when: str | None, now: str, cfg: SendConfig, stage: str = proof.PROVEN,
+                  text: str | None = None) -> str:
     """`Sends 10:42 ET` when it is ready, `Sends after 11:05 ET` later today, `Sends tomorrow`, `Sends Wed Nov 11`;
     a wait with no time (and every stop) is the queue's own sentence (`status.reason_text`: a wait on the
-    marker proof says where the first email stands, `stage`)."""
+    marker proof says where the first email stands, `stage`; a verdict's own `text` wins)."""
     if when is None or (reason != "ready" and reason not in TIME_REASONS):
-        return reason_text(reason, stage)
+        return reason_text(reason, stage, text)
     at, today = _ny(when, cfg), _ny(now, cfg).date()
     if at.date() == today:
         clock = f"{at.hour}:{at.minute:02d} ET"
@@ -165,7 +168,12 @@ class _Outbox:
         self.people = people_by_ids(conn, {t["person_id"] for t in self.touches})
         self.schedule = queue_schedule(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
         self.projection, self.paused = queue_projection(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded)
-        self.proof_stage = proof.phase(conn)
+        self.accounts = accounts.in_play(conn, cfg)
+        # Each account's own marker proof: a message waiting on it says where its account's first email stands.
+        self.stages = {address: proof.phase(conn, row.account_id) for address, row in self.accounts.items()}
+        self.mailboxes = {r["account_id"]: (r["address"], r["kind"]) for r in conn.execute(
+            "SELECT account_id, address, kind FROM sender_account")}
+        self.addresses, self.sender_address = people_queries.sender_addresses(conn)
         self.queue_order = {mid: n for n, mid in enumerate(self.schedule)}
         self.tz = {q.message_id: q.tz for q in load_queue(conn, cfg)}
         self.sends_today = _company_sends_today(conn, self.companies, now, cfg)
@@ -196,7 +204,8 @@ class _Outbox:
         sent = self.sends_today.get(survivor, 0)
         projected = self.projection.get(m["message_id"])
         clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
-                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg, self.proof_stage)))
+                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg,
+                                                    self.stages.get(verdict.account, proof.PROVEN), verdict.text)))
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
                         projected_at=projected.strftime(ISO_FMT) if projected is not None else None,
                         projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,
@@ -342,14 +351,36 @@ class _Outbox:
             saved_at=m["updated_at"],
             followups=[OutboxFollowup(seq=f["seq"], due_on=f["due_on"], sent_at=f["sent_at"], state=f["state"])
                        for f in self.messages[touch_id] if f["seq"] >= 1],
-            first_sent_at=touch["first_sent_at"],
-            gmail_thread_url=GMAIL_THREAD.format(touch["gmail_thread_id"]) if touch["gmail_thread_id"] else None,
+            first_sent_at=touch["first_sent_at"], from_account=self._from(touch),
+            gmail_thread_url=self._thread_url(touch),
             reply=reply, touch_revision=touch["revision"],
             held=[HeldMessage(touch_id=t["touch_id"], person_name=self.people[t["person_id"]]["name"], state=h["state"],
                               seq=h["seq"], due_on=h["due_on"]) for t, h in self.held_by(touch)],
             thread=self._thread(touch),
             bounce_reason=(_first_line(bounce["body_text"], False) or "Bounced") if bounce is not None
             else ("Bounced" if touch["state"] == "bounced" else None))
+
+    def _from(self, touch: sqlite3.Row) -> FromAccount:
+        """The touch's own account once it has one (a touch sent before touches named one is account 1's); before
+        that, the account the sender would route it to, or the sentence for what it waits for."""
+        if touch["account_id"] is not None or touch["gmail_thread_id"] or touch["first_sent_at"]:
+            data = people_queries.PeopleData(addresses=self.addresses, sender_account=self.sender_address)
+            address = people_queries.from_address(data, touch) or None
+            return FromAccount(address=address, text=address or "An account Knock no longer has.")
+        routed = accounts.route(self.conn, self.cfg, touch["touch_id"], self.accounts)
+        line = route_line(self.conn, self.cfg, touch["touch_id"], self.survivor[touch["touch_id"]], routed)
+        return FromAccount(address=line.account, text=line.account or line.text or "")
+
+    def _thread_url(self, touch: sqlite3.Row) -> str | None:
+        """The thread in the Gmail account that holds it (`authuser`); a Mail.app account's thread has no link."""
+        thread = touch["gmail_thread_id"]
+        if not thread:
+            return None
+        found = self.mailboxes.get(touch["account_id"] if touch["account_id"] is not None else 1)
+        if found is None:
+            return GMAIL_THREAD_ANY.format(thread)
+        address, kind = found
+        return GMAIL_THREAD.format(address=address, thread=thread) if kind == "gmail" else None
 
     def _thread(self, touch: sqlite3.Row) -> list[ThreadMessage]:
         """Sent emails and what came back, in time order: the company page's own `thread`."""
@@ -360,7 +391,7 @@ class _Outbox:
         data.inbound_by_touch[tid] = self.conn.execute(
             "SELECT from_addr, subject, body_text, received_at FROM inbound_message WHERE touch_id = ? "
             "ORDER BY received_at, inbound_id", (tid,)).fetchall()
-        data.sender_account = self.conn.execute("SELECT account FROM sender WHERE sender_id = 1").fetchone()["account"]
+        data.addresses, data.sender_account = self.addresses, self.sender_address
         return [ThreadMessage(**row) for row in people_queries.thread(data, touch)]
 
     def _role(self, survivor: int):

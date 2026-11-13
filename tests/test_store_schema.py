@@ -219,7 +219,12 @@ class SchemaTest(unittest.TestCase):
             "linkedin_log": {"person_id": self.person, "kind": "note", "at": NOW, "recorded_at": NOW},
             "sender": {"sender_id": 1, "paused": 1, "pause_kind": "by_you", "paused_at": NOW,
                        "updated_at": NOW},
-            "send_day": {"day": "2026-10-20", "send_limit": 5, "created_at": NOW},
+            "send_day": {"account_id": 1, "day": "2026-10-20", "send_limit": 5, "created_at": NOW},
+            "sender_account": {"account_id": 2, "address": "base2@gmail.com", "kind": "gmail", "paused": 1,
+                               "pause_kind": "hard_block", "paused_at": NOW, "next_send_at": NOW,
+                               "auth_checked_at": NOW, "created_at": NOW, "updated_at": NOW},
+            "company_sender": {"company_id": self.company, "account_id": 1, "pinned_by": "rule", "pinned_at": NOW},
+            "bounced_address": {"address": "dead@acme.co", "first_seen_at": NOW, "source": "bounce"},
             "no_go": {"company_id": self.company, "reason": "other", "source": "devanshu", "created_at": NOW,
                       "lifted_at": NOW, "lift_reason": "changed my mind"},
             "review_item": {"kind": "flagged", "company_id": self.company, "reason": "r",
@@ -338,7 +343,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 96)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193, 1 for #205, 1 for #251 (board.last_full_read_at)
+        self.assertEqual(len(columns), 103)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193, 1 for #205, 1 for #251 (board.last_full_read_at), 7 for 0015 (sender_account 5, company_sender 1, bounced_address 1)
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")

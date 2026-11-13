@@ -54,14 +54,19 @@ person at once, log the old value in `event` and raise a flagged Needs-you item;
 `refresh/`, `dashboard/`) stays in the repo for rollback only. Nothing in the old system runs, and `mail/add.py`,
 `mail/sender.py` and the old :3001 and :3002 services are not part of daily work any more.
 
-- Gmail secrets: `~/Library/Application Support/outreach-mail/`. Never print them.
+- Gmail secrets: `~/Library/Application Support/outreach-mail/`. Never print them. Account 1 keeps
+  `<secrets>/token.json`; every other Gmail account has its own `<secrets>/<address>/token.json`.
+- Several sender accounts (multi-sender plan, #9): each tick the sender reads every Gmail account that has a token and
+  sends only from accounts with `sends = true` in the sending config. An account with no sign-in makes every tick
+  partial until he signs it in with `python -m outreach.sending auth --account <address>`.
 - Store: `~/Library/Application Support/outreach/outreach.db`. It holds everything; the old files are history.
 - `live_checkout.is_live()` is true only in the live checkout, and nothing can change that. With a real Gmail
   token present, `python -m outreach.sending run` (including `--dry-run`) does nothing outside it;
   `python -m outreach.sending auth` exits outside it.
 
 **Only in the live checkout:** `python -m outreach.sending run` (with or without `--dry-run`: a dry run still reads
-Gmail) and `python -m outreach.sending auth` (writes the real token), `python -m outreach.crawl` (every command sends
+Gmail), `python -m outreach.sending auth` and `auth --account <address>` (write the real token),
+`python -m outreach.sending whoami` and `whoami --account <address>` (read the real token), `python -m outreach.crawl` (every command sends
 real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
 (it reads company pages and calls a model; `--dry-run` runs anywhere), `python -m outreach.followup_drafter run` (it
 calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.sources seed-ats` (it sends real
@@ -122,7 +127,8 @@ drafting tools (`save_draft` and `save_followup` in `outreach.mcp`, which read `
 
 Merge the PR, then in the live checkout run
 `git pull --ff-only https://github.com/DevanshuNEU/sept-23-companies.git master` (its SSH remote is unreachable
-from agent shells), `uv sync`, and the tests there (`uv run python -m unittest discover -s tests -t .`), then:
+from agent shells), `uv sync`, and the tests there (`uv run python -m unittest discover -s tests -t .`), then (with a
+migration, the schema line below gives the order instead):
 
 - Python changed in a job (`outreach/api`, `sending`, `crawl`, `sources`, `reader`): `launchctl kickstart -k
   gui/$(id -u)/com.devanshu.outreach-<job>`. The API is the only long-running one; the others start fresh each
@@ -130,7 +136,10 @@ from agent shells), `uv sync`, and the tests there (`uv run python -m unittest d
 - web changed: `cd web && pnpm install --frozen-lockfile && pnpm build`, then kickstart the API job.
 - a launchd template changed or a job was added: `uv run python -m outreach.deploy plan`, read it, then
   `uv run python -m outreach.deploy install`. `uv run python -m outreach.deploy status` shows what is loaded.
-- the schema changed: `uv run python -m outreach.install` applies the new migration, then kickstart the API.
+- the schema changed: the order is pull, `uv sync`, `uv run python -m outreach.install` (applies the new migration),
+  kickstart the API, then the tests. Until the migration is in, the live API refuses every request.
+- a new Gmail sender account: in the live checkout, `uv run python -m outreach.sending auth --account <address>`, then
+  `uv run python -m outreach.sending whoami --account <address>` to check it signed in as that address.
 - MCP tools changed: the next Claude Code session loads the new tools; the registration needs no change.
 
 Rollback is `git revert`, never a reset. Rolling back the whole switch is `python -m outreach.deploy rollback`

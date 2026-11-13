@@ -1,16 +1,19 @@
 import dataclasses
+import random
 import unittest
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from outreach.sending import accounts as _accounts
 from outreach.sending import human, queue, ramp
 from outreach.sending.config import load_config
+from outreach.sending.accounts import in_play as _in_play
 from tests import SHIPPED_SEND_CONFIG
-from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_message, seed_sent
+from tests.sendtest import MON, UTC, bounce, put_day, seed_email_person, seed_message, seed_sent, with_ramp, solo
 from tests.storetest import fresh_store, seed_company
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
-CFG = dataclasses.replace(load_config(), ramp_floor=1)
+CFG = dataclasses.replace(with_ramp(solo(load_config()), ramp_floor=1), followup_business_days=(3, 7, 14, 21))  # the 4-step order mechanism; shipped config is one follow-up (0018)
 NY = ZoneInfo("America/New_York")
 LA = ZoneInfo("America/Los_Angeles")
 MON_DAY = date(2026, 11, 2)
@@ -59,24 +62,25 @@ class Base(unittest.TestCase):
 
     def verdicts_at(self, now=MON, *, gate=None):
         """The verdicts at `now` by message id."""
-        day = ramp.open_day(self.db, now, CFG)
-        return {v.message_id: v for v in queue.verdicts(self.db, now, CFG, day=day, gate=gate)}
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), now, CFG)
+        return {v.message_id: v for v in queue.verdicts(self.db, now, CFG, _in_play(self.db, CFG), day=day, gate=gate)}
 
     def reason(self, message, now=MON, **kw) -> str:
         return self.verdicts_at(now, **kw)[message].reason
 
 
-HUMAN = load_config(SHIPPED_SEND_CONFIG)  # the shipped pacing: jittered day start and company gaps, a pick pool
+ONE = CFG.accounts[0].address  # the one account of CFG and HUMAN
+HUMAN = solo(load_config(SHIPPED_SEND_CONFIG))  # the shipped config: jittered day start and company gaps, a pick pool
 
 
 class HumanPacingTest(Base):
     def verdicts_with_human(self, now):
-        day = ramp.open_day(self.db, now, HUMAN)
-        return {v.message_id: v for v in queue.verdicts(self.db, now, HUMAN, day=day, gate=None)}
+        day = ramp.open_day(self.db, _accounts.primary(self.db, HUMAN), now, HUMAN)
+        return {v.message_id: v for v in queue.verdicts(self.db, now, HUMAN, _in_play(self.db, HUMAN), day=day, gate=None)}
 
     def test_the_first_send_of_the_day_starts_a_little_after_the_window_opens(self):
         _, message = self.approve()
-        opens = ny(2, 8, 30)
+        opens = ny(2, 8, 0)
         offset = human.day_start_offset(MON_DAY, HUMAN)
         self.assertGreater(offset, timedelta(0))
         verdict = self.verdicts_with_human(opens)[message]
@@ -107,14 +111,83 @@ class HumanPacingTest(Base):
     def test_pick_takes_the_first_ready_without_an_rng(self):
         ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(4)]
         found = list(self.verdicts_at().values())
-        self.assertEqual(queue.pick(found, queue.load_queue(self.db)).message_id, ids[0])
+        self.assertEqual(queue.pick(found, queue.load_queue(self.db), account=ONE).message_id, ids[0])
+
+    def test_pick_takes_the_earliest_window_close_first(self):
+        # Approved first, a Los Angeles recipient; second, a New York one. At 14:50 ET both are ready, and New York
+        # closes at 15:00 ET while Los Angeles closes at 18:00 ET, so the New York one goes with a pool of one.
+        _, la = self.approve(company=seed_company(self.db, "LA"), tz="America/Los_Angeles")
+        _, ny_id = self.approve(company=seed_company(self.db, "NYC"), tz="America/New_York")
+        now = ny(2, 14, 50)
+        verdicts = self.verdicts_at(now)
+        self.assertEqual({v.reason for v in verdicts.values()}, {"ready"})
+        items = queue.load_queue(self.db)
+        self.assertEqual(queue.pick(list(verdicts.values()), items, account=ONE).message_id, la)  # no order given: queue order
+        picked = queue.pick(list(verdicts.values()), items, random.Random(1), 1, now=now, cfg=CFG, account=ONE)
+        self.assertEqual(picked.message_id, ny_id)
+
+    def test_pick_draws_only_among_the_earliest_close(self):
+        # Two New York recipients and four Los Angeles ones, a pool of 5: every draw is a New York one.
+        for i in range(4):
+            self.approve(company=seed_company(self.db, f"LA{i}"), tz="America/Los_Angeles")
+        nyc = [self.approve(company=seed_company(self.db, f"NYC{i}"), tz="America/New_York")[1] for i in range(2)]
+        now = ny(2, 14, 50)
+        verdicts = list(self.verdicts_at(now).values())
+        items = queue.load_queue(self.db)
+        picked = {queue.pick(verdicts, items, random.Random(s), 5, now=now, cfg=CFG, account=ONE).message_id for s in range(80)}
+        self.assertEqual(picked, set(nyc))
 
     def test_pick_with_an_rng_varies_inside_the_pool(self):
         import random
         ids = [self.approve(company=seed_company(self.db, f"C{i}"))[1] for i in range(8)]
         found = list(self.verdicts_at().values())
-        picked = {queue.pick(found, queue.load_queue(self.db), random.Random(s), 3).message_id for s in range(60)}
+        picked = {queue.pick(found, queue.load_queue(self.db), random.Random(s), 3, account=ONE).message_id for s in range(60)}
         self.assertEqual(picked, set(ids[:3]))
+
+
+class MinutesLeftTest(Base):
+    def left(self, now=MON) -> float:
+        return queue.minutes_left(self.db, now, CFG, ONE, _in_play(self.db, CFG))
+
+    def test_only_recipients_that_can_go_today_set_the_close(self):
+        # NY-only ready mail; one LA follow-up due next week and one LA company that is paused do not move the close.
+        self.approve()
+        la = self.person(tz="America/Los_Angeles")
+        seed_sent(self.db, la, at=ny(2, 8) - timedelta(days=7))
+        seed_message(self.db, la, seq=1, due_on="2026-11-09")
+        paused = seed_company(self.db, "Paused")
+        self.db.execute("UPDATE company SET status = 'working', paused_at = '2026-11-01T12:00:00Z' "
+                        "WHERE company_id = ?", (paused,))
+        self.approve(company=paused, tz="America/Los_Angeles")
+        self.assertEqual(self.left(MON), 360.0)  # 09:00 to 15:00 in New York
+
+    def test_a_recipient_that_can_go_today_sets_the_close(self):
+        self.approve()
+        self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
+        self.assertEqual(self.left(MON), 540.0)  # to 18:00 New York, the Los Angeles close
+
+    def test_a_company_at_its_daily_limit_does_not_count(self):
+        limited = seed_company(self.db, "Limited")
+        self.sent_at(limited, ny(2, 8, 30), n=CFG.per_company_daily)
+        self.approve(company=limited, tz="America/Los_Angeles")
+        self.approve()
+        self.assertEqual(self.left(MON), 360.0)
+
+    def test_a_tokyo_recipient_closes_on_their_own_date(self):
+        # 19:00 Monday in New York is 09:00 Tuesday in Tokyo: ready, and the window closes Tuesday 15:00 Tokyo time.
+        self.approve(tz="Asia/Tokyo")
+        now = ny(2, 19)
+        self.assertEqual(self.reason(self.db.execute("SELECT message_id FROM message").fetchone()[0], now), "ready")
+        self.assertEqual(self.left(now), 360.0)
+
+    def test_pick_uses_the_recipients_own_date_for_the_close(self):
+        _, tokyo = self.approve(tz="Asia/Tokyo")
+        _, la = self.approve(tz="America/Los_Angeles")
+        now = ny(2, 19)  # Tokyo closes in 6 hours, Los Angeles (16:00 Monday there) in 2
+        verdicts = list(self.verdicts_at(now).values())
+        picked = queue.pick(verdicts, queue.load_queue(self.db), random.Random(1), 5, now=now, cfg=CFG, account=ONE)
+        self.assertEqual({v.message_id: v.reason for v in verdicts}, {tokyo: "ready", la: "window"})
+        self.assertEqual(picked.message_id, tokyo)
 
 
 class PrepareTest(Base):
@@ -125,12 +198,12 @@ class PrepareTest(Base):
         for _ in range(3):
             self.approve(company=other)
         self.sent_at(self.company, MON - timedelta(minutes=30))
-        day = ramp.open_day(self.db, MON, CFG)
-        expected = queue.verdicts(self.db, MON, CFG, day=day, gate=None)
-        p = queue.prepare(self.db, MON, CFG, day=day)
+        day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), MON, CFG)
+        expected = queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=day, gate=None)
+        p = queue.prepare(self.db, MON, CFG, _in_play(self.db, CFG), day=day)
         got = queue.decide_all(p, MON, CFG, gate=None, pending=p.queue, sends=p.sends,
-                               sent_by_day={queue.cal.ny_date(MON, CFG): p.sent_today}, next_send=p.next_send,
-                               limit=p.limit)
+                               sent_by_day={ONE: {queue.cal.ny_date(MON, CFG): p.sent_today}},
+                               next_send={ONE: p.next_send})
         self.assertEqual(got, expected)
         self.assertEqual(len(got), 6)
 
@@ -144,7 +217,7 @@ class QueueOrderTest(Base):
         order = [q.message_id for q in queue.load_queue(self.db)]
         self.assertEqual(order, [early, late, tie_a, tie_b])
         verdicts = list(self.verdicts_at().values())
-        self.assertEqual(queue.pick(verdicts, queue.load_queue(self.db)).message_id, early)
+        self.assertEqual(queue.pick(verdicts, queue.load_queue(self.db), account=ONE).message_id, early)
 
     def test_a_follow_up_sorts_by_its_due_date_not_its_approval(self):
         _, followup = self.approve_followup("2026-11-06")
@@ -174,8 +247,8 @@ class QueueOrderTest(Base):
         _, first = self.approve(company=paused, approved_at="2026-11-02T10:00:00Z")
         _, second = self.approve(approved_at="2026-11-02T11:00:00Z")
         items = queue.load_queue(self.db)
-        self.assertEqual(queue.pick(list(self.verdicts_at().values()), items).message_id, second)
-        self.assertIsNone(queue.pick([v for v in self.verdicts_at().values() if v.message_id == first], items))
+        self.assertEqual(queue.pick(list(self.verdicts_at().values()), items, account=ONE).message_id, second)
+        self.assertIsNone(queue.pick([v for v in self.verdicts_at().values() if v.message_id == first], items, account=ONE))
 
 
 class LimitsTest(Base):
@@ -190,7 +263,7 @@ class LimitsTest(Base):
         self.sent_at(seed_company(self.db, "Fourth"), ny(2, 8, 30))
         verdict = self.verdicts_at()[message]
         self.assertEqual(verdict.reason, "daily_limit")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
 
     def claim(self, company, at):
         """A message claimed at `at` that may or may not have gone out."""
@@ -248,7 +321,7 @@ class LimitsTest(Base):
             self.sent_at(self.company, ny(2, hour))
         verdict = self.verdicts_at()[message]
         self.assertEqual(verdict.reason, "per_company_limit")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
 
     def test_a_follow_up_never_waits_for_the_company_limit(self):
         # #9, 2026-10-31: the per-company limit counts first emails only.
@@ -318,7 +391,7 @@ class RecruiterTest(Base):
         verdicts = self.verdicts_at()
         self.assertEqual(verdicts[recruiter].reason, "recruiter_waits")
         self.assertEqual(verdicts[engineer].reason, "ready")
-        self.assertEqual(queue.pick(list(verdicts.values()), queue.load_queue(self.db)).message_id, engineer)
+        self.assertEqual(queue.pick(list(verdicts.values()), queue.load_queue(self.db), account=ONE).message_id, engineer)
 
     def test_recruiter_alone_is_ready(self):
         _, recruiter = self.approve(role="recruiter")
@@ -365,12 +438,12 @@ class TimingTest(Base):
         _, message = self.approve_followup("2026-11-03")
         verdict = self.verdicts_at(ny(2, 16))[message]
         self.assertEqual(verdict.reason, "followup_not_due")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
-        self.assertEqual(self.reason(message, ny(3, 8, 30)), "ready")
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
+        self.assertEqual(self.reason(message, ny(3, 8, 0)), "ready")
 
     def test_follow_up_due_on_a_weekend_waits_for_monday(self):
         _, message = self.approve_followup("2026-11-07")
-        self.assertEqual(self.verdicts_at(ny(6, 12))[message].earliest_at, ny(9, 8, 30))
+        self.assertEqual(self.verdicts_at(ny(6, 12))[message].earliest_at, ny(9, 8, 0))
 
     def test_window_is_per_recipient(self):
         now = ny(2, 16, 45)
@@ -378,20 +451,20 @@ class TimingTest(Base):
         _, west = self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
         verdicts = self.verdicts_at(now)
         self.assertEqual(verdicts[east].reason, "window")
-        self.assertEqual(verdicts[east].earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdicts[east].earliest_at, ny(3, 8, 0))
         self.assertEqual(verdicts[west].reason, "ready")
         self.assertEqual(now.astimezone(LA).hour, 13)
 
     def test_before_the_window_opens_the_earliest_time_is_today(self):
         _, message = self.approve()
         verdict = self.verdicts_at(ny(2, 7, 0))[message]
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 8, 0)))
 
     def test_weekend_is_not_a_business_day(self):
         _, message = self.approve()
         verdict = self.verdicts_at(ny(7, 10))[message]
         self.assertEqual(verdict.reason, "not_business_day")
-        self.assertEqual(verdict.earliest_at, ny(9, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(9, 8, 0))
 
     def test_bad_timezone_waits_and_says_so(self):
         _, message = self.approve(tz="Mars/Olympus")
@@ -400,7 +473,7 @@ class TimingTest(Base):
 
     def test_spacing_uses_next_send_at(self):
         _, message = self.approve()
-        self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(MON + timedelta(minutes=5)),))
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(MON + timedelta(minutes=5)),))
         verdict = self.verdicts_at()[message]
         self.assertEqual((verdict.reason, verdict.earliest_at), ("spacing", MON + timedelta(minutes=5)))
         self.assertEqual(self.reason(message, MON + timedelta(minutes=5)), "ready")
@@ -563,7 +636,7 @@ class NoAddressTest(Base):
         verdict = self.verdicts_at()[message]
         self.assertEqual((verdict.reason, verdict.earliest_at), ("no_address", None))
         self.assertEqual(queue.REASON_TEXT["no_address"], "No email address for this person.")
-        self.assertIsNone(queue.pick(list(self.verdicts_at().values()), queue.load_queue(self.db)))
+        self.assertIsNone(queue.pick(list(self.verdicts_at().values()), queue.load_queue(self.db), account=ONE))
 
     def test_no_address_waits_even_with_nothing_else_in_the_way(self):
         person, message = self.approve(tz="Asia/Tokyo")
@@ -597,12 +670,12 @@ class WindowEdgeTest(Base):
         _, message = self.approve(tz="Asia/Tokyo")
         verdict = self.verdicts_at(now)[message]
         self.assertEqual(verdict.reason, "window")
-        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 9, 8, 30, tzinfo=ZoneInfo("Asia/Tokyo")))
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 9, 8, 0, tzinfo=ZoneInfo("Asia/Tokyo")))
 
-    def test_16_30_exactly_is_inside_the_window_and_16_31_is_not(self):
+    def test_15_00_exactly_is_inside_the_window_and_15_01_is_not(self):
         _, message = self.approve()
-        self.assertEqual(self.reason(message, ny(2, 16, 30)), "ready")
-        self.assertEqual(self.reason(message, ny(2, 16, 31)), "window")
+        self.assertEqual(self.reason(message, ny(2, 15, 0)), "ready")
+        self.assertEqual(self.reason(message, ny(2, 15, 1)), "window")
 
 
 class ReasonsTest(Base):
@@ -637,7 +710,7 @@ class ReasonsTest(Base):
         self.approve(company=seed_company(self.db, "Fine"), tz="America/Los_Angeles")
         nobody, _ = self.approve(company=seed_company(self.db, "Nobody"))
         self.db.execute("UPDATE person SET email = NULL, added_by = 'import' WHERE person_id = ?", (nobody,))
-        self.db.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (stamp(MON + timedelta(minutes=3)),))
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(MON + timedelta(minutes=3)),))
         seen = set()
         for now in (MON, ny(2, 16, 45), ny(7, 10)):
             for verdict in self.verdicts_at(now).values():
@@ -730,7 +803,7 @@ class FollowupOrderTest(Base):
         second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
         verdict = self.verdicts_at()[second]
         self.assertEqual(verdict.reason, "followup_not_due")
-        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 30, tzinfo=ZoneInfo("America/New_York")))
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 0, tzinfo=ZoneInfo("America/New_York")))
         self.assertEqual(self.reason(second, now=datetime(2026, 11, 5, 9, 0, tzinfo=ZoneInfo("America/New_York"))),
                          "ready")
 
@@ -739,3 +812,346 @@ class FollowupOrderTest(Base):
         self.assertNotIn("earlier_followup", queue.TIME_REASONS)
         self.assertEqual(queue.REASON_TEXT["earlier_followup"],
                          "An earlier follow-up in this thread has not gone out yet. This one goes after it.")
+
+
+GMAIL = "devanshurajesh@gmail.com"
+GENERAL = "devanshuchi9@gmail.com"
+SPONSOR = "chicholikar.d@northeastern.edu"
+
+
+def lanes_cfg(*, sponsor_sends: bool = True, **changes):
+    """The scratch config with the shipped accounts at 15 a day: account 1 rests, the general Gmail sends and, unless
+    `sponsor_sends` is False, the sponsor account sends too."""
+    cfg = with_ramp(load_config(), ramp_start=15, ramp_step=3, ramp_floor=15, ramp_ceiling=40)
+    accts = tuple(dataclasses.replace(a, sends=sponsor_sends) if a.address == SPONSOR else a for a in cfg.accounts)
+    return dataclasses.replace(cfg, accounts=accts, **changes)
+
+
+def add_fact(conn, company_id, fact, value):
+    conn.execute("INSERT INTO evidence(company_id, fact, value, confidence, source_kind, observed_on, recorded_at) "
+                 "VALUES (?, ?, ?, 'estimate', 'linkedin', '2026-11-01', '2026-11-01T12:00:00Z')",
+                 (company_id, fact, value))
+
+
+class AccountsQueueTest(Base):
+    """The queue with every account in play (`accounts` given): each message gets the account `accounts.route`
+    picks, and the daily limit, spacing, pause and sign-in are that account's."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = lanes_cfg()
+        self.rows = _accounts.sync(self.db, self.cfg, "2026-11-02T12:00:00Z")
+        self.ids = {a: r.account_id for a, r in self.rows.items()}
+        self.sponsor_co = seed_company(self.db, "Sponsor Co")
+        add_fact(self.db, self.sponsor_co, "everify", "enrolled")
+
+    def found(self, now=MON, cfg=None, rows=None):
+        cfg = cfg or self.cfg
+        return {v.message_id: v for v in queue.verdicts(self.db, now, cfg, rows or self.rows, day=None, gate=None)}
+
+    def sent_by(self, address, company, at, n=1):
+        for _ in range(n):
+            seed_sent(self.db, self.person(company=company), at=at, account_id=self.ids[address])
+
+    def test_each_message_gets_its_account(self):
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        # A follow-up stays on the account that sent its first email, whatever its company's lane.
+        thread = self.person(company=self.sponsor_co)
+        seed_sent(self.db, thread, at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GENERAL])
+        followup = seed_message(self.db, thread, seq=1, due_on="2026-11-02")
+        found = self.found()
+        self.assertEqual({m: found[m].account for m in (general, sponsor, followup)},
+                         {general: GENERAL, sponsor: SPONSOR, followup: GENERAL})
+
+    def test_daily_limit_per_account(self):
+        # The general account has sent its 15 today; the sponsor account has sent none.
+        for i in range(15):
+            self.sent_by(GENERAL, seed_company(self.db, f"Sent{i}"), ny(2, 8, 10))
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        found = self.found()
+        self.assertEqual((found[general].reason, found[general].earliest_at), ("daily_limit", ny(3, 8, 0)))
+        self.assertEqual(found[sponsor].reason, "ready")
+        items, verdicts = queue.load_queue(self.db, self.cfg), list(found.values())
+        self.assertIsNone(queue.pick(verdicts, items, now=MON, cfg=self.cfg, account=GENERAL))
+        self.assertEqual(queue.pick(verdicts, items, now=MON, cfg=self.cfg, account=SPONSOR).message_id, sponsor)
+
+    def test_a_claim_in_doubt_counts_only_against_its_own_account(self):
+        for i in range(14):
+            self.sent_by(GENERAL, seed_company(self.db, f"Sent{i}"), ny(2, 8, 10))
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        self.assertEqual(self.found()[general].reason, "ready")
+        person = self.person(company=seed_company(self.db, "InFlight"))
+        claimed = seed_message(self.db, person)
+        self.db.execute("UPDATE touch SET account_id = ? WHERE person_id = ?", (self.ids[GENERAL], person))
+        self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = '<x@y.z>', claimed_at = ? "
+                        "WHERE message_id = ?", (stamp(ny(2, 8, 45)), claimed))
+        found = self.found()
+        self.assertEqual((found[general].reason, found[sponsor].reason), ("daily_limit", "ready"))
+
+    def test_sponsor_waits_when_edu_not_sending(self):
+        cfg = lanes_cfg(sponsor_sends=False)
+        rows = _accounts.sync(self.db, cfg, "2026-11-02T12:00:00Z")
+        _, sponsor = self.approve(company=self.sponsor_co)
+        _, general = self.approve()
+        closed = seed_company(self.db, "Closed Sponsor")
+        add_fact(self.db, closed, "everify", "enrolled")
+        _, stopped = self.approve(company=closed)
+        self.db.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                        (closed,))
+        found = self.found(cfg=cfg, rows=rows)
+        self.assertEqual((found[sponsor].reason, found[sponsor].account, found[sponsor].earliest_at),
+                         ("lane_waits", None, None))
+        self.assertEqual(found[sponsor].text, f"Waits for {SPONSOR}, which does not send yet.")
+        self.assertEqual(found[general].reason, "ready")
+        self.assertEqual(found[stopped].reason, "company_closed")  # a stop still says stopped
+        self.assertIn("lane_waits", queue.REASONS)
+        self.assertNotIn("lane_waits", queue.TIME_REASONS | set(queue.STOP_REASONS))
+        self.assertIsNone(queue.pick(list(found.values()), queue.load_queue(self.db, cfg), account=SPONSOR))
+
+    def test_a_thread_on_an_account_that_is_not_sending_waits_and_names_it(self):
+        # Account 1 rests: a follow-up in one of its threads cannot move to another account.
+        resting = self.person()
+        seed_sent(self.db, resting, at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GMAIL])
+        on_resting = seed_message(self.db, resting, seq=1, due_on="2026-11-02")
+        # A thread whose account is not in play at all.
+        gone = self.person(company=seed_company(self.db, "Gone"))
+        seed_sent(self.db, gone, at=ny(2, 8) - timedelta(days=7), account_id=self.ids[SPONSOR])
+        on_gone = seed_message(self.db, gone, seq=1, due_on="2026-11-02")
+        rows = {a: r for a, r in self.rows.items() if a != SPONSOR}
+        found = self.found(rows=rows)
+        self.assertEqual((found[on_resting].reason, found[on_resting].account), ("lane_waits", None))
+        self.assertEqual(found[on_resting].text, f"Waits: its thread is on {GMAIL}, which only reads now.")
+        self.assertEqual((found[on_gone].reason, found[on_gone].account), ("lane_waits", None))
+        self.assertEqual(found[on_gone].text, f"Waits: its thread is on {SPONSOR}, which is not set up to send now.")
+
+    def test_a_thread_with_no_account_is_account_1s(self):
+        # A first email sent before touches carried an account (NULL) went from account 1: its follow-up stays
+        # there and does not move to the general account by lane or pin.
+        person = self.person()
+        seed_sent(self.db, person, at=ny(2, 8) - timedelta(days=7))
+        followup = seed_message(self.db, person, seq=1, due_on="2026-11-02")
+        _accounts.pin(self.db, self.company, self.ids[GENERAL], "rule", "2026-11-02T12:00:00Z")
+        touch = self.touch_of(person)
+        row, why = _accounts.route(self.db, self.cfg, touch, self.rows)
+        self.assertEqual((row.account_id, why), (self.ids[GMAIL], "thread"))
+        verdict = self.found()[followup]
+        self.assertEqual((verdict.reason, verdict.account), ("lane_waits", None))
+        self.assertEqual(verdict.text, f"Waits: its thread is on {GMAIL}, which only reads now.")
+
+    def test_company_band_counts_every_account(self):
+        cfg = lanes_cfg(per_company_daily=2)
+        _, queued = self.approve()  # a general company in the 2 a day band
+        self.sent_by(GENERAL, self.company, ny(2, 8, 5))  # one first email today
+        now = ny(2, 11)
+        self.assertEqual(self.found(now, cfg=cfg)[queued].reason, "ready")  # one more may go
+        self.sent_by(GENERAL, self.company, ny(2, 9, 30))
+        verdict = self.found(now, cfg=cfg)[queued]
+        self.assertEqual((verdict.reason, verdict.account), ("per_company_limit", GENERAL))  # not two
+
+    def test_first_emails_from_two_accounts_never_on_one_day(self):
+        # The moment the pin moves from the resting account: it sent a first email to the company today, so the
+        # general account's first email there waits for the next business day, though the band has room.
+        cfg = lanes_cfg(per_company_daily=2)
+        _, queued = self.approve()
+        self.sent_by(GMAIL, self.company, ny(2, 8, 5))
+        verdict = self.found(ny(2, 11), cfg=cfg)[queued]
+        self.assertEqual((verdict.reason, verdict.earliest_at, verdict.account),
+                         ("per_company_limit", ny(3, 8, 0), GENERAL))
+        self.assertEqual(self.found(ny(3, 9), cfg=cfg)[queued].reason, "ready")  # a new day
+        # A follow-up never waits for it: it goes from its own thread's account.
+        thread = self.person()
+        seed_sent(self.db, thread, at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GENERAL])
+        followup = seed_message(self.db, thread, seq=1, due_on="2026-11-02")
+        self.assertEqual(self.found(ny(2, 11), cfg=cfg)[followup].reason, "ready")
+
+    def test_a_first_email_in_doubt_or_at_a_merged_company_counts_for_its_account(self):
+        cfg = lanes_cfg(per_company_daily=3)
+        survivor, duplicate = seed_company(self.db, "Survivor"), seed_company(self.db, "Duplicate")
+        self.merge(duplicate, survivor)
+        _, queued = self.approve(company=survivor)
+        # A first email to the duplicate, claimed today from the resting account and not settled yet.
+        person = self.person(company=duplicate)
+        claimed = seed_message(self.db, person)
+        self.db.execute("UPDATE touch SET account_id = ? WHERE person_id = ?", (self.ids[GMAIL], person))
+        self.db.execute("UPDATE message SET state = 'sending', pending_rfc_id = '<x@y.z>', claimed_at = ? "
+                        "WHERE message_id = ?", (stamp(ny(2, 8, 5)), claimed))
+        self.db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (claimed,))
+        self.assertEqual(self.found(ny(2, 11), cfg=cfg)[queued].reason, "per_company_limit")
+
+    def test_window_0800_1500_recipient_time(self):
+        _, la = self.approve(tz="America/Los_Angeles")
+        pt = ZoneInfo("America/Los_Angeles")
+        self.assertEqual(self.found(datetime(2026, 11, 2, 7, 59, tzinfo=pt))[la].reason, "window")
+        self.assertEqual(self.found(datetime(2026, 11, 2, 8, 0, tzinfo=pt))[la].reason, "ready")
+        self.assertEqual(self.found(datetime(2026, 11, 2, 15, 1, tzinfo=pt))[la].reason, "window")
+
+    def test_holiday_2026_11_26_waits(self):
+        cfg = lanes_cfg(holidays=load_config(SHIPPED_SEND_CONFIG).holidays)
+        self.assertIn(date(2026, 11, 26), cfg.holidays)
+        _, general = self.approve()
+        verdict = self.found(ny(26, 10), cfg=cfg)[general]
+        self.assertEqual(verdict.reason, "not_business_day")
+        self.assertEqual(verdict.earliest_at, ny(30, 8, 0))  # the 27th is a holiday too
+
+    def unread(self, *addresses, now=MON):
+        """The verdicts while the reads of these accounts are incomplete or failed."""
+        held = frozenset(self.ids[a] for a in addresses)
+        return {v.message_id: v for v in queue.verdicts(self.db, now, self.cfg, self.rows, day=None, gate=None,
+                                                        unread=held)}
+
+    def test_failed_read_on_account_1_holds_only_its_companies(self):
+        # Company A was emailed from account 1; its new first email goes from the general account.
+        seed_sent(self.db, self.person(), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GMAIL])
+        _, at_a = self.approve()
+        # Company B has nothing on account 1 (its own queued touch has no account yet).
+        b = seed_company(self.db, "B")
+        _, at_b = self.approve(company=b)
+        # Company C has a touch sent before touches carried an account: its thread is account 1's.
+        c = seed_company(self.db, "C")
+        seed_sent(self.db, self.person(company=c), at=ny(2, 8) - timedelta(days=7))
+        _, at_c = self.approve(company=c)
+        # Company E's duplicate D was emailed from account 1: the family counts.
+        d, e = seed_company(self.db, "D"), seed_company(self.db, "E")
+        seed_sent(self.db, self.person(company=d), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GMAIL])
+        self.merge(d, e)
+        _, at_e = self.approve(company=e)
+        # Company F was emailed only from the general account.
+        f = seed_company(self.db, "F")
+        seed_sent(self.db, self.person(company=f), at=ny(2, 8) - timedelta(days=7), account_id=self.ids[GENERAL])
+        _, at_f = self.approve(company=f)
+        clear = self.found()
+        self.assertEqual({m: clear[m].reason for m in (at_a, at_b, at_c, at_e, at_f)},
+                         dict.fromkeys((at_a, at_b, at_c, at_e, at_f), "ready"))
+        found = self.unread(GMAIL)
+        for held in (at_a, at_c, at_e):
+            self.assertEqual((found[held].reason, found[held].account, found[held].earliest_at),
+                             ("inbound_unread", GENERAL, None), held)
+            self.assertEqual(found[held].text, f"Waits: replies on {GMAIL} could not be read yet.")
+        self.assertEqual((found[at_b].reason, found[at_f].reason), ("ready", "ready"))
+        self.assertEqual(queue.pick(list(found.values()), queue.load_queue(self.db, self.cfg), now=MON,
+                                    cfg=self.cfg, account=GENERAL).message_id, at_b)
+
+    def test_an_unread_account_holds_its_own_messages(self):
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        found = self.unread(GENERAL)
+        self.assertEqual((found[general].reason, found[general].account), ("inbound_unread", GENERAL))
+        self.assertEqual(found[general].text, f"Waits: replies on {GENERAL} could not be read yet.")
+        self.assertEqual(found[sponsor].reason, "ready")
+        self.assertIsNone(queue.pick(list(found.values()), queue.load_queue(self.db, self.cfg), account=GENERAL))
+        # A stop still says stopped.
+        self.db.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                        (self.sponsor_co,))
+        self.assertEqual(self.unread(GENERAL, SPONSOR)[sponsor].reason, "company_closed")
+        self.assertIn("inbound_unread", queue.REASONS)
+        self.assertNotIn("inbound_unread", queue.TIME_REASONS | set(queue.STOP_REASONS))
+        self.assertTrue(queue.REASON_TEXT["inbound_unread"])
+
+    def test_every_caller_names_the_accounts_and_the_picking_account(self):
+        # There is no one-account path any more: the accounts in play and the account that picks are required.
+        self.approve()
+        with self.assertRaises(TypeError):
+            queue.verdicts(self.db, MON, self.cfg, day=None, gate=None)
+        found = queue.verdicts(self.db, MON, self.cfg, self.rows, day=None, gate=None)
+        with self.assertRaises(TypeError):
+            queue.pick(found, queue.load_queue(self.db, self.cfg))
+
+    def test_spacing_per_account(self):
+        later = ny(2, 9, 30)
+        self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = ?",
+                        (stamp(later), self.ids[GENERAL]))
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        found = self.found()
+        self.assertEqual((found[general].reason, found[general].earliest_at), ("spacing", later))
+        self.assertEqual(found[sponsor].reason, "ready")
+
+    def test_the_day_start_is_seeded_by_account(self):
+        cfg = lanes_cfg(day_start_jitter_minutes=25)
+        # Account 1 keeps the offset it had before accounts; the others get their own.
+        self.assertEqual(human.day_start_offset(MON_DAY, cfg, 1), human.day_start_offset(MON_DAY, cfg))
+        days = [MON_DAY + timedelta(days=i) for i in range(10)]
+        self.assertNotEqual([human.day_start_offset(d, cfg, self.ids[GENERAL]) for d in days],
+                            [human.day_start_offset(d, cfg, self.ids[SPONSOR]) for d in days])
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        opens = ny(2, 8)
+        found = self.found(opens, cfg=cfg)
+        self.assertEqual((found[general].reason, found[general].earliest_at),
+                         ("spacing", opens + human.day_start_offset(MON_DAY, cfg, self.ids[GENERAL])))
+        self.assertEqual((found[sponsor].reason, found[sponsor].earliest_at),
+                         ("spacing", opens + human.day_start_offset(MON_DAY, cfg, self.ids[SPONSOR])))
+
+    def test_an_account_pause_or_sign_out_holds_only_that_account(self):
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        _accounts.hard_pause(self.db, self.ids[GENERAL], "Gmail said no", "2026-11-02T13:00:00Z")
+        found = self.found()
+        self.assertEqual((found[general].reason, found[sponsor].reason), ("sender_paused", "ready"))
+        self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?",
+                        (self.ids[SPONSOR],))
+        self.assertEqual(self.found()[sponsor].reason, "signed_out")
+
+    def test_a_signed_out_wait_names_its_account(self):
+        # One account signed out while another is fine: the row says which account, not that Gmail is signed out.
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?",
+                        (self.ids[GENERAL],))
+        found = self.found()
+        self.assertEqual((found[general].reason, found[general].text),
+                         ("signed_out", f"Waits: {GENERAL} is not signed in."))
+        self.assertEqual((found[sponsor].reason, found[sponsor].text), ("ready", None))
+        # The tick's own sign-in (gate_accounts) names it the same way.
+        self.db.execute("UPDATE sender_account SET auth_state = 'ok'")
+        gated = {v.message_id: v for v in queue.gate_accounts(list(self.found().values()), {SPONSOR: "signed_out"})}
+        self.assertEqual((gated[sponsor].reason, gated[sponsor].text),
+                         ("signed_out", f"Waits: {SPONSOR} is not signed in."))
+        self.assertEqual((gated[general].reason, gated[general].text), ("ready", None))
+
+    def test_his_pause_holds_every_account_and_a_stop_still_says_stopped(self):
+        _, general = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)
+        closed = seed_company(self.db, "Closed")
+        _, stopped = self.approve(company=closed)
+        self.db.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
+                        (closed,))
+        self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'by you', "
+                        "paused_at = '2026-11-02T13:00:00Z' WHERE sender_id = 1")
+        found = self.found()
+        self.assertEqual({m: found[m].reason for m in (general, sponsor, stopped)},
+                         {general: "sender_paused", sponsor: "sender_paused", stopped: "company_closed"})
+
+    def test_minutes_left_counts_only_the_accounts_own_recipients(self):
+        self.approve()  # New York, general account
+        self.approve(company=self.sponsor_co, tz="America/Los_Angeles")
+        self.assertEqual(queue.minutes_left(self.db, MON, self.cfg, GENERAL, self.rows), 360.0)  # to 15:00 NY
+        self.assertEqual(queue.minutes_left(self.db, MON, self.cfg, SPONSOR, self.rows), 540.0)  # to 18:00 NY
+        found = queue.verdicts(self.db, MON, self.cfg, self.rows, day=None, gate=None)
+        items = queue.load_queue(self.db, self.cfg)
+        self.assertEqual(queue.minutes_left_for(found, items, MON, self.cfg, account=GENERAL), 360.0)
+
+    def test_window_minutes_gives_minutes_left_and_the_full_day_per_account(self):
+        # The full day runs from the earliest window open (08:00 local) to the latest close among the account's
+        # recipients that can go today, in absolute time.
+        self.approve()  # New York, general account
+        self.approve(company=self.sponsor_co, tz="America/Los_Angeles")
+        self.assertEqual(queue.window_minutes(self.db, MON, self.cfg, GENERAL, self.rows), (360.0, 420.0))
+        # Los Angeles only: 11:00 to 18:00 New York is a 420 minute day, not 600.
+        self.assertEqual(queue.window_minutes(self.db, MON, self.cfg, SPONSOR, self.rows), (540.0, 420.0))
+        found = queue.verdicts(self.db, MON, self.cfg, self.rows, day=None, gate=None)
+        items = queue.load_queue(self.db, self.cfg)
+        self.assertEqual(queue.day_minutes_for(found, items, MON, self.cfg, account=SPONSOR), 420.0)
+        # Both zones in one count: 08:00 New York to 18:00 New York.
+        self.assertEqual(queue.day_minutes_for(found, items, MON, self.cfg), 600.0)
+        self.assertEqual(queue.day_minutes_for([], [], MON, self.cfg), 420.0)
+
+    def test_first_only_keeps_the_account(self):
+        _, general = self.approve()
+        _, other = self.approve(company=seed_company(self.db, "Other"))
+        found = {v.message_id: v for v in queue.first_only(list(self.found().values()))}
+        self.assertEqual((found[general].reason, found[other].reason), ("ready", "message_id_unproven"))
+        self.assertEqual((found[general].account, found[other].account), (GENERAL, GENERAL))

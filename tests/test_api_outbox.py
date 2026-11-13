@@ -13,11 +13,22 @@ from outreach.sending.queue import REASONS
 from outreach.store.writes import append_event
 from tests import apiseed as seed
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import prove
 
+REST, GENERAL, NEU = "devanshurajesh@gmail.com", "devanshuchi9@gmail.com", "chicholikar.d@northeastern.edu"
 GROUPS = ("replied", "review", "approved", "sending", "checking", "sent", "paused", "closed")
 
 
 class OutboxBase(ApiCase):
+    """The shipped shape: account 1 (devanshurajesh) rests, account 2 (devanshuchi9) sends the general lane, the
+    Northeastern account does not send yet."""
+
+    def setUp(self):
+        super().setUp()
+        from outreach.sending import accounts
+        from outreach.sending.config import load_config
+        self.ids = {a: row.account_id for a, row in accounts.sync(self.conn, load_config(), NOW).items()}
+
     def outbox(self) -> dict:
         res = self.get("/api/outbox")
         self.assertEqual(res.status_code, 200, res.text)
@@ -29,8 +40,12 @@ class OutboxBase(ApiCase):
         return res.json()
 
     def prove(self):
-        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
-                     at="2026-11-01T12:00:00Z", idempotency_key="proof")
+        """Account 2's marker proof: an old email of its own, at a company of its own (`Proof Co`), which the lists
+        below leave out (`mine`)."""
+        prove(self.conn, self.ids[GENERAL])
+
+    def mine(self, items: list[dict]) -> list[dict]:
+        return [i for i in items if not i["company"]["name"].startswith("Proof Co")]
 
     def thread(self, company: int, name: str, *, tz: str = "America/New_York", **touch) -> int:
         pid = seed.person(self.conn, company, name)
@@ -39,7 +54,8 @@ class OutboxBase(ApiCase):
 
     def claimed(self, touch_id: int, state: str) -> int:
         """A claimed message: `sending`, or `send_unknown` through `sending` (the store allows no shortcut, and only
-        one message is `sending` at a time)."""
+        one message is `sending` at a time). A claim names the account it goes from (the general lane's)."""
+        self.conn.execute("UPDATE touch SET account_id = ? WHERE touch_id = ?", (self.ids[GENERAL], touch_id))
         mid = seed.message(self.conn, touch_id, 0, "approved")
         self.conn.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ? "
                           "WHERE message_id = ?", (f"<pending{mid}@x>", "2026-11-10T15:00:00Z", mid))
@@ -158,7 +174,7 @@ class ViewTest(OutboxBase):
         self.conn.execute("UPDATE message SET approved_at = '2026-11-01T09:00:00Z' WHERE message_id = ?",
                           (seed.message(self.conn, now, 0, "approved"),))
 
-        items = sorted(self.outbox()["items"], key=lambda i: i["sortKey"])
+        items = self.mine(sorted(self.outbox()["items"], key=lambda i: i["sortKey"]))
         self.assertEqual([i["touchId"] for i in items], [new_reply, old_reply, new_draft, old_draft, now, later])
         ready, waiting = items[4]["schedule"], items[5]["schedule"]
         self.assertEqual((ready["reason"], ready["earliestAt"]), ("ready", NOW))
@@ -305,24 +321,24 @@ class ProjectionTest(OutboxBase):
                          ["2026-11-10", "2026-11-10", "2026-11-10", "2026-11-11"])
         self.assertEqual(rows[ts[0]]["schedule"]["projectedAt"], NOW)
         self.assertEqual([rows[t]["schedule"]["projectedClock"] for t in (ts[0], ts[3])],
-                         ["about 10:15 ET", "about 8:30 ET"])
+                         ["about 10:15 ET", "about 8:00 ET"])
         self.assertEqual([rows[t]["schedule"]["text"] for t in (ts[0], ts[3])],
-                         ["Sends about 10:15 ET", "Sends tomorrow about 8:30 ET"])
-        self.assertEqual(rows[ts[3]]["summary"], "Sends tomorrow about 8:30 ET")
+                         ["Sends about 10:15 ET", "Sends tomorrow about 8:00 ET"])
+        self.assertEqual(rows[ts[3]]["summary"], "Sends tomorrow about 8:00 ET")
         self.assertEqual(rows[ts[3]]["at"], rows[ts[3]]["schedule"]["projectedAt"])
 
     def test_a_later_day_reads_as_a_date(self):
         self.prove()
         cid = seed.company(self.conn, "Acme", status="working")
         ts = self.approved(cid, *[f"P{i}" for i in range(7)])
-        self.assertEqual(self.by_touch(self.outbox())[ts[6]]["schedule"]["text"], "Sends Thu Nov 12, about 8:30 ET")
+        self.assertEqual(self.by_touch(self.outbox())[ts[6]]["schedule"]["text"], "Sends Thu Nov 12, about 8:00 ET")
 
     def test_approved_rows_sort_by_projected_time(self):
         self.prove()
         busy, quiet = (seed.company(self.conn, n, status="working") for n in ("Busy", "Quiet"))
         ts = self.approved(busy, "A One", "B Two", "C Three", "D Four")
         [other] = self.approved(quiet, "Q One")
-        order = [i["touchId"] for i in sorted(self.outbox()["items"], key=lambda i: i["sortKey"])]
+        order = [i["touchId"] for i in self.mine(sorted(self.outbox()["items"], key=lambda i: i["sortKey"]))]
         self.assertEqual(order, [ts[0], other, ts[1], ts[2], ts[3]])
 
     def test_a_paused_sender_still_projects_and_says_so(self):
@@ -367,9 +383,56 @@ class DetailTest(OutboxBase):
         self.assertEqual(d["reply"]["kind"], "interested")
         self.assertEqual(d["firstSentAt"], "2026-11-02T15:00:00Z")
         thread_id = self.conn.execute("SELECT gmail_thread_id FROM touch WHERE touch_id = ?", (t,)).fetchone()[0]
-        self.assertEqual(d["gmailThreadUrl"], f"https://mail.google.com/mail/u/0/#all/{thread_id}")
+        self.assertEqual(d["gmailThreadUrl"], f"https://mail.google.com/mail/?authuser={REST}#all/{thread_id}")
         self.assertEqual(d["followups"], [{"seq": 1, "dueOn": "2026-11-12", "sentAt": "2026-11-06T15:00:00Z",
                                            "state": "sent"}])
+
+    def test_outbox_from_is_touch_account(self):
+        ids = self.ids
+        cid = seed.company(self.conn, "Acme", status="working")
+        old = self.thread(cid, "Olga Old")  # sent by the old sender before touches named an account: account 1's
+        seed.send_first(self.conn, old, at="2026-11-02T15:00:00Z")
+        new = self.thread(cid, "Nia New", account_id=ids[GENERAL])
+        seed.send_first(self.conn, new, at="2026-11-03T15:00:00Z")
+        fresh = self.thread(seed.company(self.conn, "Fresh Co", status="working"), "Fay Fresh")
+        seed.message(self.conn, fresh, 0, "drafted")
+        sponsor = seed.company(self.conn, "Sponsor Co", status="working")
+        seed.evidence(self.conn, sponsor, "sponsorship", "yes")
+        waits = self.thread(sponsor, "Sam Sponsor")
+        seed.message(self.conn, waits, 0, "drafted")
+        d = self.detail(old)
+        self.assertEqual(d["fromAccount"], {"address": REST, "text": REST})
+        self.assertEqual([m["from"] for m in d["thread"]], [REST])
+        d = self.detail(new)
+        self.assertEqual(d["fromAccount"], {"address": GENERAL, "text": GENERAL})
+        self.assertEqual([m["from"] for m in d["thread"]], [GENERAL])
+        self.assertEqual(self.detail(fresh)["fromAccount"], {"address": GENERAL, "text": GENERAL})
+        self.assertEqual(self.detail(waits)["fromAccount"],
+                         {"address": None, "text": f"Waits for {NEU}, which does not send yet."})
+        # The company page's thread reads the same account.
+        person = self.conn.execute("SELECT person_id FROM touch WHERE touch_id = ?", (new,)).fetchone()[0]
+        page = self.get(f"/api/companies/{cid}").json()
+        [touch] = [t for t in page["touches"] if t["person"]["id"] == person]
+        self.assertEqual([m["from"] for m in touch["messages"] if m["direction"] == "out"], [GENERAL])
+
+    def test_thread_link_names_account(self):
+        ids = self.ids
+        cid = seed.company(self.conn, "Acme", status="working")
+        old = self.thread(cid, "Olga Old")
+        seed.send_first(self.conn, old)
+        new = self.thread(cid, "Nia New", account_id=ids[GENERAL])
+        seed.send_first(self.conn, new)
+        neu = self.thread(cid, "Ned Neu", account_id=ids[NEU])
+        seed.send_first(self.conn, neu)
+
+        def thread_of(t):
+            return self.conn.execute("SELECT gmail_thread_id FROM touch WHERE touch_id = ?", (t,)).fetchone()[0]
+
+        self.assertEqual(self.detail(old)["gmailThreadUrl"],
+                         f"https://mail.google.com/mail/?authuser={REST}#all/{thread_of(old)}")
+        self.assertEqual(self.detail(new)["gmailThreadUrl"],
+                         f"https://mail.google.com/mail/?authuser={GENERAL}#all/{thread_of(new)}")
+        self.assertIsNone(self.detail(neu)["gmailThreadUrl"], "a Mail.app thread has no Gmail link")
 
     def test_detail_hook_date_is_parsed_from_the_hook_text(self):
         cid = seed.company(self.conn, "Acme", status="working")

@@ -1342,6 +1342,38 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AccountStatus
+         * @description One sender account on the strip: its line is `address` then `text` ("4 of 15 today").
+         */
+        AccountStatus: {
+            /** Address */
+            address: string;
+            /**
+             * Authstate
+             * @enum {string}
+             */
+            authState: "unknown" | "ok" | "signed_out" | "wrong_account" | "app_closed";
+            /** Lane */
+            lane: ("sponsor" | "general") | null;
+            /** Limit */
+            limit: number;
+            /** Pausereason */
+            pauseReason: string;
+            /** Paused */
+            paused: boolean;
+            /** Sends */
+            sends: boolean;
+            /** Senttoday */
+            sentToday: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "sending" | "paused_by_you" | "paused_hard_block" | "signed_out" | "reading_only" | "not_sending_yet";
+            /** Text */
+            text: string;
+        };
+        /**
          * AddFromBenchBody
          * @description Add a bench company to today's list. `idempotencyKey` is `bench:<companyId>:add`: once it landed, the same
          *     key answers with the row and writes nothing.
@@ -2179,6 +2211,17 @@ export interface components {
             /** Reportedon */
             reportedOn: string | null;
         };
+        /**
+         * FromAccount
+         * @description The account an email goes from: the touch's own once sent; before that, the one the sender would pick, or
+         *     no address and the sentence for what it waits for.
+         */
+        FromAccount: {
+            /** Address */
+            address: string | null;
+            /** Text */
+            text: string;
+        };
         /** FunnelFrom */
         FunnelFrom: {
             /** Count */
@@ -2941,6 +2984,7 @@ export interface components {
             firstSentAt: string | null;
             /** Followups */
             followups: components["schemas"]["OutboxFollowup"][];
+            fromAccount: components["schemas"]["FromAccount"];
             /** Gmailthreadurl */
             gmailThreadUrl: string | null;
             /** Held */
@@ -3898,7 +3942,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "ready" | "sender_paused" | "signed_out" | "old_sender_running" | "message_id_unproven" | "not_business_day" | "daily_limit" | "spacing" | "window" | "bad_timezone" | "followup_not_due" | "earlier_followup" | "company_paused" | "company_held" | "per_company_limit" | "per_company_gap" | "recruiter_waits" | "no_address" | "no_thread" | "company_closed" | "no_go" | "reply_stop" | "touch_done";
+            reason: "ready" | "sender_paused" | "signed_out" | "old_sender_running" | "message_id_unproven" | "not_business_day" | "daily_limit" | "spacing" | "window" | "bad_timezone" | "followup_not_due" | "earlier_followup" | "company_paused" | "company_held" | "per_company_limit" | "per_company_gap" | "recruiter_waits" | "no_address" | "no_thread" | "lane_waits" | "inbound_unread" | "company_closed" | "no_go" | "reply_stop" | "touch_done";
             /** Text */
             text: string;
             /** Tz */
@@ -4076,6 +4120,8 @@ export interface components {
         };
         /** SendingStatus */
         SendingStatus: {
+            /** Accounts */
+            accounts: components["schemas"]["AccountStatus"][];
             /** Gmailmessage */
             gmailMessage: string | null;
             lastStepDown: components["schemas"]["SendingStepDown"] | null;

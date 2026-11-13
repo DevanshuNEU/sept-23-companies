@@ -11,16 +11,16 @@ import unittest
 from unittest import mock
 from datetime import timedelta
 
-from outreach.sending import claim, queue
+from outreach.sending import accounts, claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
 from outreach.store import transaction
 from outreach.store.writes import append_event
-from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
+from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 MS = 60_000
 
 
@@ -36,6 +36,11 @@ class Base(unittest.TestCase):
                                reconcile_after_minutes=CFG.reconcile_after_minutes)
         self.rng = random.Random(7)
         self.n = 0
+
+    @property
+    def primary(self) -> accounts.AccountRow:
+        """The one account the tick runs until the per-account loop (account 1 here)."""
+        return accounts.primary(self.db, CFG)
 
     def probe(self, name: str) -> None:
         if self.db.in_transaction:
@@ -55,7 +60,7 @@ class Base(unittest.TestCase):
     def send(self, message_id: int) -> str:
         try:
             return claim.send_one(self.db, self.gmail, self.queued(message_id), CFG, now=iso(self.clock()),
-                                  clock=self.clock, rng=self.rng, account=CFG.from_address)
+                                  clock=self.clock, rng=self.rng, account=self.primary)
         except GmailError as err:
             return err.kind
 
@@ -74,12 +79,12 @@ class Base(unittest.TestCase):
 
     def reconcile(self, found) -> dict:
         with transaction(self.db):
-            return claim.reconcile(self.db, found, now=iso(self.clock()), cfg=CFG, rng=self.rng)
+            return claim.reconcile(self.db, found, 1, now=iso(self.clock()), cfg=CFG, rng=self.rng)
 
     def scan(self) -> dict:
         return {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
                                u.rfc_id)
-                for u in claim.unclear(self.db)}
+                for u in claim.unclear(self.db, 1)}
 
 
 class FoundInSentTest(Base):
@@ -125,7 +130,7 @@ class FoundInSentTest(Base):
         self.gmail.fail_next_send(SystemExit("killed"), accepted=True)
         with self.assertRaises(SystemExit):
             claim.send_one(self.db, self.gmail, self.queued(mid), CFG, now=iso(MON), clock=self.clock,
-                           rng=self.rng, account=CFG.from_address)
+                           rng=self.rng, account=self.primary)
         self.assertEqual(self.message(mid)["state"], "sending")
         self.tick(minutes=2)
         row = self.message(mid)
@@ -209,7 +214,7 @@ class FoundInSentTest(Base):
                         "WHERE message_id = ?", (f"Re: Hello {self.n}", follow))
         self.db.execute("UPDATE message SET state = 'approved', approved_at = ?, due_on = ? WHERE message_id = ?",
                         (iso(self.clock()), iso(self.clock())[:10], follow))
-        out = claim.outgoing_for(self.db, self.queued(follow), CFG, "<follow.1@gmail.com>")
+        out = claim.outgoing_for(self.db, self.queued(follow), CFG, "<follow.1@gmail.com>", self.primary)
         self.assertEqual(out.in_reply_to, "<CAold.1@mail.gmail.com>")
         self.assertEqual(len(self.gmail.sent), 0)
 
@@ -224,7 +229,7 @@ class FoundInSentTest(Base):
             append_event(self.db, entity="message", entity_id=mid, kind="claimed", actor="sender", at=at,
                          idempotency_key=f"claimed:{rfc}", detail={"pending_rfc_id": rfc, "attempt": 1, "seq": 0})
             claim.leftover_claims(self.db, at)
-        [u] = claim.unclear(self.db)
+        [u] = claim.unclear(self.db, 1)
         self.assertFalse(u.marked)
         self.clock.advance(minutes=60)
         self.reconcile({mid: (None, True, rfc)})
@@ -325,7 +330,7 @@ class MissingFromSentTest(Base):
         self.gmail.probe = self.probe
         self.clock.advance(hours=2)  # the Mac slept between the claim and the next tick
         claim.leftover_claims(self.db, iso(self.clock()))
-        [u] = claim.unclear(self.db)
+        [u] = claim.unclear(self.db, 1)
         self.assertEqual(u.claimed_at, iso(MON))
         self.assertEqual(u.not_before_ms, int(MON.timestamp() * 1000) - 5 * MS)
         self.assertEqual(u.send_returned_ms, int(self.clock().timestamp() * 1000))
@@ -337,7 +342,7 @@ class MissingFromSentTest(Base):
 
     def test_leftover_claims_turns_every_sending_row_unknown(self):
         _, mid = self.approve()
-        self.assertTrue(claim.claim(self.db, self.queued(mid), rfc_id="<c.1@gmail.com>", now=iso(MON)))
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.primary, rfc_id="<c.1@gmail.com>", now=iso(MON)))
         self.assertEqual(claim.leftover_claims(self.db, iso(MON + timedelta(minutes=2))), 1)
         row = self.message(mid)
         self.assertEqual((row["state"], row["error"], row["pending_rfc_id"]),
@@ -470,6 +475,59 @@ class ReviewFixTest(Base):
         self.reconcile(self.scan())
         self.assertEqual(self.message(broken)["state"], "sent")
         self.assertEqual(len(self.gmail.sent), 2)
+
+
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
+class PerAccountTest(Base):
+    """A send in doubt on one account is settled only by that account's own Sent (#9 multi-sender ruling): its
+    marker is in that mailbox and nowhere else, so another account's scan would miss it and retry it."""
+
+    def setUp(self):
+        super().setUp()
+        rows = accounts.sync(self.db, MULTI, iso(MON))
+        self.one, self.two = rows["devanshurajesh@gmail.com"], rows["devanshuchi9@gmail.com"]
+        self.gmail2 = FakeGmail(clock=self.clock, probe=self.probe, account=self.two.cfg.address, id_prefix="b",
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
+
+    def in_doubt_on_two(self) -> int:
+        _, mid = self.approve(company=seed_company(self.db, "Two Co"))
+        self.gmail2.fail_next_send(TimeoutError(), accepted=True)
+        with self.assertRaises(GmailError):
+            claim.send_one(self.db, self.gmail2, self.queued(mid), MULTI, now=iso(self.clock()), clock=self.clock,
+                           rng=self.rng, account=self.two)
+        self.assertEqual(self.message(mid)["state"], "send_unknown")
+        return mid
+
+    def test_unclear_settled_only_by_own_client(self):
+        two = self.in_doubt_on_two()
+        _, one = self.approve()
+        self.gmail.fail_next_send(TimeoutError(), accepted=False)
+        self.assertEqual(self.send(one), "timeout")
+        self.assertEqual([u.message_id for u in claim.unclear(self.db, self.one.account_id)], [one])
+        self.assertEqual([u.message_id for u in claim.unclear(self.db, self.two.account_id)], [two])
+        self.clock.advance(minutes=MULTI.reconcile_after_minutes + 1)
+        # Account 1's client scans only account 1's row; a miss there settles nothing on account 2.
+        found = {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
+                                u.rfc_id) for u in claim.unclear(self.db, self.one.account_id)}
+        self.assertEqual(set(found), {one})
+        forged = {**found, two: (None, True, self.message(two)["pending_rfc_id"])}  # a scan by the wrong client
+        with transaction(self.db):
+            counts = claim.reconcile(self.db, forged, self.one.account_id, now=iso(self.clock()), cfg=MULTI,
+                                     rng=self.rng)
+        self.assertEqual(counts, {"sent": 0, "failed": 1, "waiting": 0, "errors": 0})
+        self.assertEqual(self.message(one)["state"], "failed")
+        self.assertEqual(self.message(two)["state"], "send_unknown")  # left for its own client
+        found2 = {u.message_id: (*self.gmail2.find_sent(u.rfc_id, u.not_before_ms,
+                                                         send_returned_ms=u.send_returned_ms), u.rfc_id)
+                  for u in claim.unclear(self.db, self.two.account_id)}
+        with transaction(self.db):
+            counts = claim.reconcile(self.db, found2, self.two.account_id, now=iso(self.clock()), cfg=MULTI,
+                                     rng=self.rng)
+        self.assertEqual(counts, {"sent": 1, "failed": 0, "waiting": 0, "errors": 0})
+        self.assertEqual(self.message(two)["state"], "sent")
+        self.assertEqual((len(self.gmail.sent), len(self.gmail2.sent)), (0, 1))
 
 
 if __name__ == "__main__":

@@ -13,17 +13,18 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 
 from outreach.outcomes.context import CONTEXT_KEYS
-from outreach.sending import claim, human, proof, queue
+from outreach.sending import accounts, calendar as cal, claim, human, proof, queue, ramp, signals
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import plan_followups, stop_planned
 from outreach.sending.mail import GmailError, MESSAGE_ID, Sent
 from outreach.store import transaction
 from outreach.store.writes import append_event
-from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 
 
 def parse(text: str) -> datetime:
@@ -44,6 +45,11 @@ class Base(unittest.TestCase):
                                reconcile_after_minutes=CFG.reconcile_after_minutes)
         self.rng = random.Random(7)
         self.n = 0
+
+    @property
+    def primary(self) -> accounts.AccountRow:
+        """The one account the tick runs until the per-account loop (account 1 here)."""
+        return accounts.primary(self.db, CFG)
 
     def probe(self, name: str) -> None:
         if self.db.in_transaction:
@@ -74,7 +80,7 @@ class Base(unittest.TestCase):
 
     def send(self, message_id: int, q: queue.Queued | None = None) -> str:
         return claim.send_one(self.db, self.gmail, q or self.queued(message_id), CFG, now=iso(self.clock()),
-                              clock=self.clock, rng=self.rng, account=CFG.from_address)
+                              clock=self.clock, rng=self.rng, account=self.primary)
 
     def message(self, message_id: int) -> sqlite3.Row:
         return self.db.execute("SELECT * FROM message WHERE message_id = ?", (message_id,)).fetchone()
@@ -123,7 +129,7 @@ class ClaimBeforeTheCallTest(Base):
 
     def test_claim_is_its_own_committed_transaction(self):
         _, mid = self.approve()
-        self.assertTrue(claim.claim(self.db, self.queued(mid), rfc_id="<a.1@gmail.com>", now=iso(MON)))
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.primary, rfc_id="<a.1@gmail.com>", now=iso(MON)))
         self.assertFalse(self.db.in_transaction)
         other = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(other.close)
@@ -137,7 +143,8 @@ class ClaimBeforeTheCallTest(Base):
         append_event(self.db, entity="message", entity_id=None, kind="claimed", actor="sender", at=iso(MON),
                      idempotency_key="claimed:<reused.1@gmail.com>", detail={"pending_rfc_id": "<reused.1@gmail.com>"})
         with self.assertRaises(claim.ClaimNotRecorded):
-            claim.claim(self.db, self.queued(mid), rfc_id="<reused.1@gmail.com>", now=iso(MON))
+            claim.claim(self.db, self.queued(mid), self.primary, rfc_id="<reused.1@gmail.com>",
+                        now=iso(MON))
         self.assertFalse(self.db.in_transaction)
         row = self.message(mid)
         self.assertEqual((row["state"], row["pending_rfc_id"]), ("approved", None))
@@ -147,7 +154,7 @@ class ClaimBeforeTheCallTest(Base):
     def test_claim_refuses_an_id_that_is_not_one_message_id(self):
         _, mid = self.approve()
         with self.assertRaises(ValueError):
-            claim.claim(self.db, self.queued(mid), rfc_id="not-an-id", now=iso(MON))
+            claim.claim(self.db, self.queued(mid), self.primary, rfc_id="not-an-id", now=iso(MON))
         self.assertEqual(self.message(mid)["state"], "approved")
 
 
@@ -206,25 +213,76 @@ class RecordSentTest(Base):
         self.assertEqual(self.message(mid)["state"], "sent")
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outreach_touch").fetchone()[0], 1)
 
-    def test_first_send_plans_four_follow_ups(self):
+    def test_first_send_plans_one_follow_up(self):
         person, mid = self.approve()
         self.send(mid)
         rows = self.db.execute("SELECT seq, state, due_on, saved_by, subject FROM message WHERE touch_id = ? "
                                "AND seq > 0", (self.touch(person)["touch_id"],)).fetchall()
-        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-05", "sender", ""),
-                                                    (2, "planned", "2026-11-11", "sender", ""),
-                                                    (3, "planned", "2026-11-20", "sender", ""),
-                                                    (4, "planned", "2026-12-01", "sender", "")])
+        self.assertEqual([tuple(r) for r in rows], [(1, "planned", "2026-11-11", "sender", "")])
 
-    def test_next_send_at_is_a_human_gap_later(self):
+    def test_next_send_at_is_a_spread_gap_later(self):
         _, mid = self.approve()
         self.send(mid)
-        gap = human.next_gap_minutes(random.Random(7), CFG)
+        account = self.primary
+        today = cal.ny_date(MON, CFG)
+        left = ramp.effective_limit(self.db, account, today, CFG) - signals.counted_sends_on(
+            self.db, account.account_id, today, CFG)
+        limit = ramp.effective_limit(self.db, account, today, CFG)
+        minutes_left, day_minutes = queue.window_minutes(self.db, MON, CFG, account.cfg.address,
+                                                         accounts.in_play(self.db, CFG))
+        gap = human.spread_gap(minutes_left, left, random.Random(7), CFG, day_minutes=day_minutes, limit=limit)
         expected = iso(MON + timedelta(minutes=gap))
-        got = self.db.execute("SELECT next_send_at FROM sender").fetchone()[0]
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
         self.assertEqual(got, expected)
-        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= parse(got)
-                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
+        self.assertTrue(MON + timedelta(minutes=CFG.spread_gap_minutes[0]) <= parse(got)
+                        <= MON + timedelta(minutes=max(CFG.spread_gap_minutes[1], CFG.break_minutes[1])))
+
+    def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
+        from tests import SHIPPED_SEND_CONFIG
+        from tests.sendtest import with_ramp
+        from tests.test_sending_human import MiddleRng
+        cfg = with_ramp(solo(load_config(SHIPPED_SEND_CONFIG)), ramp_start=16, ramp_floor=15)
+        done = self.person()
+        seed_sent(self.db, done, at=MON - timedelta(days=7))
+        seed_sent(self.db, done, at=MON - timedelta(minutes=20), seq=1)  # a follow-up already sent today
+        _, mid = self.approve()
+        claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(self.clock()), clock=self.clock,
+                       rng=MiddleRng(), account=accounts.primary(self.db, cfg))
+        # 16 a day, 2 sent (one follow-up): 14 left, 15 intervals; 09:00 to 15:00 New York is 360 minutes: 24. The
+        # floor, 0.75 of 420 minutes over 17 (18.5), is lower, so 24 it is.
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
+        self.assertEqual(got, iso(MON + timedelta(minutes=max(360 / 15, 0.75 * 420 / 17))))
+
+    def test_a_late_start_sends_fewer_not_faster(self):
+        from tests import SHIPPED_SEND_CONFIG
+        from tests.sendtest import with_ramp
+        from tests.test_sending_human import MiddleRng
+        cfg = with_ramp(solo(load_config(SHIPPED_SEND_CONFIG)), ramp_start=15, ramp_floor=15)
+        late = MON + timedelta(hours=5, minutes=30)  # 14:30 New York: 30 minutes left
+        clock = FakeClock(late)
+        _, mid = self.approve()
+        claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(late), clock=clock,
+                       rng=MiddleRng(), account=accounts.primary(self.db, cfg))
+        # 14 left over 30 minutes would be 2 minutes; the floor is 0.75 of 420 minutes over 15 + 1, 19.7.
+        got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
+        self.assertEqual(got, iso(late + timedelta(minutes=0.75 * 420 / 16)))
+
+    def test_a_missing_account_row_raises_and_the_record_rolls_back(self):
+        _, mid = self.approve()
+        q = self.queued(mid)
+        self.db.execute("PRAGMA foreign_keys = OFF")
+        self.db.execute("DELETE FROM sender_account")
+        with self.assertRaises(LookupError):
+            self.send(mid, q)
+
+    def test_a_touch_with_no_account_counts_as_account_one(self):
+        """A claim now sets the touch's account; a touch sent before accounts existed has none, and is account 1's."""
+        person, mid = self.approve()
+        self.send(mid)
+        touch = self.touch(person)
+        self.assertEqual(touch["account_id"], 1)
+        self.db.execute("UPDATE touch SET account_id = NULL WHERE touch_id = ?", (touch["touch_id"],))
+        self.assertEqual(claim._account_of(self.db, CFG, touch["touch_id"]).account_id, 1)
 
     def test_a_reconciled_record_never_moves_next_send_at_earlier(self):
         _, mid = self.approve()
@@ -232,10 +290,10 @@ class RecordSentTest(Base):
         with self.assertRaises(GmailError):
             self.send(mid)
         # A reconcile hit dates the send to its claim, which can be long before a gap set since.
-        self.db.execute("UPDATE sender SET next_send_at = '2026-11-02T20:00:00Z'")
+        self.db.execute("UPDATE sender_account SET next_send_at = '2026-11-02T20:00:00Z' WHERE account_id = 1")
         claim.record_sent(self.db, mid, Sent("m-x", "t-x", self.message(mid)["pending_rfc_id"]), at=iso(MON),
                           cfg=CFG, rng=self.rng, reconciled=True)
-        self.assertEqual(self.db.execute("SELECT next_send_at FROM sender").fetchone()[0], "2026-11-02T20:00:00Z")
+        self.assertEqual(self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0], "2026-11-02T20:00:00Z")
 
 
 class ContextTest(Base):
@@ -353,10 +411,10 @@ class FollowUpTest(Base):
                                   (self.touch(person)["touch_id"],)).fetchone()[0]
         self.clock.advance(days=9)
         self.approve_planned(planned, "Re: Quick question")
-        out = claim.outgoing_for(self.db, self.queued(planned), CFG, "<follow.1@gmail.com>")
+        out = claim.outgoing_for(self.db, self.queued(planned), CFG, "<follow.1@gmail.com>", self.primary)
         self.assertEqual((out.thread_id, out.in_reply_to, out.references), (first_sent.thread_id, None, ()))
-        self.assertEqual(proof.verify_marker(self.db, self.gmail, now=self.clock())["errors"], 0)  # proven: reads it
-        out = claim.outgoing_for(self.db, self.queued(planned), CFG, "<follow.1@gmail.com>")
+        self.assertEqual(proof.verify_marker(self.db, self.gmail, 1, now=self.clock())["errors"], 0)  # proven: reads it
+        out = claim.outgoing_for(self.db, self.queued(planned), CFG, "<follow.1@gmail.com>", self.primary)
         self.assertEqual((out.in_reply_to, out.references), (first_sent.rfc_message_id, (first_sent.rfc_message_id,)))
         self.assertEqual(self.touch(person)["first_rfc_id"], first_sent.rfc_message_id)
 
@@ -365,24 +423,24 @@ class FollowUpTest(Base):
         seed_sent(self.db, person, at="2026-10-01T14:00:00Z", rfc="<one@gmail.com>", thread="t-9")
         seed_sent(self.db, person, at="2026-10-12T14:00:00Z", seq=1, rfc="<two@gmail.com>")
         mid = seed_message(self.db, person, seq=2, subject="Re: Hello", due_on="2026-11-02")
-        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<three@gmail.com>")
+        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<three@gmail.com>", self.primary)
         self.assertEqual((out.thread_id, out.in_reply_to, out.references),
                          ("t-9", "<two@gmail.com>", ("<one@gmail.com>", "<two@gmail.com>")))
         self.assertEqual((out.subject, out.body, out.to, out.message_id, out.marker),
                          ("Re: Hello", "Hello there.", f"p{self.n}@acme.co", "<three@gmail.com>", "<three@gmail.com>"))
-        self.assertEqual((out.from_addr, out.from_name), (CFG.from_address, CFG.from_name))
+        self.assertEqual((out.from_addr, out.from_name), (CFG.accounts[0].address, CFG.from_name))
 
     def test_placeholder_and_malformed_ids_are_left_out_but_the_thread_is_kept(self):
         person = self.person()
         seed_sent(self.db, person, at="2026-10-01T14:00:00Z", rfc="<imported.7@outreach.invalid>", thread="t-4")
         seed_sent(self.db, person, at="2026-10-12T14:00:00Z", seq=1, rfc="no angle brackets")
         mid = seed_message(self.db, person, seq=2, subject="Re: Hello", due_on="2026-11-02")
-        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<three@gmail.com>")
+        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<three@gmail.com>", self.primary)
         self.assertEqual((out.thread_id, out.in_reply_to, out.references), ("t-4", None, ()))
 
     def test_first_email_has_no_thread_or_reply_headers(self):
         _, mid = self.approve()
-        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<x.1@gmail.com>")
+        out = claim.outgoing_for(self.db, self.queued(mid), CFG, "<x.1@gmail.com>", self.primary)
         self.assertEqual((out.thread_id, out.in_reply_to, out.references), (None, None, ()))
 
 
@@ -400,7 +458,7 @@ class UnclearTest(Base):
         self.assertIn("server", row["error"])
         detail = json.loads(self.events(mid, "send_unknown")[0]["detail"])
         self.assertEqual((detail["error_kind"], detail["retryable"]), ("server", True))
-        self.assertFalse(claim.claim(self.db, q, rfc_id="<again.1@gmail.com>", now=iso(MON)))
+        self.assertFalse(claim.claim(self.db, q, self.primary, rfc_id="<again.1@gmail.com>", now=iso(MON)))
         self.assertEqual(self.message(mid)["pending_rfc_id"], row["pending_rfc_id"])
         self.assertEqual([q.message_id for q in queue.load_queue(self.db, CFG)], [])
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM outreach_touch").fetchone()[0], 0)
@@ -428,9 +486,9 @@ class UnclearTest(Base):
         self.gmail.fail_next_send(GmailError("network", None, "connection reset"))
         with self.assertRaises(GmailError):
             self.send(mid)
-        got = parse(self.db.execute("SELECT next_send_at FROM sender").fetchone()[0])
-        self.assertTrue(MON + timedelta(minutes=CFG.gap_minutes[0]) <= got
-                        <= MON + timedelta(minutes=max(CFG.gap_minutes[1], CFG.break_minutes[1])))
+        got = parse(self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0])
+        self.assertTrue(MON + timedelta(minutes=CFG.spread_gap_minutes[0]) <= got
+                        <= MON + timedelta(minutes=max(CFG.spread_gap_minutes[1], CFG.break_minutes[1])))
 
     def test_a_rewritten_message_id_is_recorded_sent_and_does_not_pause(self):
         # What Gmail did on the first live send. It is how a send normally ends, not a failure.
@@ -542,9 +600,9 @@ class RaceTest(Base):
         _, first = self.approve()
         _, second = self.approve(company=seed_company(self.db, "Beta"))
         q1, q2 = self.queued(first), self.queued(second)
-        self.assertTrue(claim.claim(self.db, q1, rfc_id="<a.1@gmail.com>", now=iso(MON)))
+        self.assertTrue(claim.claim(self.db, q1, self.primary, rfc_id="<a.1@gmail.com>", now=iso(MON)))
         with self.assertRaises(claim.AnotherSendInFlight):
-            claim.claim(self.db, q2, rfc_id="<b.1@gmail.com>", now=iso(MON))
+            claim.claim(self.db, q2, self.primary, rfc_id="<b.1@gmail.com>", now=iso(MON))
         self.assertEqual(self.message(second)["state"], "approved")
         self.assertFalse(self.db.in_transaction)
 
@@ -646,11 +704,11 @@ class NoThreadTest(Base):
         for thread in (None, ""):
             with self.subTest(thread=thread):
                 mid = self.imported_followup(thread)
-                reasons = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, CFG, day=None, gate=None)}
+                reasons = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=None, gate=None)}
                 self.assertEqual(reasons[mid], "no_thread")
                 self.assertIn(reasons[mid], queue.REASONS)
-                self.assertFalse(claim.claim(self.db, self.queued(mid), rfc_id=f"<nt.{self.n}@gmail.com>",
-                                             now=iso(MON)))
+                self.assertFalse(claim.claim(self.db, self.queued(mid), self.primary,
+                                             rfc_id=f"<nt.{self.n}@gmail.com>", now=iso(MON)))
                 self.assertEqual(self.message(mid)["state"], "approved")
                 self.assertEqual(self.gmail.sent, [])
 
@@ -659,12 +717,13 @@ class NoThreadTest(Base):
         _, ready = self.approve(company=seed_company(self.db, "Beta"))
         self.db.execute("UPDATE message SET approved_at = '2026-11-02T13:45:00Z' WHERE message_id = ?", (ready,))
         self.assertEqual(queue.load_queue(self.db, CFG)[-1].message_id, ready)  # the follow-up is first in line
-        picked = queue.pick(queue.verdicts(self.db, MON, CFG, day=None, gate=None), queue.load_queue(self.db, CFG))
+        picked = queue.pick(queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=None, gate=None), queue.load_queue(self.db, CFG), account=CFG.accounts[0].address)
         self.assertEqual(picked.message_id, ready)
 
     def test_an_empty_thread_id_from_gmail_is_never_stored_as_empty_text(self):
         person, mid = self.approve()
-        self.assertTrue(claim.claim(self.db, self.queued(mid), rfc_id="<empty.thread@gmail.com>", now=iso(MON)))
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.primary, rfc_id="<empty.thread@gmail.com>",
+                                    now=iso(MON)))
         claim.record_sent(self.db, mid, Sent("m-77", "", "<empty.thread@gmail.com>"), at=iso(MON), cfg=CFG,
                           rng=self.rng)
         # Gmail starts a new thread under its first message's id; never '' (a follow-up would leave the thread).
@@ -680,9 +739,136 @@ class FullfsyncTest(Base):
         self.gmail.calls.clear()
         with self.assertRaises(RuntimeError):
             claim.send_one(loose, self.gmail, self.queued(mid), CFG, now=iso(MON), clock=self.clock, rng=self.rng,
-                           account=CFG.from_address)
+                           account=self.primary)
         self.assertEqual(self.gmail.calls, [])
         self.assertEqual(self.message(mid)["state"], "approved")
+
+
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
+class AccountClaimTest(Base):
+    """A claim is made from one account (#9 multi-sender ruling, 2026-11-12). A first email's claim sets its touch's
+    account and pins the company there in the same transaction; a touch already on another account, and a follow-up
+    whose thread is another account's, are refused and nothing changes."""
+
+    def setUp(self):
+        super().setUp()
+        rows = accounts.sync(self.db, MULTI, iso(MON))
+        self.one = rows["devanshurajesh@gmail.com"]
+        self.two = rows["devanshuchi9@gmail.com"]
+        self.three = rows["chicholikar.d@northeastern.edu"]
+        self.gmail2 = FakeGmail(clock=self.clock, account=self.two.cfg.address, id_prefix="b", probe=self.probe,
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
+
+    def pin(self, company=None):
+        return self.db.execute("SELECT account_id, pinned_by FROM company_sender WHERE company_id = ?",
+                               (company or self.company,)).fetchone()
+
+    def pinned_events(self) -> list[dict]:
+        return [json.loads(r[0]) for r in self.db.execute(
+            "SELECT detail FROM event WHERE kind = 'company_pinned' ORDER BY event_id")]
+
+    def test_claim_pins_company_and_sets_touch_account(self):
+        person, mid = self.approve()
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.two, rfc_id="<two.1@gmail.com>", now=iso(MON)))
+        self.assertFalse(self.db.in_transaction)
+        self.assertEqual(self.touch(person)["account_id"], self.two.account_id)
+        self.assertEqual(tuple(self.pin()), (self.two.account_id, "rule"))
+        self.assertEqual(self.pinned_events(), [{"account_id": self.two.account_id, "by": "rule",
+                                                 "previous_account_id": None}])
+
+    def test_a_pin_on_another_account_moves_to_the_claiming_one(self):
+        self.db.execute("INSERT INTO company_sender(company_id, account_id, pinned_by, pinned_at) "
+                        "VALUES (?, ?, 'import', ?)", (self.company, self.one.account_id, iso(MON)))
+        _, mid = self.approve()
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.two, rfc_id="<two.2@gmail.com>", now=iso(MON)))
+        self.assertEqual(tuple(self.pin()), (self.two.account_id, "rule"))
+        self.assertEqual(self.pinned_events()[-1]["previous_account_id"], self.one.account_id)
+
+    def test_a_pin_already_on_the_claiming_account_is_left_as_it_is(self):
+        """His own pin stays his (`you`), and a second person at the company writes no second pin event."""
+        self.db.execute("INSERT INTO company_sender(company_id, account_id, pinned_by, pinned_at) "
+                        "VALUES (?, ?, 'you', ?)", (self.company, self.one.account_id, iso(MON)))
+        _, first = self.approve()
+        _, second = self.approve()
+        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(first), MULTI, now=iso(self.clock()),
+                                        clock=self.clock, rng=self.rng, account=self.one), "sent")
+        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(second), MULTI, now=iso(self.clock()),
+                                        clock=self.clock, rng=self.rng, account=self.one), "sent")
+        self.assertEqual(tuple(self.pin()), (self.one.account_id, "you"))
+        self.assertEqual(self.pinned_events(), [])
+
+    def test_a_first_email_whose_touch_is_on_another_account_is_refused(self):
+        """A first email claimed once from account 1 (then requeued) never goes from account 2: the touch keeps its
+        account, and nothing is written."""
+        person, mid = self.approve()
+        self.db.execute("UPDATE touch SET account_id = ? WHERE person_id = ?", (self.one.account_id, person))
+        with self.assertRaises(claim.WrongAccount):
+            claim.claim(self.db, self.queued(mid), self.two, rfc_id="<two.3@gmail.com>", now=iso(MON))
+        self.assertFalse(self.db.in_transaction)
+        self.assertEqual(self.touch(person)["account_id"], self.one.account_id)
+        self.assertEqual((self.message(mid)["state"], self.message(mid)["pending_rfc_id"]), ("approved", None))
+        self.assertEqual(self.events(mid, "claimed"), [])
+        self.assertIsNone(self.pin())
+
+    def test_a_follow_up_goes_only_from_its_threads_account(self):
+        """A thread with no account is account 1's (sent before accounts existed)."""
+        person = self.person()
+        seed_sent(self.db, person, at=MON - timedelta(days=9), rfc="<first.f@gmail.com>")
+        self.assertIsNone(self.touch(person)["account_id"])
+        follow = seed_message(self.db, person, seq=1, subject="Re: Hello", due_on="2026-11-02")
+        for wrong in (self.two, self.three):
+            with self.subTest(account=wrong.cfg.address):
+                with self.assertRaises(claim.WrongAccount):
+                    claim.claim(self.db, self.queued(follow), wrong, rfc_id=f"<f.{wrong.account_id}@gmail.com>",
+                                now=iso(MON))
+                self.assertEqual(self.message(follow)["state"], "approved")
+        self.assertEqual(self.events(follow, "claimed"), [])
+        self.assertTrue(claim.claim(self.db, self.queued(follow), self.one, rfc_id="<f.1@gmail.com>", now=iso(MON)))
+        self.assertIsNone(self.touch(person)["account_id"])  # a follow-up never sets or moves the thread's account
+        self.assertIsNone(self.pin())  # nor pins
+
+    def test_from_is_account_address(self):
+        _, mid = self.approve()
+        self.assertEqual(claim.send_one(self.db, self.gmail2, self.queued(mid), MULTI, now=iso(self.clock()),
+                                        clock=self.clock, rng=self.rng, account=self.two), "sent")
+        self.assertEqual(self.gmail.sent, [])
+        out = self.gmail2.sent[0][0]
+        self.assertEqual((out.from_addr, out.from_name), ("devanshuchi9@gmail.com", MULTI.from_name))
+        q = self.queued(self.approve()[1])
+        built = claim.outgoing_for(self.db, q, MULTI, "<x.1@northeastern.edu>", self.three)
+        self.assertEqual((built.from_addr, built.from_name), ("chicholikar.d@northeastern.edu", MULTI.from_name))
+
+    def test_the_message_id_is_on_the_sending_accounts_domain(self):
+        mail = FakeGmail(clock=self.clock, account=self.three.cfg.address, id_prefix="c",
+                         reconcile_after_minutes=MULTI.reconcile_after_minutes)
+        _, mid = self.approve()
+        three = dataclasses.replace(self.three, cfg=dataclasses.replace(self.three.cfg, sends=True))  # as in Phase B
+        self.assertEqual(claim.send_one(self.db, mail, self.queued(mid), MULTI, now=iso(self.clock()),
+                                        clock=self.clock, rng=self.rng, account=three), "sent")
+        out = mail.sent[0][0]
+        self.assertTrue(out.message_id.endswith("@northeastern.edu>"), out.message_id)
+        self.assertEqual(out.marker, out.message_id)
+        self.assertEqual(self.message(mid)["state"], "sent")
+
+    def test_a_paused_claiming_account_claims_nothing(self):
+        """The pause read inside the claim is the claiming account's own, not account 1's."""
+        _, mid = self.approve()
+        self.assertTrue(accounts.hard_pause(self.db, self.two.account_id, "test block", iso(MON)))
+        self.assertFalse(claim.claim(self.db, self.queued(mid), self.two, rfc_id="<two.4@gmail.com>", now=iso(MON)))
+        self.assertEqual(self.message(mid)["state"], "approved")
+        self.assertTrue(claim.claim(self.db, self.queued(mid), self.one, rfc_id="<one.4@gmail.com>", now=iso(MON)))
+
+    def test_an_address_that_bounced_before_is_never_claimed(self):
+        """Checked inside the claim too (the precheck runs first): any case of the address, from any account."""
+        person, mid = self.approve()
+        address = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0]
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES (?, ?, 'bounce')",
+                        (address.upper(), iso(MON)))
+        self.assertFalse(claim.claim(self.db, self.queued(mid), self.one, rfc_id="<b.1@gmail.com>", now=iso(MON)))
+        self.assertEqual(self.message(mid)["state"], "approved")
+        self.assertIsNone(self.touch(person)["account_id"])
 
 
 if __name__ == "__main__":

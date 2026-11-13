@@ -15,7 +15,7 @@
  * - `ids` names the rows tests reach for; everything else is found by name in a view.
  */
 import type {
-  Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
+  AccountStatus, Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
   DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, ImportSource, IsoDate, IsoTime, JobRunSummary, LevelTier, LinkedInGroup,
   LinkedInActivity, LinkedInPerson, LinkedInReason, LinkedInStep, LinkedInView, MergeSide, MessageState, NeedsYouView, NoGoReason, NoGoRow, NoGoSource, NoGoView, NoGoWrittenBy,
   OutboxCounts, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, PostingRow, RemovedRow, ResolvedReview,
@@ -544,7 +544,8 @@ function buildItem(c: Ctx, s: ItemSpec, rank: number): { item: OutboxItem; detai
   const detail: OutboxDetail = {
     asOf: AS_OF, item: { ...item }, body: s.body ?? defaultBody(first, s.company, s.subject),
     hook: { text: cap(s.subject.replace(/^Re: /, '')), on: null }, project: 'OpenCodeIntel', role: null, checks, savedBy: 'claude', savedAt: s.at,
-    followups: [], firstSentAt: null, gmailThreadUrl: null, reply: null, touchRevision: 1, held: [], thread: [], bounceReason: null, ...s.d,
+    followups: [], firstSentAt: null, gmailThreadUrl: null, fromAccount: { address: ACCOUNTS.general, text: ACCOUNTS.general },
+    reply: null, touchRevision: 1, held: [], thread: [], bounceReason: null, ...s.d,
   };
   return { item, detail };
 }
@@ -581,7 +582,7 @@ function generatedSent(c: Ctx, count: number, startTouch: Id): ItemSpec[] {
     const t = track(date);
     specs.push({
       touch: startTouch + i, person, company, group: 'sent', state: 'sent', seq: t.seq, subject, summary: t.summary, at, nextDue: t.nextDue,
-      d: { followups: t.followups, firstSentAt: at, gmailThreadUrl: `https://mail.google.com/mail/u/0/#sent/thread${startTouch + i}`, thread: [out(0, subject, defaultBody(person.name.split(' ')[0] ?? '', company, subject), at)] },
+      d: { followups: t.followups, firstSentAt: at, gmailThreadUrl: `https://mail.google.com/mail/?authuser=devanshuchi9@gmail.com#all/thread${startTouch + i}`, thread: [out(0, subject, defaultBody(person.name.split(' ')[0] ?? '', company, subject), at)] },
     });
   }
   return specs;
@@ -605,7 +606,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
     touch: T.priya, person: priya, company: 'Browserbase', group: 'replied', state: 'sent', touchState: 'replied', seq: 1,
     subject: `Re: ${priyaSubject}`, preview: 'Happy to chat. Does Thursday at 2 PT work for 20 minutes?', summary: 'Holding 2 queued emails at Browserbase', at: priyaReplyAt,
     d: {
-      body: priyaFu1, firstSentAt: pt('2026-10-30', '10:02'), gmailThreadUrl: 'https://mail.google.com/mail/u/0/#inbox/thread-priya-natarajan',
+      body: priyaFu1, firstSentAt: pt('2026-10-30', '10:02'), gmailThreadUrl: 'https://mail.google.com/mail/?authuser=devanshuchi9@gmail.com#all/thread-priya-natarajan',
       followups: [
         { seq: 1, dueOn: '2026-11-04', sentAt: pt('2026-11-04', '11:20'), state: 'sent' },
         { seq: 2, dueOn: '2026-11-10', sentAt: null, state: 'planned' },
@@ -718,12 +719,12 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const ninaAt = et(TODAY, '09:41');
   add({ touch: T.nina, person: c.person('Nina Kovac', 'Software Engineer', 'engineer', 'Mintlify'), company: 'Mintlify', group: 'sent', state: 'sent', seq: nina.seq, subject: 'the docs linter you shipped',
     summary: nina.summary, at: ninaAt, nextDue: nina.nextDue,
-    d: { followups: nina.followups, firstSentAt: ninaAt, gmailThreadUrl: 'https://mail.google.com/mail/u/0/#sent/thread-nina', thread: [out(0, 'the docs linter you shipped', defaultBody('Nina', 'Mintlify', 'the docs linter you shipped'), ninaAt)] } });
+    d: { followups: nina.followups, firstSentAt: ninaAt, gmailThreadUrl: 'https://mail.google.com/mail/?authuser=devanshuchi9@gmail.com#all/thread-nina', thread: [out(0, 'the docs linter you shipped', defaultBody('Nina', 'Mintlify', 'the docs linter you shipped'), ninaAt)] } });
   const theo = track('2026-11-05');
   const theoAt = et('2026-11-05', '09:20');
   add({ touch: T.theo, person: c.person('Theo Brandt', 'Software Engineer', 'engineer', 'Supabase'), company: 'Supabase', group: 'sent', state: 'sent', seq: theo.seq, subject: 'your postgres branching post',
     summary: theo.summary, at: theoAt, nextDue: theo.nextDue,
-    d: { followups: theo.followups, firstSentAt: theoAt, gmailThreadUrl: 'https://mail.google.com/mail/u/0/#sent/thread-theo', thread: [out(0, 'your postgres branching post', defaultBody('Theo', 'Supabase', 'your postgres branching post'), theoAt)] } });
+    d: { followups: theo.followups, firstSentAt: theoAt, gmailThreadUrl: 'https://mail.google.com/mail/?authuser=devanshuchi9@gmail.com#all/thread-theo', thread: [out(0, 'your postgres branching post', defaultBody('Theo', 'Supabase', 'your postgres branching post'), theoAt)] } });
   generatedSent(c, sentTotal - 2, 2100).forEach(add);
 
   /* Paused by you: Cartesia. */
@@ -786,13 +787,26 @@ export function countGroups(items: OutboxItem[]): OutboxCounts {
   return counts;
 }
 
+export const ACCOUNTS = { rest: 'devanshurajesh@gmail.com', general: 'devanshuchi9@gmail.com', neu: 'chicholikar.d@northeastern.edu' } as const;
+
+/** The three accounts as the sender reports them: account 1 reads only, devanshuchi9 sends the general lane with
+ * the day's whole count, Northeastern waits. `general` overrides the sending account's line. */
+export function fixtureAccounts(sent: number, limit: number, general: Partial<AccountStatus> = {}): AccountStatus[] {
+  const base = { paused: false, pauseReason: '', authState: 'ok', sentToday: 0, limit: 0 } as const;
+  return [
+    { ...base, address: ACCOUNTS.rest, lane: null, sends: false, state: 'reading_only', text: 'reading replies only' },
+    { ...base, address: ACCOUNTS.general, lane: 'general', sends: true, state: 'sending', text: `${sent} of ${limit} today`, sentToday: sent, limit, ...general },
+    { ...base, address: ACCOUNTS.neu, lane: 'sponsor', sends: false, state: 'not_sending_yet', text: 'waits, not sending yet', authState: 'unknown' },
+  ];
+}
+
 function sendingStatus(): SendingStatus {
   return {
     state: 'running', pausedReason: '', pausedAt: null, gmailMessage: null, sentToday: 20, limitToday: 30, rampLevel: 2,
     rampLevels: [20, 30, 40, 50, 60, 70, 80, 90, 100], nextLimitIfClean: 40, lastStepDown: null,
     signals: { bounceRate3d: 0.01, gmailErrorsToday: 0, stopRepliesToday: 0 }, window: { start: '08:30', end: '16:30' },
     nextSend: { at: '2026-11-10T15:42:00Z', tz: TZ, touchId: ids.touch.jordan, personName: 'Jordan Price', companyName: 'Mintlify' },
-    noneReason: null, revision: 1,
+    noneReason: null, revision: 1, accounts: fixtureAccounts(20, 30),
   };
 }
 
@@ -1396,11 +1410,15 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
   const s = db.outbox.sending;
   if (scenario === 'hard_block') {
     pause(s, 'paused_hard_block', 'Gmail said the daily limit was reached', et(TODAY, '10:02'), 'Sending is paused until you resume.');
+    s.accounts = fixtureAccounts(s.sentToday, s.limitToday, { state: 'paused_hard_block', text: `paused: hard block, ${s.sentToday} of ${s.limitToday} today`, paused: true, pauseReason: 'Gmail said the daily limit was reached' });
     s.gmailMessage = BLOCK_MESSAGE;
     s.signals.gmailErrorsToday = 1;
     s.lastStepDown = { at: et(TODAY, '10:02'), reason: 'Gmail daily limit reached' };
   } else if (scenario === 'signed_out') {
-    pause(s, 'signed_out', 'Gmail sign-in expired. Sign in again with mail/gmail.py auth in the live checkout.', et(TODAY, '09:50'), 'Gmail is signed out.');
+    const command = `python -m outreach.sending auth --account ${ACCOUNTS.general}`;
+    pause(s, 'signed_out', `${ACCOUNTS.general}: signed out. Run: ${command}.`, et(TODAY, '09:50'), 'Gmail is signed out.');
+    s.pausedAt = null;
+    s.accounts = fixtureAccounts(s.sentToday, s.limitToday, { state: 'signed_out', text: `signed out. Run: ${command}`, authState: 'signed_out' });
   } else if (scenario === 'weekend') {
     setAsOf(db, '2026-11-14T15:14:00Z');
     db.today.date = '2026-11-14';
@@ -1408,6 +1426,7 @@ export function buildFixture(scenario: Scenario = 'default'): FixtureDb {
     db.today.notReady = { reason: 'weekend', text: 'No list on weekends. The backlog is still here.' };
     pause(s, 'weekend', '', et('2026-11-13', '16:30'), 'Weekend. Sending resumes Monday at 08:30.');
     s.sentToday = 0;
+    s.accounts = fixtureAccounts(0, 0, { text: 'no sending today' });
   } else if (scenario === 'job_failed') {
     db.today.proposed = []; db.today.picked = 0; db.today.builtAt = null;
     db.today.notReady = { reason: 'job_failed', text: "Today's list is not ready. It is built at 08:00 on weekdays." };

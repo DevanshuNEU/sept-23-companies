@@ -4,8 +4,11 @@
   what it would do, and writes nothing. Live checkout only.
 - `status`: the sender's state, today's count, the ramp and why the next email waits, from the store at `OUTREACH_DB`
   (the live store only from the live checkout). No Gmail call.
-- `whoami`: the address the Gmail token signs in as. Live checkout only.
-- `auth`: sign in to Gmail in the browser (writes the token). Live checkout only.
+- `whoami [--account ADDRESS]`: the address an account's Gmail token signs in as (account 1 without the flag). Live
+  checkout only.
+- `auth [--account ADDRESS]`: sign one Gmail account in, in the browser (writes its token: account 1 into the
+  secrets folder, every other account into `<secrets folder>/<address>/`). Without the flag it is account 1, as
+  before accounts. Live checkout only.
 - `simulate [--days N] [--seed N]`: the two-week simulation on a temporary store and a fake Gmail; prints one line a
   day. Runs anywhere, reads neither `OUTREACH_DB` nor the real Gmail folder, and builds no Gmail client.
 
@@ -27,7 +30,7 @@ from datetime import datetime, timezone
 import live_checkout
 from outreach.drafts.checks import load_banned
 from outreach.sending.config import load_config
-from outreach.sending.gmail import GmailClient
+from outreach.sending.gmail import TOKEN_FILE, GmailClient, gmail_dir, sign_in_command, token_dir_for
 from outreach.sending.mail import GmailError
 from outreach.sending.notify import mac_notifier
 from outreach.sending.tick import BUSY_LINE, TickDeps, run_tick
@@ -57,8 +60,10 @@ def _parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="one tick: read Gmail, settle, send at most one email")
     run.add_argument("--dry-run", action="store_true", help="show what would happen and write nothing")
     sub.add_parser("status", help="the sender's state and why the next email waits (no Gmail call)")
-    sub.add_parser("whoami", help="the address the Gmail token signs in as")
-    sub.add_parser("auth", help="sign in to Gmail in the browser")
+    who = sub.add_parser("whoami", help="the address a Gmail token signs in as")
+    who.add_argument("--account", metavar="ADDRESS", help="the account (default: account 1)")
+    auth = sub.add_parser("auth", help="sign one Gmail account in, in the browser")
+    auth.add_argument("--account", metavar="ADDRESS", help="the account to sign in (default: account 1)")
     sim = sub.add_parser("simulate", help="ten business days on a fake Gmail and a fake clock")
     sim.add_argument("--days", type=int, default=10, metavar="N")
     sim.add_argument("--seed", type=int, default=7, metavar="N")
@@ -80,13 +85,35 @@ def _exit_code(conn: sqlite3.Connection, report, dry_run: bool) -> int:
     return 0 if row is not None and row["status"] == "ok" else 1
 
 
+def _clients(cfg) -> dict:
+    """One GmailClient per Gmail account that has a token file. An account without one gets no client: the tick
+    counts it signed out (one notice a day naming it), and every other account goes on."""
+    out = {}
+    base = gmail_dir()
+    for acct in cfg.accounts:
+        if acct.kind != "gmail":
+            continue
+        folder = token_dir_for(cfg, acct.address, base)
+        if os.path.exists(os.path.join(folder, TOKEN_FILE)):
+            out[acct.address] = GmailClient(base, token_dir=folder, sign_in=sign_in_command(cfg, acct.address))
+    return out
+
+
+def _account(cfg, address: str | None):
+    """The Gmail account `--account` names (account 1 without it). ValueError names what is wrong."""
+    if address is None:
+        return cfg.accounts[0]
+    token_dir_for(cfg, address)  # ValueError for an address not in the config or a Mail.app account
+    return next(a for a in cfg.accounts if a.address.lower() == address.lower())
+
+
 def _run(dry_run: bool) -> int:
     cfg = load_config()
-    client = GmailClient()
+    clients = _clients(cfg)
     conn = connect(fullfsync=True)
     try:
         banned, _ = load_banned()  # an unusable list comes back empty and blocks every claim, with a notice
-        deps = TickDeps(client=client, clock=lambda: datetime.now(timezone.utc), rng=random.Random(),
+        deps = TickDeps(clients=clients, clock=lambda: datetime.now(timezone.utc), rng=random.Random(),
                         notify=mac_notifier, old_sender_loaded=launchctl_loaded(cfg.old_sender_label), banned=banned)
         report = run_tick(conn, deps, cfg, dry_run=dry_run)
         stamp = datetime.now(timezone.utc).strftime(ISO_FMT)
@@ -120,6 +147,8 @@ def _status(now: datetime | None, old_sender_loaded: Callable[[], bool] | None) 
     if snap.gmail_message:
         print(f"gmail: {snap.gmail_message}")
     print(f"sent today: {snap.sent_today} of {snap.limit_today}")
+    for account in snap.accounts:
+        print(f"  {account.address}: {account.text}")
     print(f"ramp: starts at {snap.start_limit} (level {snap.ramp_level} of {len(snap.ramp_levels)}), "
           f"{snap.next_limit_if_clean} next sending day if today is clean")
     if snap.last_step_down:
@@ -142,18 +171,25 @@ def _status(now: datetime | None, old_sender_loaded: Callable[[], bool] | None) 
     return 0
 
 
-def _whoami() -> int:
+def _whoami(address: str | None) -> int:
+    cfg = load_config()
+    acct = _account(cfg, address)
+    base = gmail_dir()
+    command = sign_in_command(cfg, acct.address)
     try:
-        print(GmailClient().profile().email)
+        print(GmailClient(base, token_dir=token_dir_for(cfg, acct.address, base), sign_in=command).profile().email)
     except GmailError as err:
-        _say(f"Gmail sign-in is not working ({err}); run: python -m outreach.sending auth")
+        _say(f"Gmail sign-in is not working for {acct.address} ({err}); run: {command}")
         return 1
     return 0
 
 
-def _auth() -> int:
+def _auth(address: str | None) -> int:
     from outreach.sending import gmail
-    return gmail.main(["auth"])
+    cfg = load_config()
+    acct = _account(cfg, address)
+    base = gmail_dir()
+    return gmail.sign_in(token_dir_for(cfg, acct.address, base), base, expect=acct.address)
 
 
 def _simulate(days: int, seed: int) -> int:
@@ -184,9 +220,9 @@ def main(argv: Sequence[str] | None = None, *, root: str | None = None, live_roo
         if args.command == "status":
             return _status(now, old_sender_loaded)
         if args.command == "whoami":
-            return _whoami()
+            return _whoami(args.account)
         if args.command == "auth":
-            return _auth()
+            return _auth(args.account)
         return _simulate(args.days, args.seed)
     except _EXPECTED as err:
         _say(f"error: {describe_error(err)}")

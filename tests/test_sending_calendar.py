@@ -109,16 +109,16 @@ class WindowTest(unittest.TestCase):
 
     def test_window_edges(self):
         monday = (2026, 11, 2)
-        self.assertFalse(cal.in_window(local(*monday, 8, 29), NY, CFG))
-        self.assertTrue(cal.in_window(local(*monday, 8, 30), NY, CFG))
-        self.assertTrue(cal.in_window(local(*monday, 16, 30), NY, CFG))
-        self.assertFalse(cal.in_window(local(*monday, 16, 31), NY, CFG))
+        self.assertFalse(cal.in_window(local(*monday, 7, 59), NY, CFG))
+        self.assertTrue(cal.in_window(local(*monday, 8, 0), NY, CFG))
+        self.assertTrue(cal.in_window(local(*monday, 15, 0), NY, CFG))
+        self.assertFalse(cal.in_window(local(*monday, 15, 1), NY, CFG))
         self.assertFalse(cal.in_window(local(2026, 11, 7, 10, 0), NY, CFG))  # Saturday
         self.assertFalse(cal.in_window(local(2026, 11, 8, 10, 0), NY, CFG))  # Sunday
 
     def test_window_uses_recipient_time_across_the_dst_change(self):
         # After 2026-11-01 New York is on EST (UTC-5) and Los Angeles on PST (UTC-8).
-        at = utc("2026-11-02T21:00:00Z")  # 16:00 in New York, 13:00 in Los Angeles
+        at = utc("2026-11-02T19:00:00Z")  # 14:00 in New York, 11:00 in Los Angeles
         self.assertTrue(cal.in_window(at, NY, CFG))
         self.assertTrue(cal.in_window(at, LA, CFG))
         at = utc("2026-11-02T22:00:00Z")  # 17:00 in New York, 14:00 in Los Angeles
@@ -126,15 +126,15 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(cal.in_window(at, LA, CFG))
 
     def test_window_shifts_by_an_hour_in_the_week_daylight_saving_ends(self):
-        # The same 20:30Z is 16:30 in New York on EDT (Friday 2026-10-30) and 15:30 on EST (Monday 2026-11-02).
-        self.assertTrue(cal.in_window(utc("2026-10-30T20:30:00Z"), NY, CFG))
-        self.assertFalse(cal.in_window(utc("2026-10-30T20:31:00Z"), NY, CFG))
-        self.assertTrue(cal.in_window(utc("2026-11-02T21:30:00Z"), NY, CFG))
-        self.assertFalse(cal.in_window(utc("2026-11-02T21:31:00Z"), NY, CFG))
-        # 08:30 opens at 12:30Z on EDT and at 13:30Z on EST.
-        self.assertTrue(cal.in_window(utc("2026-10-30T12:30:00Z"), NY, CFG))
-        self.assertFalse(cal.in_window(utc("2026-11-02T12:30:00Z"), NY, CFG))
-        self.assertTrue(cal.in_window(utc("2026-11-02T13:30:00Z"), NY, CFG))
+        # 15:00 in New York is 19:00Z on EDT (Friday 2026-10-30) and 20:00Z on EST (Monday 2026-11-02).
+        self.assertTrue(cal.in_window(utc("2026-10-30T19:00:00Z"), NY, CFG))
+        self.assertFalse(cal.in_window(utc("2026-10-30T19:01:00Z"), NY, CFG))
+        self.assertTrue(cal.in_window(utc("2026-11-02T20:00:00Z"), NY, CFG))
+        self.assertFalse(cal.in_window(utc("2026-11-02T20:01:00Z"), NY, CFG))
+        # 08:00 opens at 12:00Z on EDT and at 13:00Z on EST.
+        self.assertTrue(cal.in_window(utc("2026-10-30T12:00:00Z"), NY, CFG))
+        self.assertFalse(cal.in_window(utc("2026-11-02T12:00:00Z"), NY, CFG))
+        self.assertTrue(cal.in_window(utc("2026-11-02T13:00:00Z"), NY, CFG))
 
     def test_the_local_date_decides_the_weekday_not_the_utc_date(self):
         # Friday 17:00 in Los Angeles is Saturday 01:00Z; Monday 00:30Z is Sunday evening in Los Angeles.
@@ -150,33 +150,33 @@ class WindowTest(unittest.TestCase):
         at = local(2026, 11, 2, 10, 0)
         self.assertEqual(cal.next_window_start(at, NY, CFG), at)
 
-    def test_next_window_start_from_friday_evening_is_monday_0830(self):
+    def test_next_window_start_from_friday_evening_is_monday_0800(self):
         at = local(2026, 11, 6, 18, 0)
-        self.assertEqual(cal.next_window_start(at, NY, CFG), local(2026, 11, 9, 8, 30))
+        self.assertEqual(cal.next_window_start(at, NY, CFG), local(2026, 11, 9, 8, 0))
         self.assertEqual(cal.next_window_start(at, NY, CFG).tzinfo, timezone.utc)
 
     def test_next_window_start_before_opening_is_the_same_day(self):
-        self.assertEqual(cal.next_window_start(local(2026, 11, 3, 7, 0), NY, CFG), local(2026, 11, 3, 8, 30))
+        self.assertEqual(cal.next_window_start(local(2026, 11, 3, 7, 0), NY, CFG), local(2026, 11, 3, 8, 0))
 
     def test_next_window_start_on_a_weekend_is_monday(self):
-        self.assertEqual(cal.next_window_start(local(2026, 11, 7, 9, 0), NY, CFG), local(2026, 11, 9, 8, 30))
+        self.assertEqual(cal.next_window_start(local(2026, 11, 7, 9, 0), NY, CFG), local(2026, 11, 9, 8, 0))
 
     def test_next_window_start_after_close_is_the_next_business_day(self):
-        self.assertEqual(cal.next_window_start(local(2026, 11, 3, 16, 31), NY, CFG), local(2026, 11, 4, 8, 30))
+        self.assertEqual(cal.next_window_start(local(2026, 11, 3, 15, 1), NY, CFG), local(2026, 11, 4, 8, 0))
 
     def test_next_window_start_across_the_dst_change_uses_the_new_offset(self):
-        # Saturday 2026-10-31 evening in New York is still EDT; Monday 08:30 is EST, so 13:30Z.
+        # Saturday 2026-10-31 evening in New York is still EDT; Monday 08:00 is EST, so 13:00Z.
         got = cal.next_window_start(local(2026, 10, 31, 20, 0), NY, CFG)
-        self.assertEqual(got, utc("2026-11-02T13:30:00Z"))
+        self.assertEqual(got, utc("2026-11-02T13:00:00Z"))
 
     def test_next_window_start_for_a_pacific_recipient_while_new_york_is_closed(self):
         at = utc("2026-11-02T22:00:00Z")  # New York 17:00: closed. Los Angeles 14:00: open.
         self.assertEqual(cal.next_window_start(at, LA, CFG), at)
-        self.assertEqual(cal.next_window_start(at, NY, CFG), local(2026, 11, 3, 8, 30))
+        self.assertEqual(cal.next_window_start(at, NY, CFG), local(2026, 11, 3, 8, 0))
 
     def test_next_window_start_skips_a_holiday(self):
         cfg = load_config_with_holidays(date(2026, 11, 3))
-        self.assertEqual(cal.next_window_start(local(2026, 11, 2, 17, 0), NY, cfg), local(2026, 11, 4, 8, 30))
+        self.assertEqual(cal.next_window_start(local(2026, 11, 2, 17, 0), NY, cfg), local(2026, 11, 4, 8, 0))
 
     def test_the_result_is_always_in_window_and_never_earlier(self):
         start = local(2026, 10, 29, 0, 0)

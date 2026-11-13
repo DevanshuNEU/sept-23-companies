@@ -21,6 +21,39 @@ def config_with(**changes) -> Path:
     return path
 
 
+def accounts_with(**changes) -> Path:
+    """A copy of config.toml with a key replaced in every [[account]] block (single-line TOML values)."""
+    text = DEFAULT_PATH.read_text(encoding="utf-8")
+    for key, toml_value in changes.items():
+        text, n = re.subn(rf"^{key} = .*$", f"{key} = {toml_value}", text, flags=re.M)
+        assert n >= 1, key
+    folder = Path(tempfile.mkdtemp(prefix="outreach-sending-config-"))
+    path = folder / "config.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def blocks_text(*blocks: str) -> Path:
+    """config.toml with its [[account]] blocks replaced by the given block texts."""
+    text = DEFAULT_PATH.read_text(encoding="utf-8")
+    head = text[:text.index("# Sender accounts")]
+    folder = Path(tempfile.mkdtemp(prefix="outreach-sending-config-"))
+    path = folder / "config.toml"
+    path.write_text(head + "\n".join(blocks), encoding="utf-8")
+    return path
+
+
+def block(address="a@example.com", kind="gmail", lane=None, sends=True, extra="", ceiling=40):
+    lines = [f'[[account]]', f'address = "{address}"', f'kind = "{kind}"']
+    if lane:
+        lines.append(f'lane = "{lane}"')
+    lines += [f'sends = {"true" if sends else "false"}', 'ramp_start = 15', 'ramp_step = 3', 'ramp_floor = 15',
+              f'ramp_ceiling = {ceiling}']
+    if extra:
+        lines.append(extra)
+    return "\n".join(lines) + "\n"
+
+
 class SendConfigTest(unittest.TestCase):
     def refused(self, key, **changes):
         with self.assertRaises(ValueError) as cm:
@@ -29,18 +62,14 @@ class SendConfigTest(unittest.TestCase):
 
     def test_defaults_are_the_nine_numbers(self):
         cfg = load_config(SHIPPED_SEND_CONFIG)
-        self.assertEqual((cfg.ramp_start, cfg.ramp_step, cfg.ramp_ceiling, cfg.ramp_floor), (200, 10, 200, 200))
         self.assertEqual((cfg.clean_bounce_rate, cfg.bounce_days), (0.02, 3))
-        self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 30), time(16, 30)))
+        self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 0), time(15, 0)))
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
         self.assertEqual((cfg.per_company_daily, cfg.per_company_gap_minutes), (2, 60))
-        self.assertEqual(cfg.followup_business_days, (3, 7, 14, 21))
-        self.assertEqual(cfg.gap_minutes, (1, 25))
-        self.assertEqual((cfg.gap_median_minutes, cfg.gap_spread, cfg.break_chance, cfg.break_minutes),
-                         (1.5, 0.6, 0.04, (10, 25)))
+        self.assertEqual(cfg.followup_business_days, (7,))
+        self.assertEqual((cfg.break_chance, cfg.break_minutes), (0.04, (10, 25)))
         self.assertEqual((cfg.pick_pool, cfg.day_start_jitter_minutes, cfg.per_company_gap_jitter_minutes),
                          (5, 25, 60))
-        self.assertEqual(cfg.holidays, ())
         self.assertEqual(cfg.day_tz, "America/New_York")
         self.assertEqual(HARD_CEILING, 200)
 
@@ -58,24 +87,31 @@ class SendConfigTest(unittest.TestCase):
     def test_config_is_frozen_and_has_every_field(self):
         cfg = load_config()
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            cfg.ramp_start = 50
+            cfg.from_name = "x"
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 39)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 35)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))
         self.assertEqual(cfg.holidays, (date(2026, 11, 26), date(2026, 12, 25)))
 
     def test_ceiling_above_200_is_refused(self):
-        self.refused("ramp_ceiling", ramp_ceiling="201")
-        self.assertEqual(load_config(config_with(ramp_ceiling="200", ramp_start="200")).ramp_ceiling, 200)
+        with self.assertRaises(ValueError) as cm:
+            load_config(accounts_with(ramp_ceiling="201"))
+        self.assertIn("ramp_ceiling", str(cm.exception))
+        cfg = load_config(accounts_with(ramp_ceiling="200", ramp_start="200", ramp_floor="200"))
+        self.assertEqual(cfg.account("devanshuchi9@gmail.com").ramp_ceiling, 200)
 
     def test_ramp_start_and_floor_must_sit_inside_the_ramp(self):
-        self.refused("ramp_start", ramp_start="10")
-        self.refused("ramp_start", ramp_start="110", ramp_ceiling="100", ramp_floor="100")
-        self.refused("ramp_floor", ramp_floor="0")
-        self.refused("ramp_floor", ramp_floor="210")
-        self.assertEqual(load_config(config_with(ramp_floor="10")).ramp_floor, 10)
+        def acct_refused(key, **changes):
+            with self.assertRaises(ValueError) as cm:
+                load_config(accounts_with(**changes))
+            self.assertIn(key, str(cm.exception))
+        acct_refused("ramp_start", ramp_start="10")
+        acct_refused("ramp_start", ramp_start="110", ramp_ceiling="100", ramp_floor="100")
+        acct_refused("ramp_floor", ramp_floor="0")
+        acct_refused("ramp_floor", ramp_floor="210")
+        self.assertEqual(load_config(accounts_with(ramp_floor="10")).account("devanshuchi9@gmail.com").ramp_floor, 10)
 
     def test_five_follow_ups_are_refused(self):
         self.refused("followup_business_days", followup_business_days="[3, 7, 14, 21, 28]")
@@ -91,13 +127,11 @@ class SendConfigTest(unittest.TestCase):
 
     def test_inverted_window_is_refused(self):
         self.refused("window_start", window_start='"17:00"')
-        self.refused("window_start", window_end='"08:30"')
+        self.refused("window_start", window_end='"07:30"')
 
     def test_inverted_gap_is_refused(self):
-        self.refused("gap_minutes", gap_minutes="[9, 4]")
         self.refused("break_minutes", break_minutes="[30, 10]")
         self.refused("break_chance", break_chance="1.5")
-        self.refused("gap_median_minutes", gap_median_minutes="0")
         self.refused("pick_pool", pick_pool="0")
 
     def test_weekday_outside_zero_to_six_is_refused(self):
@@ -106,7 +140,7 @@ class SendConfigTest(unittest.TestCase):
         self.refused("weekdays", weekdays="[]")
 
     def test_counts_must_be_at_least_one(self):
-        for key in ("bounce_days", "per_company_daily", "ramp_step",
+        for key in ("bounce_days", "per_company_daily",
                     "stop_replies_hard", "stop_replies_days", "followup_lapse_business_days",
                     "close_after_business_days", "max_send_attempts", "rethread_days", "inbound_meta_cap",
                     "prune_noop_after_days", "reconcile_after_minutes"):
@@ -127,8 +161,12 @@ class SendConfigTest(unittest.TestCase):
         self.refused("bounce_days", bounce_days="true")
         self.refused("clean_bounce_rate", clean_bounce_rate='"low"')
         self.refused("clean_bounce_rate", clean_bounce_rate="false")
-        self.refused("from_address", from_address="5")
-        self.refused("from_address", from_address='""')
+        with self.assertRaises(ValueError) as cm:
+            load_config(accounts_with(address="5"))
+        self.assertIn("address", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            load_config(accounts_with(address='""'))
+        self.assertIn("address", str(cm.exception))
         self.refused("day_tz", day_tz="5")
         self.refused("old_sender_label", old_sender_label="[]")
 
@@ -136,8 +174,8 @@ class SendConfigTest(unittest.TestCase):
         self.refused("day_tz", day_tz='"Mars/Olympus"')
 
     def test_a_window_time_with_a_zone_is_refused(self):
-        self.refused("window_start", window_start='"08:30+01:00"')
-        self.refused("window_end", window_end='"16:30Z"')
+        self.refused("window_start", window_start='"08:00+01:00"')
+        self.refused("window_end", window_end='"15:00Z"')
 
     def test_a_refusal_says_what_is_wrong(self):
         with self.assertRaises(ValueError) as cm:
@@ -147,9 +185,12 @@ class SendConfigTest(unittest.TestCase):
             load_config(config_with(clean_bounce_rate="1.5"))
         self.assertIn("between 0 and 1", str(cm.exception))
 
-    def test_from_address_is_the_one_sender(self):
+    def test_there_is_no_single_from_address(self):
+        # Every email goes from its own account (Task A10): the first block is account 1, and it rests.
         cfg = load_config()
-        self.assertEqual(cfg.from_address, "devanshurajesh@gmail.com")
+        self.assertFalse(hasattr(cfg, "from_address"))
+        self.assertEqual(cfg.accounts[0].address, "devanshurajesh@gmail.com")
+        self.assertFalse(cfg.accounts[0].sends)
         self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
 
     def test_unknown_or_missing_key_is_refused(self):
@@ -161,10 +202,83 @@ class SendConfigTest(unittest.TestCase):
             load_config(path)
         self.assertIn("bogus_key", str(cm.exception))
         path = folder / "missing.toml"
-        path.write_text(re.sub(r"^ramp_step = .*$", "", text, flags=re.M), encoding="utf-8")
+        path.write_text(re.sub(r"^bounce_days = .*$", "", text, flags=re.M), encoding="utf-8")
         with self.assertRaises(ValueError) as cm:
             load_config(path)
+        self.assertIn("bounce_days", str(cm.exception))
+        path = folder / "noramp.toml"
+        path.write_text(re.sub(r"^ramp_step = .*$", "", text, count=1, flags=re.M), encoding="utf-8")
+        with self.assertRaises(KeyError) as cm:
+            load_config(path)
         self.assertIn("ramp_step", str(cm.exception))
+
+    def test_three_accounts_parsed(self):
+        cfg = load_config(SHIPPED_SEND_CONFIG)
+        self.assertEqual([a.address for a in cfg.accounts],
+                         ["devanshurajesh@gmail.com", "devanshuchi9@gmail.com", "chicholikar.d@northeastern.edu"])
+        one, two, three = cfg.accounts
+        self.assertEqual((one.kind, one.lane, one.sends), ("gmail", None, False))
+        self.assertEqual((two.kind, two.lane, two.sends), ("gmail", "general", True))
+        self.assertEqual((two.ramp_start, two.ramp_step, two.ramp_floor, two.ramp_ceiling), (15, 3, 15, 40))
+        self.assertEqual((three.kind, three.lane, three.sends, three.mailapp_account),
+                         ("mailapp", "sponsor", False, "Exchange"))
+        self.assertEqual((three.ramp_start, three.ramp_step, three.ramp_floor, three.ramp_ceiling), (15, 3, 15, 60))
+        self.assertIsNone(one.mailapp_account)
+        self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
+        self.assertEqual((cfg.spread_jitter, cfg.spread_gap_minutes), ((0.6, 1.4), (2, 45)))
+        self.assertIs(cfg.account("devanshuchi9@gmail.com"), two)
+        with self.assertRaises(KeyError):
+            cfg.account("nobody@example.com")
+
+    def test_two_sending_accounts_in_one_lane_refused(self):
+        path = blocks_text(block("a@example.com", lane="general"), block("b@example.com", lane="general"))
+        with self.assertRaises(ValueError) as cm:
+            load_config(path)
+        self.assertIn("general", str(cm.exception))
+        load_config(blocks_text(block("a@example.com", lane="general"),
+                                block("b@example.com", lane="general", sends=False)))
+
+    def test_mailapp_needs_mailapp_account(self):
+        with self.assertRaises(ValueError) as cm:
+            load_config(blocks_text(block("a@example.com", kind="mailapp", lane="sponsor")))
+        self.assertIn("mailapp_account", str(cm.exception))
+        cfg = load_config(blocks_text(block("a@example.com", kind="mailapp", lane="sponsor",
+                                            extra='mailapp_account = "Exchange"')))
+        self.assertEqual(cfg.accounts[0].mailapp_account, "Exchange")
+
+    def test_bad_account_values_name_their_key(self):
+        for bad, key in ((block(kind="smtp"), "kind"), (block(lane="other"), "lane"),
+                         (block(extra='bogus = 1'), "bogus")):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError) as cm:
+                    load_config(blocks_text(bad))
+                self.assertIn(key, str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            load_config(blocks_text(block("a@example.com"), block("a@example.com", sends=False)))
+        self.assertIn("a@example.com", str(cm.exception))
+        with self.assertRaises(ValueError):
+            load_config(blocks_text())
+
+    def test_lane_account_skips_non_sending(self):
+        cfg = load_config(SHIPPED_SEND_CONFIG)
+        self.assertEqual(cfg.lane_account("general").address, "devanshuchi9@gmail.com")
+        self.assertIsNone(cfg.lane_account("sponsor"))  # the Northeastern block does not send until Phase B
+
+    def test_window_and_holidays(self):
+        cfg = load_config(SHIPPED_SEND_CONFIG)
+        self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 0), time(15, 0)))
+        self.assertEqual(cfg.holidays, tuple(date.fromisoformat(d) for d in (
+            "2026-11-26", "2026-11-27", "2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01")))
+
+    def test_spread_keys_are_checked(self):
+        self.refused("spread_jitter", spread_jitter="[1.4, 0.6]")
+        self.refused("spread_jitter", spread_jitter="[0, 1.4]")
+        self.refused("spread_gap_minutes", spread_gap_minutes="[45, 2]")
+        self.refused("spread_gap_minutes", spread_gap_minutes="[0, 45]")
+        self.refused("spread_gap_minutes", spread_gap_minutes="[2]")
+        self.refused("spread_floor_slack", spread_floor_slack="1")
+        self.refused("spread_floor_slack", spread_floor_slack="0")
+        self.assertEqual(load_config(SHIPPED_SEND_CONFIG).spread_floor_slack, 0.75)
 
 
 if __name__ == "__main__":

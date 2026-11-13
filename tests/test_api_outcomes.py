@@ -15,6 +15,7 @@ from outreach.api.queries import outcomes as outcome_queries
 from outreach.outcomes.wins import is_log_win
 from outreach.sending import queue
 from outreach.store import connect
+from outreach.sending.accounts import in_play as _in_play
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
 
@@ -643,14 +644,16 @@ class CompanyHold(OutcomeCase):
     def verdict(self) -> str | None:
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         return found.get(self.queued)
 
     def claimable(self) -> bool:
         """Whether the claim's own stop re-check would let the queued email go (it never reaches Gmail here)."""
-        from outreach.sending import claim
+        from outreach.sending import accounts, claim
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.queued)
-        taken = claim.claim(self.conn, q, rfc_id="<hold.test@gmail.com>", now=NOW)
+        general = accounts.sync(self.conn, self.send_cfg, NOW)[self.send_cfg.lane_account("general").address]
+        taken = claim.claim(self.conn, q, general, rfc_id="<hold.test@gmail.com>",
+                            now=NOW)
         if taken:  # put it back: this test only asks whether the claim would go ahead
             self.conn.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (self.queued,))
         return taken
@@ -695,7 +698,7 @@ class CompanyHold(OutcomeCase):
         self.assertEqual(self.answer(t, "replied", reply_kind="asked_to_stop").status_code, 200)
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        reasons = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        reasons = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         self.assertNotIn(approved, reasons)
         self.assertNotEqual(reasons.get(self.queued), "ready")  # the stop reply also holds the company
         self.assertIsNone(self.state_of(planned))
@@ -729,12 +732,12 @@ class ReplierStops(OutcomeCase):
     def reason(self, message_id):
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         return found.get(message_id)
 
     def test_a_linkedin_reply_stops_that_persons_own_email_even_after_the_hold_is_released(self):
         from outreach.drafts.followups import RELEASE_KIND
-        from outreach.sending import claim
+        from outreach.sending import accounts, claim
         t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")
         self.assertEqual(self.answer(t, "replied", reply_kind="interested").status_code, 200)
         self.assertEqual(self.reason(self.lena_email), "reply_stop")
@@ -743,7 +746,8 @@ class ReplierStops(OutcomeCase):
                      actor="devanshu", at="2026-11-10T16:00:00Z")  # #11 Task 19's release, when it lands
         self.assertEqual(self.reason(self.lena_email), "reply_stop")
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.lena_email)
-        self.assertFalse(claim.claim(self.conn, q, rfc_id="<lena.1@gmail.com>", now=NOW))
+        general = accounts.sync(self.conn, self.send_cfg, NOW)[self.send_cfg.lane_account("general").address]
+        self.assertFalse(claim.claim(self.conn, q, general, rfc_id="<lena.1@gmail.com>", now=NOW))
 
     def test_a_cleared_reply_does_not_stop_the_persons_email(self):
         t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")

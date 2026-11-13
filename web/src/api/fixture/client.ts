@@ -5,7 +5,7 @@ import type {
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
   BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedRow, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus,
 } from '../types';
-import { buildFixture, computeShell, countGroups, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
+import { buildFixture, computeShell, countGroups, fixtureAccounts, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
 import { buildJobs, CHECK_BOARDS, CHECK_STEP_MS, CHECK_TOOK_S, CHECK_WALK, foundJobs, jobsView, sortJobs } from './jobs-data';
 import { REACHED, REACHED_CLEARED, standingMark } from '@/lib/reached';
@@ -703,6 +703,7 @@ export class FixtureClient implements OutreachClient {
       const s = this.db.outbox.sending;
       if (s.state === 'running') {
         Object.assign(s, { state: 'paused_by_you', pausedReason: 'Paused by you', pausedAt: this.now, nextSend: null, noneReason: 'Sending is paused until you resume.', revision: s.revision + 1 });
+        s.accounts = fixtureAccounts(s.sentToday, s.limitToday, { state: 'paused_by_you', text: `paused by you, ${s.sentToday} of ${s.limitToday} today` });
       }
       return s;
     });
@@ -711,10 +712,11 @@ export class FixtureClient implements OutreachClient {
   resumeSending(acknowledgeBlock: boolean, o: WriteOptions): Promise<SendingStatus> {
     return this.write(o, () => {
       const s = this.db.outbox.sending;
-      if (s.state === 'signed_out') throw notAllowed('Gmail is signed out. Sign in from the live checkout first.');
+      if (s.state === 'signed_out') throw notAllowed('Gmail is signed out. Sign in from the live checkout first: python -m outreach.sending auth --account devanshuchi9@gmail.com');
       if (s.state === 'paused_hard_block' && !acknowledgeBlock) throw notAllowed('Gmail blocked sending. Read the message and confirm before you resume.');
       if (s.state === 'paused_by_you' || s.state === 'paused_hard_block') {
         Object.assign(s, { state: 'running', pausedReason: '', pausedAt: null, gmailMessage: null, noneReason: null, revision: s.revision + 1 });
+        s.accounts = fixtureAccounts(s.sentToday, s.limitToday);
       }
       return s;
     });

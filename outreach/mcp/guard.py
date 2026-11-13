@@ -10,7 +10,9 @@ live store outside the live checkout are refused exactly as everywhere else), th
    note not saved by claude as proposed; any LinkedIn log row or outreach touch but a new request he says he sent
    (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key, no outcome, no undo, paired with
    a log row that was not taken back and has no live touch), any insert there at all on a connection whose grants
-   do not insert there, and any change to either table; an event or review item by another actor; a reading or a queue row of any
+   do not insert there, and any change to either table; any dead address (`bounced_address`) but a new one Claude
+   marked, any insert there on a connection whose grants do not insert there, and any change to it; an event or
+   review item by another actor; a reading or a queue row of any
    reader version but a side session's (`side-`, #32's `side_version`, which can never be promoted, so a reading
    from Claude never decides a posting), and on the night's queue rows any change but their order; any write at all
    to the tables in `NEVER_TABLES` (the sender, companies, no-go rows, decisions and the rest); and every DELETE.
@@ -32,7 +34,8 @@ from outreach.reader.version import is_side_sql
 from outreach.store import connect, db_path
 from outreach.store.db import normalise
 
-__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "MOVE_ONLY_COLUMNS", "TRIGGER_PREFIX", "open_guarded",
+__all__ = ["Grant", "GrantError", "NEVER_TABLES", "NEVER_COLUMNS", "BRIDGE_TABLES", "INSERT_ONLY_TABLES",
+           "MOVE_ONLY_COLUMNS", "TRIGGER_PREFIX", "open_guarded",
            "install_triggers", "install_authorizer", "check_grants", "check_store"]
 
 TRIGGER_PREFIX = "mcp_"
@@ -46,12 +49,16 @@ NEVER_TABLES = frozenset({
     "daily_list", "daily_list_entry", "company", "company_alias", "company_name_key", "no_go", "board", "board_read",
     "watched_page", "job_run", "ruleset", "decision", "schema_migration", "import_record", "mx_check", "win_seen",
     "watch_dismissal", "source", "company_source", "shared_key", "work_tier", "company_post", "company_score",
-    "posting", "posting_body",
+    "posting", "posting_body", "sender_account", "company_sender",
 })
 
 # The two tables only `log_sent` holds a grant on (insert only; tests/test_mcp_write_grants pins it). Every other
 # tool leaves them exactly as they were.
 BRIDGE_TABLES = frozenset({"linkedin_log", "outreach_touch"})
+# Tables a tool may only add rows to, and only with an insert grant: on every other connection the triggers treat
+# them as never tables. `bounced_address` is the dead-address list (#9 multi-sender ruling, 2026-11-12): only
+# `mark_email_bounced` adds to it, a new address marked by Claude, and nothing changes or removes a row.
+INSERT_ONLY_TABLES = BRIDGE_TABLES | {"bounced_address"}
 
 # Columns no grant may name. `touch` maps to None: no column of a touch is ever updated through MCP.
 _MESSAGE_SEND_COLUMNS = frozenset({"touch_id", "seq", "due_on", "approved_at", "pending_rfc_id", "claimed_at",
@@ -65,6 +72,7 @@ NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
     "posting_reading": None,
     "linkedin_log": None,
     "outreach_touch": None,
+    "bounced_address": None,
 }
 
 
@@ -135,7 +143,7 @@ _VALUE_TRIGGERS = (
      "NEW.state IS NOT 'open' OR NEW.origin IS NOT 'sender' OR NEW.close_reason IS NOT NULL "
      "OR NEW.gmail_thread_id IS NOT NULL OR NEW.first_rfc_id IS NOT NULL OR NEW.first_sent_at IS NOT NULL "
      "OR NEW.replied_at IS NOT NULL OR NEW.reply_kind IS NOT NULL OR NEW.bounced_at IS NOT NULL "
-     "OR NEW.auto_reply_at IS NOT NULL OR NEW.closed_at IS NOT NULL",
+     "OR NEW.auto_reply_at IS NOT NULL OR NEW.closed_at IS NOT NULL OR NEW.account_id IS NOT NULL",
      "a touch from Claude starts open with nothing sent"),
     ("touch_update", "BEFORE UPDATE ON main.touch", None, "Claude never changes a touch"),
     ("person_insert", "BEFORE INSERT ON main.person", "NEW.added_by IS NOT 'claude'",
@@ -201,6 +209,14 @@ _VALUE_TRIGGERS = (
      "a touch from Claude is a LinkedIn request he sent, logged by log_sent, with no outcome"),
     ("outreach_touch_update", "BEFORE UPDATE ON main.outreach_touch", None,
      "Claude never changes a touch: no reply, interview, referral or undo"),
+    # A dead address Claude clears with mark_email_bounced: a new row, marked, naming the person it came off. An
+    # address already on the list keeps its first row (an insert that would replace it is refused here).
+    ("bounced_address_insert", "BEFORE INSERT ON main.bounced_address",
+     "NEW.source IS NOT 'marked' OR NEW.source_ref IS '' OR NEW.source_ref IS NULL "
+     "OR EXISTS (SELECT 1 FROM main.bounced_address b WHERE b.address = NEW.address)",
+     "Claude adds only a new dead address it marked, never another source or a change"),
+    ("bounced_address_update", "BEFORE UPDATE ON main.bounced_address", None,
+     "Claude never changes the dead-address list"),
 )
 
 
@@ -218,8 +234,8 @@ def _trigger_sql(conn: sqlite3.Connection, grants: Mapping[str, Grant]) -> list[
     for table in tables:
         statements.append(f"CREATE TEMP TRIGGER {TRIGGER_PREFIX}no_delete_{table} BEFORE DELETE ON main.{table} "
                           f"FOR EACH ROW BEGIN {_refuse('Claude never deletes a row')} END")
-        if table in BRIDGE_TABLES and not (grants.get(table) and grants[table].insert):
-            # Only log_sent's connection may insert here; on every other tool's it stays a never table.
+        if table in INSERT_ONLY_TABLES and not (grants.get(table) and grants[table].insert):
+            # Only a connection with the insert grant may insert here; on every other tool's it stays a never table.
             statements.append(
                 f"CREATE TEMP TRIGGER {TRIGGER_PREFIX}never_insert_{table} BEFORE INSERT ON main.{table} "
                 f"FOR EACH ROW BEGIN {_refuse(f'Claude never writes {table}')} END")

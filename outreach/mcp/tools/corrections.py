@@ -9,6 +9,10 @@ A person on the email channel must have an address, so clearing it moves them to
 and giving an address to a LinkedIn person makes them an email contact, as `add_people` already does. A replacement
 address is refused after a sent first email that did not bounce: the follow-ups ride that Gmail thread and a new
 address may be a different human. Removing a person is not here (#183).
+
+A cleared address goes on the dead-address list (`bounced_address`, source `marked`, with the person's id), which the
+sender refuses for good; no correction may put an address from that list back on anyone (#9 multi-sender ruling,
+2026-11-12).
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ from pydantic import Field
 from outreach.drafts.followups import no_go_sets
 from outreach.mcp.guard import MOVE_ONLY_COLUMNS, Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
+from outreach.mcp.tools.people import refuse_bounced
 from outreach.mcp.tools.reads import MAX_ID, SENT_STATES, Family, company_row, resolve
 from outreach.mcp.tools.research import clean, raise_flag_in
 from outreach.sources.keys import EMAIL, linkedin_key
@@ -90,6 +95,7 @@ def _email_changes(conn: sqlite3.Connection, person: sqlite3.Row, new_email: str
     if new_email == old_email:
         return {}
     if new_email is not None:
+        refuse_bounced(conn, new_email, person["name"])
         other = conn.execute("SELECT person_id, name FROM person WHERE email = ? AND person_id <> ?",
                              (new_email, person["person_id"])).fetchone()
         if other is not None:
@@ -224,6 +230,9 @@ def mark_email_bounced(ctx: Ctx, args: BouncedInput) -> dict:
     changes = _email_changes(conn, person, None)
     with transaction(conn):
         _write(conn, person["person_id"], changes, ctx.now)
+        if not conn.execute("SELECT 1 FROM bounced_address WHERE address = ?", (old.strip(),)).fetchone():
+            conn.execute("INSERT INTO bounced_address(address, first_seen_at, source, source_ref) "
+                         "VALUES (?, ?, 'marked', ?)", (old.strip(), ctx.now, str(person["person_id"])))
         noted = record_edit(ctx, person, changes, kind="email_bounced", extra={"reason": reason},
                             summary=clean(f"Claude cleared {person['name']}'s email {old} as bounced: {reason}"))
     return {"person_id": person["person_id"], "cleared_email": old, "channel": _channel_after(person, changes),
@@ -283,11 +292,13 @@ TOOLS = (
               "event": Grant(insert=True)}),
     ToolSpec("mark_email_bounced",
              "An address bounced or is dead: clear it from the person and record why. They become a LinkedIn "
-             "contact. Writes no message and no touch: the sender already holds any email to a person with no "
-             "address. Applies at once, logs the old address and raises a Needs-you note.",
+             "contact, and the address is never used again. Writes no message and no touch: the sender already "
+             "holds any email to a person with no address. Applies at once, logs the old address and raises a "
+             "Needs-you note.",
              BouncedInput, mark_email_bounced,
              {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at", "revision"})),
-              "review_item": Grant(insert=True), "event": Grant(insert=True)}),
+              "review_item": Grant(insert=True), "event": Grant(insert=True),
+              "bounced_address": Grant(insert=True)}),
     ToolSpec("move_person",
              "A person works at a different company now: move them there. Applies at once, logs both companies "
              "and raises a Needs-you note. Earlier sends and events stay under the company they happened at. "

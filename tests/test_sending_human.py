@@ -1,3 +1,4 @@
+import dataclasses
 import random
 import statistics
 import unittest
@@ -11,34 +12,77 @@ CFG = load_config(SHIPPED_SEND_CONFIG)
 T0 = datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc)
 
 
-class GapTest(unittest.TestCase):
-    def draws(self, n=20000, seed=1):
-        rng = random.Random(seed)
-        return [human.next_gap_minutes(rng, CFG) for _ in range(n)]
+class MiddleRng:
+    """An rng whose every draw is the middle: no break (random 0.5 is above the break chance), a factor of 1.0."""
+
+    def random(self):
+        return 0.5
+
+    def uniform(self, low, high):
+        return (low + high) / 2
+
+
+class SpreadGapTest(unittest.TestCase):
+    def test_spread_gap_formula(self):
+        self.assertEqual(human.spread_gap(420, 15, MiddleRng(), CFG), 26.25)
+
+    def test_spread_gap_clipped(self):
+        low, high = CFG.spread_gap_minutes
+        self.assertEqual(human.spread_gap(10, 15, MiddleRng(), CFG), low)
+        self.assertEqual(human.spread_gap(420, 2, MiddleRng(), CFG), high)
+
+    def test_nothing_left_gives_the_high_clip(self):
+        self.assertEqual(human.spread_gap(420, 0, MiddleRng(), CFG), CFG.spread_gap_minutes[1])
+        self.assertEqual(human.spread_gap(420, -3, random.Random(1), CFG), CFG.spread_gap_minutes[1])
+
+    def test_the_factor_runs_across_the_jitter_range(self):
+        rng = random.Random(1)
+        gaps = [human.spread_gap(420, 15, rng, dataclasses.replace(CFG, break_chance=0.0001)) for _ in range(3000)]
+        low, high = CFG.spread_jitter
+        self.assertTrue(all(26.25 * low - 1e-9 <= g <= 26.25 * high + 1e-9 for g in gaps if g < 40))
+        self.assertGreater(len({round(g) for g in gaps}), 10)
 
     def test_same_seed_same_gaps(self):
-        self.assertEqual(self.draws(50, seed=7), self.draws(50, seed=7))
-        self.assertNotEqual(self.draws(50, seed=7), self.draws(50, seed=8))
+        def draws(seed):
+            rng = random.Random(seed)
+            return [human.spread_gap(300, 10, rng, CFG) for _ in range(50)]
+        self.assertEqual(draws(7), draws(7))
+        self.assertNotEqual(draws(7), draws(8))
 
-    def test_every_gap_is_a_clipped_gap_or_a_break(self):
-        low, high = CFG.gap_minutes
-        b_low, b_high = CFG.break_minutes
-        for g in self.draws(5000):
-            self.assertTrue(low <= g <= high or b_low <= g <= b_high, g)
+    def test_a_break_is_in_break_minutes(self):
+        always = dataclasses.replace(CFG, break_chance=0.999999)
+        low, high = CFG.break_minutes
+        for seed in range(20):
+            self.assertTrue(low <= human.spread_gap(420, 15, random.Random(seed), always) <= high)
 
-    def test_gaps_are_not_flat(self):
-        gaps = self.draws()
-        self.assertGreater(statistics.pstdev(gaps), 2.0)  # uniform 4 to 9 minutes has a spread of 1.4
-        self.assertGreater(len({round(g) for g in gaps}), 15)  # many different whole-minute gaps
-        self.assertTrue(any(g < 2 for g in gaps) and any(g > 12 for g in gaps))  # quick ones and real pauses
+    def test_the_expected_gap_is_the_formula_at_factor_one(self):
+        self.assertEqual(human.expected_gap_minutes(420, 15, CFG), 26.25)
+        self.assertEqual(human.expected_gap_minutes(10, 15, CFG), CFG.spread_gap_minutes[0])
+        self.assertEqual(human.expected_gap_minutes(420, 0, CFG), CFG.spread_gap_minutes[1])
 
-    def test_the_mean_is_what_the_projection_uses(self):
-        gaps = self.draws()
-        self.assertAlmostEqual(statistics.fmean(gaps), human.mean_gap_minutes(CFG), delta=0.5)
+    def test_a_late_start_sends_fewer_not_faster(self):
+        # 30 minutes left and 14 sends left would be 2 minute gaps; the full day's pace (a 420 minute window over a
+        # limit of 15, plus one: 26.25) times the slack is the floor before the factor.
+        self.assertEqual(CFG.spread_floor_slack, 0.75)
+        floor = 0.75 * 420 / 16
+        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), CFG, day_minutes=420, limit=15), floor)
+        self.assertEqual(human.expected_gap_minutes(30, 14, CFG, day_minutes=420, limit=15), floor)
+        whole = dataclasses.replace(CFG, spread_floor_slack=0.9999)
+        self.assertAlmostEqual(human.spread_gap(30, 14, MiddleRng(), whole, day_minutes=420, limit=15), 26.25, places=2)
+        # Early in the day the minutes left over the sends left is the larger, and it still rules.
+        self.assertEqual(human.spread_gap(300, 9, MiddleRng(), CFG, day_minutes=420, limit=15), 30.0)
+        self.assertEqual(human.expected_gap_minutes(300, 9, CFG, day_minutes=420, limit=15), 30.0)
+        # The factor and the clip still apply on top of the floor.
+        rng = random.Random(3)
+        no_breaks = dataclasses.replace(CFG, break_chance=0.0)
+        gaps = [human.spread_gap(30, 14, rng, no_breaks, day_minutes=420, limit=15) for _ in range(2000)]
+        self.assertTrue(all(floor * 0.6 - 1e-9 <= g <= floor * 1.4 + 1e-9 for g in gaps))
 
-    def test_a_day_of_sends_fits_the_window(self):
-        # 100 sends in an 8 hour window need an average gap under 4.8 minutes, tick spacing included (up to 2 more).
-        self.assertLess(human.mean_gap_minutes(CFG) + 1, 4.8)
+    def test_the_mean_draw_is_the_expected_gap(self):
+        rng = random.Random(5)
+        no_breaks = dataclasses.replace(CFG, break_chance=0.0001)
+        gaps = [human.spread_gap(420, 15, rng, no_breaks) for _ in range(20000)]
+        self.assertAlmostEqual(statistics.fmean(gaps), human.expected_gap_minutes(420, 15, CFG), delta=0.5)
 
 
 class ChooseTest(unittest.TestCase):

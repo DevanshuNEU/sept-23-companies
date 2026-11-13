@@ -9,18 +9,20 @@ import json
 import random
 import sqlite3
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 from outreach.drafts.followups import company_map, due_followups, held_survivors
-from outreach.sending import claim, inbound, queue
+from outreach.sending import accounts, claim, inbound, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
-from outreach.sending.mail import GmailError
+from outreach.sending.mail import GmailError, Sent
 from outreach.store import transaction
-from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, prove
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
+CFG = dataclasses.replace(solo(load_config()), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
 
 
 class Base(unittest.TestCase):
@@ -66,7 +68,7 @@ class Base(unittest.TestCase):
         mid = seed_message(self.db, person, subject=subject or f"Quick question about the platform team {self.n}")
         q = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == mid)
         self.assertEqual(claim.send_one(self.db, self.gmail, q, CFG, now=iso(self.clock()), clock=self.clock,
-                                        rng=self.rng, account=CFG.from_address), "sent")
+                                        rng=self.rng, account=accounts.primary(self.db, CFG)), "sent")
         touch = self.db.execute("SELECT touch_id FROM touch WHERE person_id = ?", (person,)).fetchone()[0]
         return person, touch, self.gmail.sent[-1][1]
 
@@ -75,14 +77,19 @@ class Base(unittest.TestCase):
         person = self.person(company)
         return seed_message(self.db, person, subject=f"Hello from Devanshu {self.n}")
 
-    def sync(self, cfg=CFG):
-        """One tick's inbound steps: read with no transaction open, then apply in one transaction."""
-        snap = inbound.snapshot(self.db, now=self.clock(), cfg=cfg)
-        read = inbound.read_inbound(self.gmail, snap, cfg=cfg, now=self.clock())
+    def sync(self, cfg=CFG, *, gmail=None, account=None):
+        """One tick's inbound steps for one account (account 1 unless given): read with no transaction open, then
+        apply in one transaction."""
+        account = account or accounts.primary(self.db, cfg)
+        read = inbound.read_inbound(self.db, gmail or self.gmail, account, cfg=cfg, now=self.clock())
         with transaction(self.db):
-            counts = inbound.apply_inbound(self.db, read, account=CFG.from_address, now=self.clock(), cfg=cfg,
-                                           notify=self.notify)
+            counts = inbound.apply_inbound(self.db, read, account, now=self.clock(), cfg=cfg, notify=self.notify)
         return read, counts
+
+    def cursor(self, account_id=1):
+        """The account's own history cursor (`sender_account.history_id`)."""
+        return self.db.execute("SELECT history_id FROM sender_account WHERE account_id = ?",
+                               (account_id,)).fetchone()[0]
 
     def touch(self, touch_id):
         return self.db.execute("SELECT * FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
@@ -99,7 +106,7 @@ class Base(unittest.TestCase):
         return row[0] if row else None
 
     def verdict(self, message_id):
-        found = {v.message_id: v.reason for v in queue.verdicts(self.db, self.clock(), CFG, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None, gate=None)}
         return found.get(message_id)
 
     def events(self, entity, kind, entity_id=None):
@@ -114,6 +121,10 @@ class Base(unittest.TestCase):
 
     def sender(self):
         return self.db.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
+
+    def account_row(self):
+        """Account 1's own row: where a hard block lands (sender row 1 stays his button)."""
+        return self.db.execute("SELECT * FROM sender_account WHERE account_id = 1").fetchone()
 
     def approve_followup(self, touch_id, subject):
         """Stands in for #13's draft and his click on the planned follow-up."""
@@ -256,7 +267,7 @@ class HumanReplyTest(Base):
         self.sync()  # takes the cursor: mail outside the tracked threads is read by history from here
         reply = self.gmail.deliver_reply(sent, "p1@acme.co", subject="A new subject, so Gmail starts a new thread",
                                          new_thread=True)
-        self.assertNotIn(reply.thread_id, inbound.tracked_threads(self.db))
+        self.assertNotIn(reply.thread_id, inbound.tracked_threads(self.db, 1))
         _, counts = self.sync()
         self.assertEqual(counts["replies"], 1)
         self.assertEqual(self.touch(touch_id)["state"], "replied")
@@ -293,7 +304,7 @@ class HumanReplyTest(Base):
         early = dataclasses.replace(meta, internal_ms=meta.internal_ms - 60_000)  # Gmail's clock runs behind
         read = inbound.InboundRead(metas=[early], new_history_id=None, complete=False)
         with transaction(self.db):
-            inbound.apply_inbound(self.db, read, account=CFG.from_address, now=self.clock(), cfg=CFG,
+            inbound.apply_inbound(self.db, read, accounts.primary(self.db, CFG), now=self.clock(), cfg=CFG,
                                   notify=self.notify)
         self.assertEqual(self.touch(touch_id)["state"], "replied")
         self.assertIsNotNone(self.outreach(touch_id)["replied_at"])
@@ -350,7 +361,7 @@ class BounceTest(Base):
         self.assertEqual(self.planned(touch_id), [])
         stopped = self.events("touch", "skipped_by_sender", touch_id)
         self.assertEqual(json.loads(stopped[0]["detail"])["reason"], "bounced")
-        self.assertEqual(signals.bounce_rate_3d(self.db, self.clock().date(), CFG), 1.0)
+        self.assertEqual(signals.bounce_rate_3d(self.db, 1, self.clock().date(), CFG), 1.0)
         self.assertEqual(len(self.events("touch", "bounced", touch_id)), 1)
 
     def test_bounce_leaves_no_follow_up_sendable(self):
@@ -359,14 +370,14 @@ class BounceTest(Base):
         self.gmail.deliver_bounce(sent, dsn="hard")
         self.sync()
         self.assertEqual(self.state(approved), "skipped")
-        self.assertNotIn(approved, {v.message_id for v in queue.verdicts(self.db, self.clock(), CFG, day=None,
+        self.assertNotIn(approved, {v.message_id for v in queue.verdicts(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None,
                                                                          gate=None)})
         self.assertEqual(due_followups(self.db, self.clock().date(), days_ahead=30), [])
 
     def test_unthreaded_bounce_is_matched(self):
         _, touch_id, sent = self.send_first()
         self.sync()  # takes a cursor, so the next read is by history and sees INBOX mail outside the thread
-        self.assertTrue(self.sender()["history_id"])
+        self.assertTrue(self.cursor())
         self.gmail.deliver_bounce(sent, dsn="hard", threaded=False)
         _, counts = self.sync()
         self.assertEqual(counts["bounces"], 1)
@@ -422,8 +433,9 @@ class BounceTest(Base):
         self.assertIsNone(self.touch(touch_id)["bounced_at"])
         self.assertEqual(len(self.planned(touch_id)), 1)
         self.assertEqual(len(self.events("sender", "gmail_limit")), 1)
-        sender = self.sender()
+        sender = self.account_row()
         self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
+        self.assertEqual(self.sender()["paused"], 0)
         self.assertEqual([(r["kind"], r["dsn_class"]) for r in self.inbound_rows()], [("bounce", "limit")])
 
     def test_an_unmatched_limit_notice_still_pauses(self):
@@ -434,10 +446,10 @@ class BounceTest(Base):
         limit = dataclasses.replace(meta, snippet="You have reached a limit for sending mail.")
         read = inbound.InboundRead(metas=[limit], new_history_id=None, complete=False)
         with transaction(self.db):
-            inbound.apply_inbound(self.db, read, account=CFG.from_address, now=self.clock(), cfg=CFG,
+            inbound.apply_inbound(self.db, read, accounts.primary(self.db, CFG), now=self.clock(), cfg=CFG,
                                   notify=self.notify)
         self.assertEqual(len(self.events("sender", "gmail_limit")), 1)
-        self.assertEqual(self.sender()["pause_kind"], "hard_block")
+        self.assertEqual(self.account_row()["pause_kind"], "hard_block")
 
 
 class BounceNoGoTest(Base):
@@ -509,13 +521,13 @@ class BounceNoGoTest(Base):
         from outreach.sending import signals
         _, _, sent = self.send_first()
         _, _, other = self.send_first()
-        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 2)
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None).sent_today, 2)
         self.gmail.deliver_bounce(sent, dsn="blocked")
         self.sync()
         today = self.clock().date()
-        self.assertEqual(signals.sends_on(self.db, today, CFG), 2)  # the bounce rate still sees both
-        self.assertEqual(signals.counted_sends_on(self.db, today, CFG), 1)
-        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 1)
+        self.assertEqual(signals.sends_on(self.db, 1, today, CFG), 2)  # the bounce rate still sees both
+        self.assertEqual(signals.counted_sends_on(self.db, 1, today, CFG), 1)
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None).sent_today, 1)
 
 
 class StopTagTest(Base):
@@ -545,7 +557,7 @@ class StopTagTest(Base):
         self.tag(second, self.clock(), on="outreach_touch")
         self.assertEqual(self.observe(), 1)
         self.assertEqual(len(self.events("sender", "stop_replies_hard")), 1)
-        sender = self.sender()
+        sender = self.account_row()
         self.assertEqual((sender["paused"], sender["pause_kind"]), (1, "hard_block"))
 
     def test_stop_tag_seen_twice_counts_once(self):
@@ -574,7 +586,7 @@ class ReadTest(Base):
         self.clock.advance(days=50)
         _, touch_id, sent = self.send_first()
         self.sync()
-        cursor = self.sender()["history_id"]
+        cursor = self.cursor()
         self.gmail.deliver_reply(sent, "p2@acme.co")
         self.gmail.expire_history()
         self.gmail.calls.clear()
@@ -584,7 +596,7 @@ class ReadTest(Base):
         self.assertEqual(self.gmail.calls.count("thread"), 1)  # the touch sent 50 days ago is not read again
         self.assertEqual(self.touch(touch_id)["state"], "replied")
         self.assertEqual(self.touch(old_touch)["state"], "open")
-        self.assertNotEqual(self.sender()["history_id"], cursor)
+        self.assertNotEqual(self.cursor(), cursor)
         self.gmail.calls.clear()
         self.sync()
         self.assertEqual(self.gmail.calls, ["history"])  # back on the cursor
@@ -597,7 +609,7 @@ class ReadTest(Base):
         read, _ = self.sync()
         self.assertEqual(self.gmail.calls, ["profile", "thread"])
         self.assertEqual(read.new_history_id, history_before_threads)
-        self.assertEqual(self.sender()["history_id"], history_before_threads)
+        self.assertEqual(self.cursor(), history_before_threads)
         self.assertEqual(self.touch(touch_id)["state"], "replied")
 
     def test_a_deleted_thread_does_not_stop_the_read(self):
@@ -605,27 +617,27 @@ class ReadTest(Base):
         self.db.execute("UPDATE touch SET gmail_thread_id = 'gone' WHERE touch_id = ?", (touch_id,))
         read, _ = self.sync()
         self.assertTrue(read.complete)
-        self.assertTrue(self.sender()["history_id"])
+        self.assertTrue(self.cursor())
 
     def test_a_partial_read_moves_the_cursor_only_past_what_was_read(self):
         _, touch_id, sent = self.send_first()
         self.sync()
-        cursor = int(self.sender()["history_id"])
+        cursor = int(self.cursor())
         self.gmail.deliver_reply(sent, "p1@acme.co")
         self.gmail.deliver_unrelated("news@shop.example", "Sale")
         read, _ = self.sync(dataclasses.replace(CFG, inbound_meta_cap=1))
         self.assertFalse(read.complete)
         self.assertEqual(self.touch(touch_id)["state"], "replied")  # tracked threads are read first
-        moved = int(self.sender()["history_id"])
+        moved = int(self.cursor())
         self.assertGreater(moved, cursor)  # past the reply, not past the unread sale notice
         self.gmail.deliver_reply(sent, "p1@acme.co")
         self.fail_on["message"] = GmailError("server", 503, "backend error")
         read, _ = self.sync()
         self.assertFalse(read.complete)
-        self.assertEqual(int(self.sender()["history_id"]), moved)  # nothing read, nothing passed
+        self.assertEqual(int(self.cursor()), moved)  # nothing read, nothing passed
         read, _ = self.sync()
         self.assertTrue(read.complete)
-        self.assertGreater(int(self.sender()["history_id"]), moved)
+        self.assertGreater(int(self.cursor()), moved)
         self.assertEqual(len(self.inbound_rows()), 2)
 
     def backlog(self, sent, before=6, after=5):
@@ -640,12 +652,12 @@ class ReadTest(Base):
         _, touch_id, sent = self.send_first()
         self.sync(cfg)
         self.backlog(sent)
-        cursors, reads = [int(self.sender()["history_id"])], 0
+        cursors, reads = [int(self.cursor())], 0
         for _ in range(5):
             self.gmail.calls.clear()
             read, _ = self.sync(cfg)
             reads += self.gmail.calls.count("message")
-            cursors.append(int(self.sender()["history_id"]))
+            cursors.append(int(self.cursor()))
             if read.complete:
                 break
         self.assertTrue(read.complete)
@@ -659,7 +671,7 @@ class ReadTest(Base):
         cfg = dataclasses.replace(CFG, inbound_meta_cap=4)
         _, touch_id, sent = self.send_first()
         self.sync(cfg)
-        cursor = self.sender()["history_id"]
+        cursor = self.cursor()
         self.backlog(sent)
         real = self.gmail.history
 
@@ -674,7 +686,7 @@ class ReadTest(Base):
             reads += self.gmail.calls.count("message")
             if read.complete:
                 break
-            self.assertEqual(self.sender()["history_id"], cursor)
+            self.assertEqual(self.cursor(), cursor)
         self.assertTrue(read.complete)
         self.assertEqual(reads, 12)
         self.assertEqual(self.touch(touch_id)["state"], "bounced")
@@ -695,11 +707,11 @@ class ReadTest(Base):
     def test_a_failed_history_call_is_an_incomplete_read_not_no_replies(self):
         self.send_first()
         self.sync()
-        cursor = self.sender()["history_id"]
+        cursor = self.cursor()
         self.fail_on["history"] = GmailError("network", None, "offline")
         read, counts = self.sync()
         self.assertFalse(read.complete)
-        self.assertEqual(self.sender()["history_id"], cursor)
+        self.assertEqual(self.cursor(), cursor)
 
     def test_inbox_noise_writes_nothing(self):
         _, touch_id, sent = self.send_first()
@@ -733,6 +745,219 @@ class ReadTest(Base):
         self.assertIn("history", self.gmail.calls)
         self.assertIn("message", self.gmail.calls)
         self.assertEqual(self.problems, [])
+
+
+GMAIL = "devanshurajesh@gmail.com"
+GENERAL = "devanshuchi9@gmail.com"
+
+
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
+class AccountInboundTest(Base):
+    """Inbound mail per sender account (#9 multi-sender ruling, 2026-11-12): each account reads its own mailbox
+    with its own history cursor, a Gmail thread id means something only in its own mailbox, and a reply in any
+    account stops the company on every account."""
+
+    def setUp(self):
+        super().setUp()
+        self.rows = accounts.sync(self.db, MULTI, iso(MON))
+        self.one, self.two = self.rows[GMAIL], self.rows[GENERAL]
+        self.gmail2 = FakeGmail(clock=self.clock, account=GENERAL, id_prefix="b", probe=self.probe,
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
+
+    def sync_two(self, cfg=MULTI):
+        return self.sync(cfg, gmail=self.gmail2, account=self.two)
+
+    def on_two(self, company=None, *, thread=None):
+        """A first email account 2 sent (in its own mailbox, in `thread` when given). Returns (person, touch,
+        Sent)."""
+        person = self.person(company)
+        email = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0]
+        rfc = f"<two.{self.n}@gmail.com>"
+        meta = self.gmail2.add_to_sent(email, f"A question about your platform {self.n}", message_id=rfc,
+                                       thread_id=thread)
+        seed_sent(self.db, person, at=self.clock(), rfc=rfc, thread=meta.thread_id, account_id=self.two.account_id)
+        touch = self.db.execute("SELECT touch_id FROM touch WHERE person_id = ?", (person,)).fetchone()[0]
+        return person, touch, Sent(meta.gmail_message_id, meta.thread_id, rfc)
+
+    def test_cursor_per_account(self):
+        _, mine, sent1 = self.send_first()
+        _, theirs, sent2 = self.on_two()
+        self.sync()
+        self.assertTrue(self.cursor(1))
+        self.assertEqual(self.cursor(self.two.account_id), "")
+        self.gmail2.calls.clear()
+        read, _ = self.sync_two()
+        self.assertTrue(read.complete)
+        # No cursor yet: its profile, then only its own recent thread (not account 1's).
+        self.assertEqual(self.gmail2.calls, ["profile", "thread"])
+        self.assertEqual(self.cursor(self.two.account_id), self.gmail2.profile().history_id)
+        self.gmail2.deliver_reply(sent2, "p2@acme.co")
+        self.gmail.calls.clear()
+        self.sync()
+        self.assertEqual(self.gmail.calls, ["history"])  # account 1's mailbox has nothing new
+        self.assertEqual(self.touch(theirs)["state"], "open")
+        self.gmail2.calls.clear()
+        self.sync_two()
+        self.assertEqual(self.gmail2.calls[0], "history")  # account 2 reads by its own cursor
+        self.assertEqual(self.touch(theirs)["state"], "replied")
+        self.assertEqual(self.touch(mine)["state"], "open")
+        self.assertEqual(self.sender()["history_id"], "")  # the old single cursor is never written
+
+    def test_account_1_takes_the_old_sender_cursor_once(self):
+        _, touch_id, sent = self.send_first()
+        old = self.gmail.profile().history_id
+        self.db.execute("UPDATE sender SET history_id = ? WHERE sender_id = 1", (old,))
+        self.assertEqual(self.cursor(1), "")
+        self.fail_on["history"] = GmailError("network", None, "offline")
+        read, _ = self.sync()
+        self.assertFalse(read.complete)
+        self.assertEqual(self.cursor(1), old)  # copied over though the read failed: the live cursor is not lost
+        self.gmail.deliver_reply(sent, "p1@acme.co")
+        self.gmail.calls.clear()
+        self.sync()
+        self.assertEqual(self.gmail.calls[0], "history")  # read on from the old cursor, not from the profile
+        self.assertEqual(self.touch(touch_id)["state"], "replied")
+        self.assertNotEqual(self.cursor(1), old)
+        self.assertEqual(self.sender()["history_id"], old)  # left as it was
+        # Only account 1 inherits it: account 2 starts with no cursor.
+        self.on_two()
+        self.gmail2.calls.clear()
+        self.sync_two()
+        self.assertEqual(self.gmail2.calls[0], "profile")
+
+    def test_same_gmail_thread_id_in_two_mailboxes_not_confused(self):
+        _, mine, sent1 = self.send_first()
+        _, theirs, sent2 = self.on_two(thread=sent1.thread_id)  # account 2's mailbox has a thread of the same id
+        self.assertEqual(sent2.thread_id, sent1.thread_id)
+        self.assertEqual(inbound.tracked_threads(self.db, 1)[sent1.thread_id], mine)
+        self.assertEqual(inbound.tracked_threads(self.db, self.two.account_id)[sent1.thread_id], theirs)
+        self.sync()
+        self.sync_two()
+        self.gmail2.deliver_reply(sent2, "p2@acme.co")
+        self.gmail.deliver_bounce(sent1, dsn="hard")
+        self.sync()
+        self.sync_two()
+        self.assertEqual(self.touch(mine)["state"], "bounced")
+        self.assertEqual(self.touch(theirs)["state"], "replied")
+        self.assertIsNone(self.touch(theirs)["bounced_at"])
+        self.assertIsNone(self.touch(mine)["replied_at"])
+        self.assertEqual(sorted((r["touch_id"], r["kind"]) for r in self.inbound_rows()),
+                         sorted([(mine, "bounce"), (theirs, "human")]))
+
+    def test_bounce_adds_bounced_address(self):
+        person, touch_id, sent = self.send_first()
+        address = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person,)).fetchone()[0]
+        bounce = self.gmail.deliver_bounce(sent, dsn="hard")
+        self.sync()
+        row = self.db.execute("SELECT * FROM bounced_address WHERE address = ?", (address,)).fetchone()
+        self.assertEqual((row["source"], row["source_ref"]), ("bounce", bounce.gmail_message_id))
+        self.assertTrue(row["first_seen_at"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM no_go WHERE person_id = ?", (person,)).fetchone()[0],
+                         1)  # #224 still holds
+        # An address already listed keeps its first row.
+        person2, _, sent2 = self.send_first()
+        address2 = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person2,)).fetchone()[0]
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source, source_ref) "
+                        "VALUES (?, ?, 'marked', 'person:1')", (address2.upper(), iso(MON)))
+        self.gmail.deliver_bounce(sent2, dsn="policy")
+        self.sync()
+        self.assertEqual([tuple(r) for r in self.db.execute(
+            "SELECT source, source_ref FROM bounced_address WHERE address = ?", (address2,))], [("marked", "person:1")])
+        # A bounce in account 2's mailbox lists its address too; a delay or limit notice lists nobody.
+        person3, _, sent3 = self.on_two()
+        self.sync_two()
+        self.gmail2.deliver_bounce(sent3, dsn="delay")
+        self.gmail2.deliver_bounce(sent3, dsn="limit")
+        self.sync_two()
+        address3 = self.db.execute("SELECT email FROM person WHERE person_id = ?", (person3,)).fetchone()[0]
+        self.assertIsNone(self.db.execute("SELECT 1 FROM bounced_address WHERE address = ?", (address3,)).fetchone())
+        self.gmail2.deliver_bounce(sent3, dsn="hard")
+        self.sync_two()
+        self.assertEqual(self.db.execute("SELECT source FROM bounced_address WHERE address = ?",
+                                         (address3,)).fetchone()[0], "bounce")
+
+    def test_a_bounce_that_fails_to_apply_lists_no_address(self):
+        _, touch_id, sent = self.send_first()
+        self.gmail.deliver_bounce(sent, dsn="hard")
+        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=MULTI, now=self.clock())
+        with mock.patch("outreach.sending.inbound._no_go_the_bounced", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError), transaction(self.db):
+                inbound.apply_inbound(self.db, read, self.one, now=self.clock(), cfg=MULTI, notify=self.notify)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM bounced_address").fetchone()[0], 0)
+        self.assertEqual(self.touch(touch_id)["state"], "open")
+
+    def test_reply_in_resting_account_stops_company_on_new_account(self):
+        # Company X was emailed from account 1, which rests now; a colleague's first email there routes to
+        # account 2. The reply lands in account 1's mailbox and must stop the company on account 2 too.
+        replier, touch_id, sent = self.send_first()
+        colleague = self.colleague()
+        self.clock.advance(days=1)
+        # Account 1 rests now (the shipped accounts): it reads, and the colleague routes to account 2.
+        resting = dataclasses.replace(MULTI, accounts=load_config().accounts)
+        rows = accounts.in_play(self.db, resting)
+        before = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), resting, rows, day=None,
+                                                          gate=None)}
+        self.assertEqual(before[colleague].account, GENERAL)
+        self.assertNotIn(before[colleague].reason, queue.STOP_REASONS + ("company_held",))
+        followup = self.approve_followup(touch_id, "Re: " + self.gmail.sent[-1][0].subject)
+        self.gmail.deliver_reply(sent, "p1@acme.co")
+        self.sync()
+        after = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), resting, rows, day=None,
+                                                         gate=None)}
+        # The company stop is the hold: every queued email to anyone there waits, on every account, until he
+        # releases it. The replier's own follow-up is stopped for good.
+        self.assertEqual((after[colleague].reason, after[colleague].account), ("company_held", GENERAL))
+        self.assertEqual(self.state(followup), "skipped")
+        self.assertNotIn(followup, after)
+        self.assertIsNone(queue.pick(list(after.values()), queue.load_queue(self.db, resting), account=GENERAL))
+
+    def test_seen_keys_are_per_account(self):
+        self.send_first()
+        self.on_two()
+        self.sync()
+        self.sync_two()
+        mine = self.gmail.deliver_unrelated("news@shop.example", "Digest")
+        theirs = self.gmail2.deliver_unrelated("news@shop.example", "Digest")
+        self.sync()
+        self.sync_two()
+        keys = {r[0] for r in self.db.execute("SELECT gmail_message_id FROM inbound_seen")}
+        self.assertIn(mine.gmail_message_id, keys)  # account 1's keys are as before accounts
+        self.assertIn(f"{self.two.account_id}:{theirs.gmail_message_id}", keys)
+        # Every key from account 2's mailbox (its ids start with "b": its digest and its own sent email) carries
+        # its account id.
+        self.assertEqual({k for k in keys if k.startswith("b")}, set())
+        self.assertEqual({k.partition(":")[0] for k in keys if ":" in k}, {str(self.two.account_id)})
+        self.assertIn(mine.gmail_message_id, inbound.known_ids(self.db, 1))
+        self.assertNotIn(theirs.gmail_message_id, inbound.known_ids(self.db, 1))
+        self.assertIn(theirs.gmail_message_id, inbound.known_ids(self.db, self.two.account_id))
+        self.assertNotIn(mine.gmail_message_id, inbound.known_ids(self.db, self.two.account_id))
+        self.gmail2.calls.clear()
+        self.sync_two()
+        self.assertEqual(self.gmail2.calls, ["history"])  # nothing read twice
+
+    def test_a_limit_notice_in_account_2s_mailbox_blocks_account_2(self):
+        self.on_two()
+        self.sync_two()
+        meta = self.gmail2.deliver_unrelated("Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+                                             "Delivery Status Notification (Failure)")
+        limit = dataclasses.replace(meta, snippet="You have reached a limit for sending mail.")
+        read = inbound.InboundRead(metas=[limit], new_history_id=None, complete=False,
+                                   account_id=self.two.account_id)
+        with transaction(self.db):
+            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=MULTI, notify=self.notify)
+        paused = {r["account_id"]: r["pause_kind"] for r in self.db.execute(
+            "SELECT account_id, pause_kind FROM sender_account WHERE paused = 1")}
+        self.assertEqual(paused, {self.two.account_id: "hard_block"})
+
+    def test_a_read_of_one_account_is_never_applied_as_another(self):
+        self.send_first()
+        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=MULTI, now=self.clock())
+        before = list(self.db.iterdump())
+        with self.assertRaises(ValueError), transaction(self.db):
+            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=MULTI, notify=self.notify)
+        self.assertEqual(list(self.db.iterdump()), before)
 
 
 class VerifyImportedTest(Base):

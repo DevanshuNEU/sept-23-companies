@@ -305,5 +305,42 @@ class SameNameTest(PeopleCase):
                          (known, False, ["duplicate", "name_only_match"]))
         self.assertEqual(fingerprint(self.db), before)
 
+
+class BouncedAddressTest(PeopleCase):
+    """An address that ever bounced (`bounced_address`, from any account) never comes back on a person: the whole
+    call is refused with code `bounced_address` and nothing is written (#9 multi-sender ruling, 2026-11-12)."""
+
+    def test_add_people_refuses_bounced_address(self):
+        pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
+        self.ok("mark_email_bounced", {"person_id": pat, "reason": "Gmail says no such mailbox"})
+        before = fingerprint(self.db)
+        for given in ("pat@acme.example", " PAT@Acme.Example "):
+            with self.subTest(given=given):
+                err = self.error("add_people", {"company_id": self.acme,
+                                                "people": [person("Sam Park", email="sam@acme.example"),
+                                                           person("Pat Lee Two", email=given)]})
+                self.assertEqual(err["code"], "bounced_address")
+                self.assertIn("pat@acme.example", err["message"])
+                self.assertIn("Nothing was written", err["fix"])
+                self.assertEqual(fingerprint(self.db), before)
+
+    def test_a_bounced_address_is_not_filled_in_on_someone_known(self):
+        sam = seed.person(self.db, self.acme, "Sam Park", channel="linkedin",
+                          linkedin_url="https://www.linkedin.com/in/sam-park")
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES ('sam@acme.example', "
+                        "'2026-11-01T10:00:00Z', 'bounce')")
+        before = fingerprint(self.db)
+        err = self.error("add_people", {"company_id": self.acme, "people": [
+            person("Sam Park", email="sam@acme.example", linkedin_url="https://www.linkedin.com/in/sam-park")]})
+        self.assertEqual(err["code"], "bounced_address")
+        self.assertEqual(fingerprint(self.db), before)
+        self.assertIsNone(self.db.execute("SELECT email FROM person WHERE person_id = ?", (sam,)).fetchone()[0])
+
+    def test_an_address_that_never_bounced_is_added(self):
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES ('old@acme.example', "
+                        "'2026-11-01T10:00:00Z', 'bounce')")
+        self.assertTrue(self.add(person(email="pat@acme.example"))["results"][0]["created"])
+
+
 if __name__ == "__main__":
     unittest.main()

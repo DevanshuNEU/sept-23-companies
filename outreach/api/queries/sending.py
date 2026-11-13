@@ -1,11 +1,13 @@
 """The sending strip and the global pause: the sender's own snapshot on the wire, and his pause and resume.
 
 `SendingStatus` is `outreach.sending.status.sending_snapshot` reshaped, never a second reading of the sender's
-rules; health's one-line sender summary reads the same snapshot. The one thing the store cannot say is whether the
-old mailer's launchd job is still loaded, so the app passes that in (`old_sender_check`).
+rules: one line per account, today's count and limit summed over the accounts that send; health's one-line sender
+summary reads the same snapshot. The one thing the store cannot say is whether the old mailer's launchd job is still
+loaded, so the app passes that in (`old_sender_check`).
 
-A pause is his (`pause_kind 'by_you'`). A plain resume clears only his pause: a hard block (a Gmail limit, a hard
-bounce rate) stays until a resume says `acknowledgeBlock`, and the refusal shows its reason.
+A pause is his (`pause_kind 'by_you'`, on `sender` row 1: it holds every account). A plain resume clears only his
+pause: a hard block (a Gmail limit, a hard bounce rate) stays until a resume says `acknowledgeBlock`, and the refusal
+shows its reason.
 A pause never overwrites a hard block, so a plain resume can never clear one.
 """
 import logging
@@ -17,14 +19,15 @@ from datetime import date, datetime, timezone
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.health import SenderSummary
-from outreach.api.models.outbox import NextSend, SendingSignals, SendingStatus, SendingStepDown, SendingWindow
+from outreach.api.models.outbox import (AccountStatus, NextSend, SendingSignals, SendingStatus, SendingStepDown,
+                                       SendingWindow)
 from outreach.api.revisions import bump
 from outreach.drafts.followups import canonical_company
 from outreach.sending import calendar as cal
-from outreach.sending import signals
+from outreach.sending import accounts, signals
 from outreach.sending.config import SendConfig, load_config
-from outreach.sending.status import SendingSnapshot, sending_snapshot
-from outreach.sending.status import _gate as tick_gate  # the one gate the queue and the strip share
+from outreach.sending.status import SendingSnapshot, lead, sending_snapshot
+from outreach.sending.status import sender_gate  # the one gate the queue and the strip share
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
@@ -61,8 +64,9 @@ def _step_down(conn: sqlite3.Connection, snap: SendingSnapshot, cfg: SendConfig)
         return None
     day, reason = snap.last_step_down
     row = conn.execute(
-        f"SELECT max(at) FROM event WHERE entity = 'sender' AND kind IN ({','.join('?' * len(STEP_DOWN_KINDS))}) "
-        "AND json_extract(detail, '$.day') = ?", (*STEP_DOWN_KINDS, day)).fetchone()
+        f"SELECT max(at) FROM event WHERE entity = 'sender' AND entity_id = ? "
+        f"AND kind IN ({','.join('?' * len(STEP_DOWN_KINDS))}) AND json_extract(detail, '$.day') = ?",
+        (lead(accounts.in_play(conn, cfg)).account_id, *STEP_DOWN_KINDS, day)).fetchone()
     at = row[0] or cal.ny_day_bounds(date.fromisoformat(day), cfg)[0]
     return SendingStepDown(at=at, reason=reason)
 
@@ -89,7 +93,10 @@ def sending_status(conn: sqlite3.Connection, now: str, cfg: SendConfig, *, old_s
         signals=SendingSignals(bounce_rate_3d=snap.bounce_rate_3d, gmail_errors_today=snap.gmail_errors_today,
                                stop_replies_today=snap.stop_replies_today),
         window=SendingWindow(start=cfg.window_start.strftime("%H:%M"), end=cfg.window_end.strftime("%H:%M")),
-        next_send=_next_send(conn, snap), none_reason=snap.none_reason, revision=snap.revision)
+        next_send=_next_send(conn, snap), none_reason=snap.none_reason, revision=snap.revision,
+        accounts=[AccountStatus(address=a.address, lane=a.lane, sends=a.sends, state=a.state, text=a.text,
+                                paused=a.paused, pause_reason=a.pause_reason, auth_state=a.auth_state,
+                                sent_today=a.sent_today, limit=a.limit) for a in snap.accounts])
 
 
 @dataclass(frozen=True)
@@ -109,7 +116,7 @@ def read_sender(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) 
         log.warning("The sending config could not be loaded: %s", err)
         return SenderRead(None, None)
     return SenderRead(sending_snapshot(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded),
-                      tick_gate(conn, old_sender_loaded))  # the tick's own order, never a copy of it
+                      sender_gate(conn, cfg, old_sender_loaded))  # the tick's own order, never a copy of it
 
 
 def summary_of(read: SenderRead) -> SenderSummary:
@@ -137,7 +144,7 @@ def _event(ctx: WriteCtx, kind: str, detail: dict) -> None:
 
 
 def pause_sending(ctx: WriteCtx, revision: int, cfg: SendConfig, *, old_sender_loaded: bool) -> SendingStatus:
-    """His pause. Already paused (by him or by a hard block) writes nothing and answers with the status: the
+    """His pause. Already paused (by him, or a hard block on sender row 1) writes nothing and answers with the status: the
     sender is already stopped, and a hard block must never turn into a pause a plain resume could clear."""
     if not _sender(ctx.conn)["paused"]:
         bump(ctx.conn, "sender", "sender_id", 1, revision,
@@ -148,19 +155,36 @@ def pause_sending(ctx: WriteCtx, revision: int, cfg: SendConfig, *, old_sender_l
 
 def resume_sending(ctx: WriteCtx, revision: int, acknowledge_block: bool, cfg: SendConfig, *,
                    old_sender_loaded: bool) -> SendingStatus:
-    """Clears his pause. A hard block is cleared only with `acknowledge_block`; without it the refusal carries the
-    block's reason. Not paused writes nothing. The revision is checked first in every case."""
+    """Clears his pause. A hard block on an account that sends is cleared only with `acknowledge_block`; without it
+    the refusal carries the block's reason. A block on an account that does not send needs no acknowledgement and is
+    cleared with his pause. Not paused writes nothing. The revision is checked first in every case."""
     row = _sender(ctx.conn)
     if row["revision"] != revision:
         raise ApiProblem("conflict", f"Sending changed since you loaded it. {NOT_SAVED}")
-    if row["paused"]:
-        hard = row["pause_kind"] == "hard_block"
+    # A hard block lives on an account's own row (`sender_account`) now, or on sender row 1 in an older store. Only
+    # a block on an account that sends needs his acknowledgement (the strip shows only those); a leftover block on
+    # an account that does not send is cleared with the rest (`clear_hard_blocks`).
+    sending_ids = [a.account_id for a in accounts.sending(accounts.in_play(ctx.conn, cfg))]
+    blocked = ctx.conn.execute(
+        f"SELECT paused_reason FROM sender_account WHERE paused = 1 AND account_id IN "
+        f"({','.join('?' * len(sending_ids))}) ORDER BY account_id", sending_ids).fetchall()
+    if row["paused"] or blocked:
+        hard = bool(blocked) or row["pause_kind"] == "hard_block"
+        reason = blocked[0]["paused_reason"] if blocked else row["paused_reason"]
         if hard and not acknowledge_block:
-            reason = row["paused_reason"] or "The sender stopped sending to protect the account."
+            reason = reason or "The sender stopped sending to protect the account."
             raise ApiProblem("not_allowed", f"Sending stopped on a hard block. {reason} Confirm that you read this "
                                             f"to resume. {NOT_SAVED}")
-        bump(ctx.conn, "sender", "sender_id", 1, revision,
-             {"paused": 0, "pause_kind": None, "paused_reason": "", "paused_at": None}, at=ctx.now)
-        _event(ctx, "resumed", {"text": "Sending resumed by you", "cleared": row["pause_kind"],
-                                "reason": row["paused_reason"], "acknowledged": bool(acknowledge_block and hard)})
+        cleared = "hard_block" if hard else row["pause_kind"]
+        if blocked and row["paused"] and row["pause_kind"] == "by_you":
+            cleared = "hard_block and by_you"
+        if row["paused"]:
+            bump(ctx.conn, "sender", "sender_id", 1, revision,
+                 {"paused": 0, "pause_kind": None, "paused_reason": "", "paused_at": None}, at=ctx.now)
+        accounts.clear_hard_blocks(ctx.conn, ctx.now)
+        if not row["paused"]:  # the sender row did not change, but the strip's revision must move
+            ctx.conn.execute("UPDATE sender SET revision = revision + 1, updated_at = ? WHERE sender_id = 1",
+                             (ctx.now,))
+        _event(ctx, "resumed", {"text": "Sending resumed by you", "cleared": cleared,
+                                "reason": reason, "acknowledged": bool(acknowledge_block and hard)})
     return sending_status(ctx.conn, ctx.now, cfg, old_sender_loaded=old_sender_loaded)

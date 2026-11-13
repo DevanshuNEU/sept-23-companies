@@ -107,6 +107,23 @@ const initials = (name: string) =>
     .join('')
     .toUpperCase();
 
+/** Which account the email goes from: the thread's own once it went out, else the one the sender would use. With no
+ * account that can take it, the sender's own sentence for what it waits for. */
+function FromLine({ from }: { from: OutboxDetail['fromAccount'] }) {
+  return (
+    <p className="mt-0.5 text-[13px] text-muted-foreground">
+      {from.address ? (
+        <>
+          {'From '}
+          <span className="text-foreground">{from.address}</span>
+        </>
+      ) : (
+        from.text
+      )}
+    </p>
+  );
+}
+
 function DetailHeader({ detail }: { detail: OutboxDetail }) {
   const { item } = detail;
   const { person, company } = item;
@@ -134,6 +151,7 @@ function DetailHeader({ detail }: { detail: OutboxDetail }) {
             </a>
           ) : null}
         </div>
+        <FromLine from={detail.fromAccount} />
       </div>
       <div className="flex flex-none flex-wrap justify-end gap-1.5">
         <Badge variant={person.roleKind === 'recruiter' ? 'warn' : 'outline'}>{ROLE_BADGE[person.roleKind]}</Badge>

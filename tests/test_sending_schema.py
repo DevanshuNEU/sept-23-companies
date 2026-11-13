@@ -41,7 +41,7 @@ class SendingSchemaTest(unittest.TestCase):
                     self.db.execute(f"UPDATE sender SET {column} = '2026-11-02 08:00' WHERE sender_id = 1")
 
     def test_send_day_closed_at_is_canonical_utc(self):
-        self.db.execute("INSERT INTO send_day(day, send_limit, created_at) VALUES ('2026-11-02', 20, ?)", (NOW,))
+        self.db.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (1, '2026-11-02', 20, ?)", (NOW,))
         self.assertIsNone(self.db.execute("SELECT closed_at FROM send_day").fetchone()[0])
         self.db.execute("UPDATE send_day SET closed_at = '2026-11-02T08:00:00Z'")
         self.assertEqual(self.db.execute("SELECT closed_at FROM send_day").fetchone()[0], NOW)

@@ -5,6 +5,10 @@ test('the Outbox shows the sending strip and the drafts', async ({ page, console
   const strip = page.getByRole('region', { name: 'Sending today' });
   await expect(strip.getByText('Running')).toBeVisible();
   await expect(strip.getByText('20 of 30 sent')).toBeVisible();
+  // Each account on its own line under it.
+  const accounts = strip.getByRole('list', { name: 'Accounts' });
+  await expect(accounts.getByRole('listitem').first()).toHaveText('devanshuchi9@gmail.com20 of 30 today');
+  await expect(accounts.getByRole('listitem').last()).toHaveText('devanshurajesh@gmail.comreading replies only');
   // One line; the limit and the ramp are behind Details.
   await strip.getByRole('button', { name: 'Details about sending today' }).click();
   await expect(page.getByRole('dialog', { name: 'Details about sending today' }).getByText('Level 2 of 9, 30 a day')).toBeVisible();

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from outreach.sending import queue
 from outreach.sending.config import load_config as load_send_config
+from outreach.sending.accounts import in_play as _in_play
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
 from tests.test_mcp_reads import merge, no_go, outreach_touch
@@ -169,7 +170,7 @@ class UpdatePersonTest(CorrectionsCase):
                          before)
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         found = {v.message_id: v.reason for v in
-                 queue.verdicts(self.db, now, load_send_config(), day=None, gate=None)}
+                 queue.verdicts(self.db, now, load_send_config(), _in_play(self.db, load_send_config()), day=None, gate=None)}
         self.assertEqual(found[approved], "no_address")
 
 
@@ -306,6 +307,41 @@ class MovePersonTest(CorrectionsCase):
         self.assertEqual(self.error("move_person", {"person_id": sam, "company_id": gone})["code"],
                          "company_removed")
         self.assertEqual(fingerprint(self.db), before)
+
+
+class BouncedAddressTest(CorrectionsCase):
+    """The dead-address list (`bounced_address`, #9 multi-sender ruling): mark_email_bounced adds the cleared
+    address (source `marked`), and no correction may put an address from it back on anyone."""
+
+    def addresses(self):
+        return [tuple(r) for r in self.db.execute(
+            "SELECT address, source, source_ref FROM bounced_address ORDER BY address")]
+
+    def test_mark_email_bounced_adds_the_address_to_the_list(self):
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "Gmail says no such mailbox"})
+        self.assertEqual(self.addresses(), [("pat@acme.example", "marked", str(self.pat))])
+        first_seen = self.db.execute("SELECT first_seen_at FROM bounced_address").fetchone()[0]
+        self.assertEqual(first_seen, NOW)
+
+    def test_an_address_already_on_the_list_keeps_its_first_row(self):
+        self.db.execute("INSERT INTO bounced_address(address, first_seen_at, source, source_ref) VALUES "
+                        "('PAT@acme.example', '2026-11-01T10:00:00Z', 'bounce', '77')")
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "Gmail says no such mailbox"})
+        self.assertEqual(self.addresses(), [("PAT@acme.example", "bounce", "77")])
+        self.assertIsNone(self.row(self.pat)["email"])
+
+    def test_update_person_refuses_a_bounced_address(self):
+        self.ok("mark_email_bounced", {"person_id": self.pat, "reason": "Gmail says no such mailbox"})
+        sam = seed.person(self.db, self.acme, "Sam Park", channel="linkedin")
+        before = fingerprint(self.db)
+        for person_id, given in ((self.pat, "pat@acme.example"), (sam, "Pat@Acme.Example")):
+            with self.subTest(person_id=person_id):
+                err = self.error("update_person", {"person_id": person_id, "email": given})
+                self.assertEqual(err["code"], "bounced_address")
+                self.assertIn("pat@acme.example", err["message"])
+                self.assertIn("Nothing was written", err["fix"])
+                self.assertEqual(fingerprint(self.db), before)
+        self.ok("update_person", {"person_id": sam, "email": "sam@acme.example"})
 
 
 if __name__ == "__main__":

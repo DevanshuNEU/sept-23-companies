@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ChevronDown, Pause, Play } from 'lucide-react';
-import type { SenderState, SendingStatus } from '@/api';
+import type { AccountState, AccountStatus, SenderState, SendingStatus } from '@/api';
 import { RampLadder } from '@/components/ramp-ladder';
 import {
   AlertDialog,
@@ -31,6 +31,62 @@ const SENDER: Record<SenderState, { label: string; tone: Tone }> = {
 };
 
 const DOT: Record<Tone, string> = { ok: 'bg-ok-dot', info: 'bg-info-dot', warn: 'bg-warn-dot', bad: 'bg-bad-dot', idle: 'bg-idle-dot' };
+
+// Each account's tone: green while it sends, red when it needs him (a hard block, a sign-in), grey otherwise.
+const ACCOUNT_TONE: Record<AccountState, Tone> = {
+  sending: 'ok',
+  paused_by_you: 'idle',
+  paused_hard_block: 'bad',
+  signed_out: 'bad',
+  reading_only: 'idle',
+  not_sending_yet: 'idle',
+};
+
+/** What sends first, then what will send once it is set up, then what only reads replies. Config order within each. */
+const accountRank = (a: AccountStatus) => (a.sends ? 0 : a.lane ? 1 : 2);
+
+const RUN = '. Run: ';
+
+/** Sender text that ends in a sign-in command ("signed out. Run: python -m ... auth --account x."), with the command
+ * set as code he can copy and nothing else in the code. Text with no command reads as it is. */
+export function CommandText({ text }: { text: string }) {
+  const at = text.indexOf(RUN);
+  if (at < 0) return <>{text}</>;
+  const rest = text.slice(at + RUN.length);
+  const stop = rest.indexOf('. '); // a command has no ". " in it; anything after it is its own sentence
+  const command = (stop < 0 ? rest : rest.slice(0, stop)).replace(/\.$/, '');
+  const after = stop < 0 ? (rest.endsWith('.') ? '.' : '') : rest.slice(stop);
+  return (
+    <>
+      {`${text.slice(0, at)}. Run `}
+      <code className="font-mono select-all">{command}</code>
+      {after}
+    </>
+  );
+}
+
+/** One line per account: its address and what it does today ("4 of 15 today", "reading replies only"). */
+function Accounts({ accounts }: { accounts: AccountStatus[] }) {
+  if (accounts.length === 0) return null;
+  const ordered = [...accounts].sort((a, b) => accountRank(a) - accountRank(b));
+  return (
+    <ul aria-label="Accounts" className="flex flex-wrap items-center gap-x-6 gap-y-1 pb-1.5 text-xs">
+      {ordered.map((a) => {
+        const tone = ACCOUNT_TONE[a.state];
+        const red = tone === 'bad';
+        return (
+          <li key={a.address} data-tone={tone} title={a.pauseReason || undefined} className="flex min-w-0 items-center gap-2">
+            <span aria-hidden className={cn('size-1.5 flex-none rounded-full', DOT[tone])} />
+            <span className="font-medium whitespace-nowrap">{a.address}</span>
+            <span className={cn('min-w-0 break-words tabular-nums', red ? 'text-bad' : 'text-muted-foreground')}>
+              <CommandText text={a.text} />
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function Cell({ name, tone, className, children }: { name: string; tone?: Tone; className?: string; children: ReactNode }) {
   return (
@@ -158,57 +214,68 @@ function Details({ s }: { s: SendingStatus }) {
   );
 }
 
-/** Spec 5.3: the sender in one line (state, today's count, the next send), the detail in a popover, Pause one click away. */
+/** Spec 5.3: the sender in one line (state, today's count summed over the sending accounts, the next send), each
+ * account on the line below it, the detail in a popover, Pause one click away (his pause holds every account). */
 export function SendingStrip({ sending: s, onPause, onResume }: { sending: SendingStatus; onPause: () => void; onResume: () => void }) {
   const sender = SENDER[s.state];
   const red = sender.tone === 'bad';
   return (
-    <section aria-label="Sending today" className="flex min-h-11 flex-none flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-1.5">
-      <div role="group" aria-label="Sender" data-tone={sender.tone} className="flex min-w-0 items-center gap-2 text-sm">
-        <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
-        <span className={cn('font-medium whitespace-nowrap', red && 'text-bad')}>{sender.label}</span>
-        {red ? (
-          <span title={senderSub(s)} className="max-w-[44ch] truncate text-xs text-bad">
-            {senderSub(s)}
-          </span>
-        ) : null}
+    <section aria-label="Sending today" className="flex-none border-b px-4">
+      <div className="flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 py-1.5">
+        <div role="group" aria-label="Sender" data-tone={sender.tone} className="flex min-w-0 items-center gap-2 text-sm">
+          <span aria-hidden className={cn('size-2 flex-none rounded-full', DOT[sender.tone], s.state === 'running' && 'ripple')} />
+          <span className={cn('font-medium whitespace-nowrap', red && 'text-bad')}>{sender.label}</span>
+          {s.state === 'paused_hard_block' ? (
+            <span title={senderSub(s)} className="max-w-[44ch] truncate text-xs text-bad">
+              {senderSub(s)}
+            </span>
+          ) : null}
+        </div>
+        <span className="text-sm whitespace-nowrap tabular-nums">{`${s.sentToday} of ${s.limitToday} sent`}</span>
+        <span className="min-w-0 truncate text-sm text-muted-foreground tabular-nums">{nextLine(s)}</span>
+        <div className="ml-auto flex items-center gap-1">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" aria-label="Details about sending today">
+                Details
+                <ChevronDown aria-hidden />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              aria-label="Details about sending today"
+              className="w-80"
+              // Focus goes to the panel, not its first tabbable (the ramp), whose tooltip would open on its own.
+              onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus();
+              }}
+            >
+              <Details s={s} />
+            </PopoverContent>
+          </Popover>
+          <Toggle s={s} onPause={onPause} onResume={onResume} />
+        </div>
       </div>
-      <span className="text-sm whitespace-nowrap tabular-nums">{`${s.sentToday} of ${s.limitToday} sent`}</span>
-      <span className="min-w-0 truncate text-sm text-muted-foreground tabular-nums">{nextLine(s)}</span>
-      <div className="ml-auto flex items-center gap-1">
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" aria-label="Details about sending today">
-              Details
-              <ChevronDown aria-hidden />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            align="end"
-            aria-label="Details about sending today"
-            className="w-80"
-            // Focus goes to the panel, not its first tabbable (the ramp), whose tooltip would open on its own.
-            onOpenAutoFocus={(e) => {
-              e.preventDefault();
-              if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus();
-            }}
-          >
-            <Details s={s} />
-          </PopoverContent>
-        </Popover>
-        <Toggle s={s} onPause={onPause} onResume={onResume} />
-      </div>
+      <Accounts accounts={s.accounts} />
     </section>
   );
 }
 
-/** Loading: the strip's line as blocks at its final size. */
+/** Loading: the strip's line and its accounts line as blocks at their final size. */
 export function SendingStripSkeleton() {
   return (
-    <section aria-hidden className="flex h-11 flex-none items-center gap-4 border-b px-4">
-      {[96, 88, 176].map((w, i) => (
-        <Skeleton key={i} className="h-4" style={{ width: w }} />
-      ))}
+    <section aria-hidden className="flex-none border-b px-4">
+      <div className="flex h-11 items-center gap-4">
+        {[96, 88, 176].map((w, i) => (
+          <Skeleton key={i} className="h-4" style={{ width: w }} />
+        ))}
+      </div>
+      <div className="flex h-5 items-center gap-6 pb-1.5">
+        {[220, 240, 200].map((w, i) => (
+          <Skeleton key={i} className="h-3" style={{ width: w }} />
+        ))}
+      </div>
     </section>
   );
 }

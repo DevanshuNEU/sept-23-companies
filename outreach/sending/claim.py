@@ -14,6 +14,13 @@ Each crash window ends in a state that is settled by the marker, never by sendin
 - after Gmail accepted, before the record: the same path, and the Sent scan finds it, so it is recorded `sent`.
 - during the record: the record is one transaction, so it either committed (`sent`) or left `sending`.
 Gmail keeping the marker is proven by the first marked email before a second one is claimed (`proof`).
+
+Every claim is made from one sender account (#9 multi-sender ruling, 2026-11-12), and the proof is that account's.
+A first email's claim sets its touch's account and pins the company to it in the same transaction, so every later
+email there (follow-ups included) goes from the same account; a touch already on another account is refused, never
+moved. A follow-up goes only from its thread's account (none is account 1). The email is From that account, and its
+Message-ID is on that account's domain. A send in doubt is settled only from that account's own Sent (`unclear`
+and `reconcile` take the account): its marker is in that mailbox and nowhere else.
 """
 import json
 import logging
@@ -30,7 +37,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
                                        resolve_company)
 from outreach.outcomes.context import build_context
 from outreach.sending import calendar as cal
-from outreach.sending import human, proof
+from outreach.sending import accounts, human, proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import plan_followups
 from outreach.sending.gmail import new_message_id
@@ -43,9 +50,9 @@ from outreach.store.db import transaction
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event, log_touch
 
-__all__ = ["AnotherSendInFlight", "Unproven", "ClaimNotRecorded", "claim", "outgoing_for", "email_context",
-           "record_sent", "record_unclear", "send_one", "PLACEHOLDER_DOMAIN", "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile",
-           "requeue_failed"]
+__all__ = ["AnotherSendInFlight", "Unproven", "ClaimNotRecorded", "WrongAccount", "bounced_before", "claim",
+           "outgoing_for", "email_context", "record_sent", "record_unclear", "send_one", "PLACEHOLDER_DOMAIN",
+           "LEFTOVER_ERROR", "Unclear", "leftover_claims", "unclear", "reconcile", "requeue_failed"]
 
 # #17 writes Message-IDs on this domain for imported mail whose real id is unknown; they are never put in a header.
 PLACEHOLDER_DOMAIN = "@outreach.invalid>"
@@ -75,26 +82,34 @@ class ClaimNotRecorded(RuntimeError):
     claim: it is refused and nothing changes."""
 
 
+class WrongAccount(RuntimeError):
+    """The message belongs to another sender account than the one claiming it (a first email whose touch is already
+    on another account, or a follow-up whose thread is another account's), or the claiming account does not send.
+    It is refused and nothing changes."""
+
+
 def _stamp(at: datetime | str) -> str:
     return as_datetime(at).strftime(ISO_FMT)
 
 
 # -- the claim --------------------------------------------------------------------------------------------------
 
-def _still_sendable(conn: sqlite3.Connection, message_id: int) -> bool:
+def _still_sendable(conn: sqlite3.Connection, message_id: int, account_id: int) -> bool:
     """Read inside the claim's transaction: False when a stop, hold or pause landed after the queue picked the
     message (a no-go on the person or the company family, a closed, removed, paused or held company, a touch that
-    is no longer open, a reply from the person on any channel, or a paused sender). The queue already checked
-    these; this closes the gap between the pick and the claim, so a person who said stop a second ago is never
-    sent to."""
-    row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id "
+    is no longer open, a reply from the person on any channel, an address that bounced before, or a paused claiming
+    account). The queue and the precheck already checked these; this closes the gap between the pick and the claim,
+    so a person who said stop a second ago is never sent to."""
+    row = conn.execute("SELECT t.state AS touch_state, t.gmail_thread_id, m.seq, p.person_id, p.company_id, p.email "
                        "FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                        "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (message_id,)).fetchone()
     if row is None or row["touch_state"] != "open":
         return False
     if row["seq"] >= 1 and not row["gmail_thread_id"]:
         return False  # a follow-up with no thread would go out as a new thread (an imported touch can lack one)
-    if conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"]:
+    if accounts.pause_of(conn, account_id) is not None:  # his pause, or the claiming account's hard block
+        return False
+    if bounced_before(conn, row["email"]):
         return False
     companies = company_map(conn)
     survivor = resolve_company(companies, row["company_id"])[-1]
@@ -110,24 +125,64 @@ def _attempts(conn: sqlite3.Connection, message_id: int) -> int:
                         (message_id,)).fetchone()[0]
 
 
-def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool:
-    """Commit `approved -> sending` with `rfc_id` as `pending_rfc_id`, in one transaction, and append `claimed`
-    with `rfc_id` as its `marker` (every claim is marked; `proof` counts only marked claims). False when nothing
-    changed: the message moved on or was edited since `q` was read (its revision), a stop, hold or pause landed
-    since the pick, or it is a follow-up whose touch has no Gmail thread. Raises AnotherSendInFlight when another
-    message is `sending`, Unproven when Gmail is not shown to keep the marker and a marked email was already
-    claimed (read in this transaction, so at most one marked email is ever claimed before the proof),
+def bounced_before(conn: sqlite3.Connection, address: str | None) -> bool:
+    """True when `address` is on the dead-address list (`bounced_address`, any account, any case). Read only."""
+    if not address or not address.strip():
+        return False
+    return conn.execute("SELECT 1 FROM bounced_address WHERE address = ?", (address.strip(),)).fetchone() is not None
+
+
+def _take_account(conn: sqlite3.Connection, q: Queued, account: accounts.AccountRow, stamp: str) -> None:
+    """Inside the claim's transaction: tie the message to the claiming account, or raise WrongAccount (nothing
+    written). A first email's touch takes the account when it has none, and its company is pinned there (by the
+    rule) unless it already is; a touch already on another account is refused, never moved. A follow-up needs its
+    thread's account (none is account 1), and sets and pins nothing."""
+    row = conn.execute("SELECT t.touch_id, t.account_id, p.company_id FROM message m "
+                       "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id "
+                       "WHERE m.message_id = ?", (q.message_id,)).fetchone()
+    if row is None:
+        return  # the message is gone; the claim's own update changes nothing
+    mine = account.account_id
+    if q.seq >= 1:
+        if (row["account_id"] or 1) != mine:
+            raise WrongAccount(f"message {q.message_id} is a follow-up in account {row['account_id'] or 1}'s thread, "
+                               f"so account {mine} does not send it")
+        return
+    if row["account_id"] is not None and row["account_id"] != mine:
+        raise WrongAccount(f"message {q.message_id}'s first email belongs to account {row['account_id']}, so account "
+                           f"{mine} does not send it")
+    if row["account_id"] is None:
+        conn.execute("UPDATE touch SET account_id = ?, updated_at = ?, revision = revision + 1 "
+                     "WHERE touch_id = ? AND account_id IS NULL", (mine, stamp, row["touch_id"]))
+    company = canonical_company(conn, row["company_id"])
+    pinned = conn.execute("SELECT account_id FROM company_sender WHERE company_id = ?", (company,)).fetchone()
+    if pinned is None or pinned["account_id"] != mine:
+        accounts.pin(conn, company, mine, by="rule", now=stamp)
+
+
+def claim(conn: sqlite3.Connection, q: Queued, account: accounts.AccountRow, *, rfc_id: str, now: str) -> bool:
+    """Commit `approved -> sending` from `account` with `rfc_id` as `pending_rfc_id`, in one transaction, and append
+    `claimed` with `rfc_id` as its `marker` (every claim is marked; `proof` counts only marked claims). A first email
+    also takes the account on its touch and pins its company there, in the same transaction (`_take_account`).
+    False when nothing changed: the message moved on or was edited since `q` was read (its revision), a stop, hold,
+    bounce or pause of the account landed since the pick, or it is a follow-up whose touch has no Gmail thread.
+    Raises WrongAccount when the message belongs to another account or the account does not send (`sends = false`:
+    it rests and only reads, even in its own threads), AnotherSendInFlight when another message is
+    `sending`, Unproven when Gmail is not shown to keep this account's marker and a marked email was already claimed
+    from it (read in this transaction, so at most one marked email per account is ever claimed before its proof),
     ClaimNotRecorded when the `claimed` event did not write (a reused token: the proof must see every claim), and
-    ValueError when `rfc_id` is not one Message-ID."""
+    ValueError when `rfc_id` is not one Message-ID. Nothing is written when it raises."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
+    if not account.cfg.sends:
+        raise WrongAccount(f"{account.cfg.address} does not send (sends = false), so it claims nothing")
     stamp = _stamp(now)
     try:
         with transaction(conn):
-            if not proof.may_claim(conn):
-                raise Unproven("Gmail is not shown to keep the sender's marker yet and an email was already claimed, "
-                               "so no other email is claimed")
-            if not _still_sendable(conn, q.message_id):
+            if not proof.may_claim(conn, account.account_id):
+                raise Unproven(f"Gmail is not shown to keep the sender's marker on {account.cfg.address} yet and an "
+                               "email was already claimed from it, so no other email is claimed from it")
+            if not _still_sendable(conn, q.message_id, account.account_id):
                 return False
             cur = conn.execute(
                 "UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ?, updated_at = ?, "
@@ -135,10 +190,12 @@ def claim(conn: sqlite3.Connection, q: Queued, *, rfc_id: str, now: str) -> bool
                 (rfc_id, stamp, stamp, q.message_id, q.revision))
             if cur.rowcount == 0:
                 return False
+            _take_account(conn, q, account, stamp)
             written = append_event(conn, entity="message", entity_id=q.message_id, company_id=q.company_id,
                                    kind="claimed", actor="sender", at=stamp,
                                    detail={"pending_rfc_id": rfc_id, "marker": rfc_id,
-                                           "attempt": _attempts(conn, q.message_id) + 1, "seq": q.seq},
+                                           "attempt": _attempts(conn, q.message_id) + 1, "seq": q.seq,
+                                           "account_id": account.account_id},
                                    idempotency_key=f"claimed:{rfc_id}")
             if written is None:
                 raise ClaimNotRecorded(f"the token {rfc_id} was claimed before, so this claim is refused")
@@ -176,13 +233,15 @@ _UNCONFIRMED = (
     "<> ''))")
 
 
-def outgoing_for(conn: sqlite3.Connection, q: Queued, cfg: SendConfig, rfc_id: str) -> Outgoing:
-    """The email for `q` as stored, with `rfc_id` as its Message-ID and marker. A follow-up (seq 1 or more) goes in
-    the touch's Gmail thread, In-Reply-To the newest sent message of that touch and References every one of them,
-    oldest first, by the Message-ID Gmail stored each under (`rfc_message_id`). A placeholder or malformed
-    Message-ID is left out of both, and so is one not yet confirmed from Gmail (`_UNCONFIRMED`: the send could not
-    read back what Gmail stored, and the read back by Gmail id has not filled it in yet), since Gmail never keeps the
-    one the sender set; with none left, the follow-up still goes in the thread by `thread_id`."""
+def outgoing_for(conn: sqlite3.Connection, q: Queued, cfg: SendConfig, rfc_id: str,
+                 account: accounts.AccountRow) -> Outgoing:
+    """The email for `q` as stored, From `account` (its address, and `cfg.from_name`), with `rfc_id` as its
+    Message-ID and marker. A follow-up (seq 1 or more) goes in the touch's Gmail thread, In-Reply-To the newest sent
+    message of that touch and References every one of them, oldest first, by the Message-ID Gmail stored each under
+    (`rfc_message_id`). A placeholder or malformed Message-ID is left out of both, and so is one not yet confirmed
+    from Gmail (`_UNCONFIRMED`: the send could not read back what Gmail stored, and the read back by Gmail id has not
+    filled it in yet), since Gmail never keeps the one the sender set; with none left, the follow-up still goes in
+    the thread by `thread_id`."""
     row = conn.execute(
         "SELECT m.subject, m.body, m.seq, m.touch_id, p.email, t.gmail_thread_id FROM message m "
         "JOIN touch t ON t.touch_id = m.touch_id JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?",
@@ -199,7 +258,7 @@ def outgoing_for(conn: sqlite3.Connection, q: Queued, cfg: SendConfig, rfc_id: s
         if kept:
             in_reply_to, references = kept[-1], kept
     return Outgoing(to=row["email"] or "", subject=row["subject"], body=row["body"], from_name=cfg.from_name,
-                    from_addr=cfg.from_address, message_id=rfc_id, thread_id=thread_id, in_reply_to=in_reply_to,
+                    from_addr=account.cfg.address, message_id=rfc_id, thread_id=thread_id, in_reply_to=in_reply_to,
                     references=references, marker=rfc_id)
 
 
@@ -257,12 +316,35 @@ def email_context(conn: sqlite3.Connection, person_id: int, company_id: int, *, 
 
 # -- recording --------------------------------------------------------------------------------------------------
 
-def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random) -> None:
-    """`sender.next_send_at` becomes `at` plus a random gap, unless it is already later: a gap never shrinks."""
-    candidate = (as_datetime(at) + timedelta(minutes=human.next_gap_minutes(rng, cfg))).strftime(ISO_FMT)
-    current = conn.execute("SELECT next_send_at FROM sender WHERE sender_id = 1").fetchone()[0]
-    if current is None or candidate > current:
-        conn.execute("UPDATE sender SET next_send_at = ? WHERE sender_id = 1", (candidate,))
+def _account_of(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int) -> accounts.AccountRow:
+    """The account that sent this touch (`touch.account_id`; none counts as account 1, as in `signals`). LookupError
+    when it has no row or its address is not in the config."""
+    row = conn.execute("SELECT account_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
+    account = accounts.by_id(conn, cfg, row[0] if row is not None else None)
+    if account is None:
+        raise LookupError(f"touch {touch_id} has no sending account in the config")
+    return account
+
+
+def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Random, touch_id: int) -> None:
+    """The sending account's `next_send_at` becomes `at` plus a spread gap (`human.spread_gap`: the minutes left in
+    its window over the sends it has left today, never below a share of its full window today over its limit today), unless it
+    is already later: a gap never shrinks."""
+    account = _account_of(conn, cfg, touch_id)
+    when = as_datetime(at)
+    today = cal.ny_date(when, cfg)
+    limit = ramp.effective_limit(conn, account, today, cfg)
+    sends_left = max(limit - signals.counted_sends_on(conn, account.account_id, today, cfg), 0)
+    minutes_left, day_minutes = queue.window_minutes(conn, when, cfg, account.cfg.address,
+                                                     accounts.in_play(conn, cfg))
+    gap = human.spread_gap(minutes_left, sends_left, rng, cfg, day_minutes=day_minutes, limit=limit)
+    candidate = (when + timedelta(minutes=gap)).strftime(ISO_FMT)
+    current = conn.execute("SELECT next_send_at FROM sender_account WHERE account_id = ?",
+                           (account.account_id,)).fetchone()
+    if current is None:
+        raise LookupError(f"sender_account {account.account_id} has no row, so its next send cannot be set")
+    if current[0] is None or candidate > current[0]:
+        conn.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = ?", (candidate, account.account_id))
 
 
 def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: str, cfg: SendConfig,
@@ -275,7 +357,7 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
     claimed token and the marker Gmail showed (None when not read). When a marked claim's marker was read and is not
     the claimed one (Gmail dropped or changed it), `marker_missing` is appended in the same write: sending stops at
     once, before any later email could be claimed, whatever the next tick's read back does. `at` is when it went
-    out (a reconcile passes the claim time). `next_send_at` moves to `at` plus a gap, never earlier than it was.
+    out (a reconcile passes the claim time). The sending account's `next_send_at` moves to `at` plus a spread gap, never earlier than it was.
     LookupError when the message is not `sending` or `send_unknown`."""
     stamp = _stamp(at)
     recorded = _stamp(now) if now else stamp
@@ -324,7 +406,7 @@ def record_sent(conn: sqlite3.Connection, message_id: int, sent: Sent, *, at: st
                                  "found_marker": normalise_message_id(sent.marker),
                                  "gmail_message_id": sent.gmail_message_id, "stored_rfc_id": sent.rfc_message_id,
                                  "thread_id": sent.thread_id})
-        _push_gap(conn, stamp, cfg, rng)
+        _push_gap(conn, stamp, cfg, rng, row["touch_id"])
 
 
 def _kind_of(err: BaseException) -> str:
@@ -358,7 +440,7 @@ def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, 
                      idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
                      detail={**(extra or {}), "pending_rfc_id": row["pending_rfc_id"], "error": text,
                              "error_kind": kind, "retryable": kind in RETRYABLE})
-        _push_gap(conn, stamp, cfg, rng)
+        _push_gap(conn, stamp, cfg, rng, row["touch_id"])
 
 
 def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:
@@ -368,9 +450,12 @@ def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:
 
 
 def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendConfig, *, now: str,
-             clock: Callable[[], datetime], rng: random.Random, account: str) -> Literal["sent", "lost_race"]:
-    """Claim `q` with a new token (its Message-ID and marker) at `now`, send it with no transaction open, then
-    record it under the ids Gmail returned (Gmail storing its own Message-ID is normal, not a failure).
+             clock: Callable[[], datetime], rng: random.Random,
+             account: accounts.AccountRow) -> Literal["sent", "lost_race"]:
+    """Claim `q` from `account` with a new token (its Message-ID, on the account's domain, and its marker) at `now`,
+    send it through `client` (that account's own) with no transaction open, then record it under the ids Gmail
+    returned (Gmail storing its own Message-ID is normal, not a failure). The claim's errors (WrongAccount, Unproven,
+    AnotherSendInFlight) are raised before any call.
 
     Returns `sent`, or `lost_race` when the claim changed nothing (nothing is sent then). When the call fails the
     outcome is unclear: the message is recorded `send_unknown` and a GmailError is raised so the tick can apply its
@@ -382,11 +467,11 @@ def send_one(conn: sqlite3.Connection, client: MailClient, q: Queued, cfg: SendC
     to a power cut after Gmail took the email."""
     if conn.execute("PRAGMA fullfsync").fetchone()[0] != 1:
         raise RuntimeError("the sender sends only on a connection opened with connect(fullfsync=True)")
-    rfc = new_message_id(account)
-    if not claim(conn, q, rfc_id=rfc, now=now):
+    rfc = new_message_id(account.cfg.address)
+    if not claim(conn, q, account, rfc_id=rfc, now=now):
         return "lost_race"
     try:
-        outgoing = outgoing_for(conn, q, cfg, rfc)
+        outgoing = outgoing_for(conn, q, cfg, rfc, account)
     except Exception as err:
         failure = GmailError("bad_request", None, f"the email could not be built: {describe_error(err)}")
         record_unclear(conn, q.message_id, failure, at=_stamp(clock()), cfg=cfg, rng=rng)
@@ -475,11 +560,14 @@ def _marked(conn: sqlite3.Connection, rfc_id: str) -> bool:
     return row is not None and row[0] is not None and normalise_message_id(row[0]) == normalise_message_id(rfc_id)
 
 
-def unclear(conn: sqlite3.Connection) -> list[Unclear]:
-    """Every `send_unknown` message, oldest claim first. Read only."""
+def unclear(conn: sqlite3.Connection, account_id: int) -> list[Unclear]:
+    """Every `send_unknown` message of this account (its touch's account; none is account 1), oldest claim first.
+    Only this account's client may scan Sent for them. Read only."""
     out = []
-    for row in conn.execute("SELECT message_id, pending_rfc_id, claimed_at, updated_at FROM message "
-                            "WHERE state = 'send_unknown' ORDER BY claimed_at, message_id").fetchall():
+    for row in conn.execute("SELECT m.message_id, m.pending_rfc_id, m.claimed_at, m.updated_at FROM message m "
+                            "JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'send_unknown' "
+                            "AND COALESCE(t.account_id, 1) = ? ORDER BY m.claimed_at, m.message_id",
+                            (account_id,)).fetchall():
         event = _unknown_event(conn, row["pending_rfc_id"])
         # Without its event (a hand edit), the later of the claim and the last change: never earlier than either.
         returned = event["at"] if event is not None else max(row["claimed_at"], row["updated_at"])
@@ -510,10 +598,12 @@ def _fail(conn: sqlite3.Connection, u: Unclear, *, now: str, cfg: SendConfig) ->
                          "retryable": detail.get("retryable") is True, "attempt": _attempts(conn, u.message_id)})
 
 
-def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool, str]], *, now: str,
-              cfg: SendConfig, rng: random.Random) -> dict[str, int]:
-    """Apply Sent scans made earlier with no transaction open (`found`: message id to what `find_sent` returned and
-    the marker it looked for, `(hit, complete, scanned_marker)`).
+def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool, str]], account_id: int, *,
+              now: str, cfg: SendConfig, rng: random.Random) -> dict[str, int]:
+    """Apply Sent scans made earlier with no transaction open by this account's own client (`found`: message id to
+    what `find_sent` returned and the marker it looked for, `(hit, complete, scanned_marker)`). Only this account's
+    sends in doubt (`unclear(conn, account_id)`) are settled; a scan result for any other message is ignored, so a
+    miss in one mailbox never fails a send another account made.
 
     A send recorded as rewritten by the sender before the marker (`Unclear.stored`) becomes `sent` from those ids,
     whatever the scan found. A hit carrying the message's own marker becomes `sent` under the Message-ID Gmail
@@ -552,7 +642,7 @@ def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, b
         return "waiting"
 
     with atomic(conn, "reconcile"):
-        pending = {u.message_id: u for u in unclear(conn)}
+        pending = {u.message_id: u for u in unclear(conn, account_id)}
         work = [(u, None) for u in pending.values() if u.stored is not None]
         work += [(pending[mid], scan) for mid, scan in found.items()
                  if mid in pending and pending[mid].stored is None]  # one not in pending settled since the scan

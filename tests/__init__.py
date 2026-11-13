@@ -32,10 +32,16 @@ from outreach.sending import config as _send_config
 SHIPPED_SEND_CONFIG = _send_config.DEFAULT_PATH
 _ramp_copy = _pathlib.Path(tempfile.mkdtemp(prefix="outreach-sending-config-test-")) / "config.toml"
 _ramp_text = SHIPPED_SEND_CONFIG.read_text(encoding="utf-8")
-for _old, _new in (("ramp_start = 200", "ramp_start = 20"),
-                   ("ramp_floor = 200", "ramp_floor = 20"),
-                   ("ramp_ceiling = 200", "ramp_ceiling = 100"),
-                   ("gap_median_minutes = 1.5", "gap_median_minutes = 2.0"),
+# The ramp lives in each [[account]] block now: every block gets the old ramp (20 to 100, step 10).
+import re as _re
+for _key, _value in (("ramp_start", 20), ("ramp_step", 10), ("ramp_floor", 20), ("ramp_ceiling", 100)):
+    _ramp_text, _n = _re.subn(rf"^{_key} = .*$", f"{_key} = {_value}", _ramp_text, flags=_re.M)
+    assert _n >= 1, f"tests/__init__.py: {_key} is not in config.toml"
+# The shipped holidays (Thanksgiving, Christmas, New Year) would shift the business-day arithmetic of tests pinned to
+# November dates, so the scratch copy has none; tests/test_sending_config.py checks the shipped list.
+_ramp_text, _n = _re.subn(r"^holidays = .*$", "holidays = []", _ramp_text, flags=_re.M)
+assert _n == 1, "tests/__init__.py: holidays is not in config.toml once"
+for _old, _new in (("spread_gap_minutes = [2, 45]", "spread_gap_minutes = [2, 3]"),  # short gaps: tests tick a few minutes apart
                    ("per_company_daily = 2", "per_company_daily = 3"),  # the old default band (#229 ships 2)
                    ("pick_pool = 5", "pick_pool = 1"),
                    ("day_start_jitter_minutes = 25", "day_start_jitter_minutes = 0"),
@@ -45,6 +51,12 @@ for _old, _new in (("ramp_start = 200", "ramp_start = 20"),
     _ramp_text = _ramp_text.replace(_old, _new)
 _ramp_copy.write_text(_ramp_text, encoding="utf-8")
 _send_config.DEFAULT_PATH = _ramp_copy
+
+
+def flat_200(cfg):
+    """The shipped config with the old flat 200 ramp (#9, 2026-11-12, #227) set on every account."""
+    from tests.sendtest import with_ramp
+    return with_ramp(cfg, ramp_start=200, ramp_step=10, ramp_floor=200, ramp_ceiling=200)
 _send_config.load_config.__defaults__ = (_ramp_copy,)
 
 

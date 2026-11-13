@@ -364,13 +364,12 @@ def send_sends_only_what_was_approved_once(h):
     assert [tuple(r) for r in logged] == [("email", "plan")], f"outreach touches: {[tuple(r) for r in logged]}"
     planned = h.conn.execute("SELECT seq, state, due_on FROM message WHERE touch_id = ? AND seq >= 1",
                              (ids.founder_touch,)).fetchall()
-    assert [tuple(r) for r in planned] == [(1, "planned", "2026-11-13"), (2, "planned", "2026-11-19"),
-                                           (3, "planned", "2026-11-30"), (4, "planned", "2026-12-09")], \
+    assert [tuple(r) for r in planned] == [(1, "planned", "2026-11-19")], \
         f"follow-ups: {[tuple(r) for r in planned]}"
     states = h.conn.execute("SELECT m.state, COUNT(*) FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                             "JOIN person p ON p.person_id = t.person_id WHERE p.company_id = ? GROUP BY m.state",
                             (ids.company,)).fetchall()
-    assert {r[0]: r[1] for r in states} == {"sent": 1, "drafted": 1, "planned": 4}, \
+    assert {r[0]: r[1] for r in states} == {"sent": 1, "drafted": 1, "planned": 1}, \
         f"Sendwell's messages by state: {[tuple(r) for r in states]}"
 
 

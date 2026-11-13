@@ -99,7 +99,7 @@ class RefusalTest(unittest.TestCase):
         source = (SENDING / "__main__.py").read_text(encoding="utf-8")
         body = source[source.index("def main("):]
         self.assertLess(body.index("require_live"), body.index("_run("))
-        self.assertLess(body.index("require_live"), body.index("_auth()"))
+        self.assertLess(body.index("require_live"), body.index("_auth("))
 
 
 class CommandSetTest(unittest.TestCase):
@@ -117,7 +117,7 @@ class CommandSetTest(unittest.TestCase):
         self.assertEqual(cli._parser().parse_args(["simulate"]).days, 10)
 
 
-class LiveRunTest(unittest.TestCase):
+class _LiveRun(unittest.TestCase):
     """With `root` standing for the live checkout, `run` builds its tick from the right parts."""
 
     def setUp(self):
@@ -143,6 +143,8 @@ class LiveRunTest(unittest.TestCase):
     def go(self, *argv):
         return run(list(argv), root=self.live, live_root=self.live)
 
+
+class LiveRunTest(_LiveRun):
     def test_run_wires_the_tick_for_launchd(self):
         self.db.execute("INSERT INTO job_run(job, started_at, finished_at, status) VALUES ('sender', '2026-11-02T14:00:00Z', "
                         "'2026-11-02T14:00:01Z', 'ok')")
@@ -150,7 +152,7 @@ class LiveRunTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.connect.assert_called_once_with(fullfsync=True)
         deps = self.seen["deps"]
-        self.assertIs(deps.client, self.client)
+        self.assertEqual(dict(deps.clients), {})  # no token file in the scratch Gmail folder: no client
         self.assertIs(deps.notify, cli.mac_notifier)
         self.assertEqual(self.seen["cfg"], load_config())
         self.assertFalse(self.seen["dry_run"])
@@ -194,10 +196,88 @@ class LiveRunTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("outreach.sending auth", err)
 
-    def test_auth_delegates_to_the_gmail_sign_in(self):
-        with mock.patch("outreach.sending.gmail.main", return_value=0) as signed_in:
+    def test_auth_delegates_to_the_gmail_sign_in_for_account_1(self):
+        with mock.patch("outreach.sending.gmail.sign_in", return_value=0) as signed_in:
             self.assertEqual(self.go("auth")[0], 0)
-        signed_in.assert_called_once_with(["auth"])
+        signed_in.assert_called_once_with(os.environ["OUTREACH_GMAIL_DIR"], os.environ["OUTREACH_GMAIL_DIR"],
+                                          expect=REST)
+
+
+REST, GENERAL, NEU = (a.address for a in load_config().accounts)
+
+
+class AccountFlagTest(_LiveRun):
+    """`auth` and `whoami` act on account 1 unless `--account` names another Gmail account; `run` builds one client
+    per Gmail account that has a token file."""
+
+    def setUp(self):
+        super().setUp()
+        self.gdir = temp_dir(self)
+        patcher = mock.patch.dict(os.environ, {"OUTREACH_GMAIL_DIR": self.gdir})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def token(self, *parts: str) -> None:
+        folder = os.path.join(self.gdir, *parts)
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "token.json"), "w") as f:
+            f.write("{}")
+
+    def test_auth_requires_account_flag_for_new_accounts(self):
+        with mock.patch("outreach.sending.gmail.sign_in", return_value=0) as signed_in:
+            self.assertEqual(self.go("auth")[0], 0)
+            self.assertEqual(self.go("auth", "--account", GENERAL)[0], 0)
+            code, _, err = self.go("auth", "--account", "nobody@example.com")
+            self.assertEqual(code, 1)
+            self.assertIn("nobody@example.com", err)
+            code, _, err = self.go("auth", "--account", NEU)
+            self.assertEqual(code, 1)
+            self.assertIn("Mail.app", err)
+        self.assertEqual(signed_in.call_args_list, [
+            mock.call(self.gdir, self.gdir, expect=REST),
+            mock.call(os.path.join(self.gdir, GENERAL), self.gdir, expect=GENERAL)])
+
+    def test_whoami_takes_the_account_flag(self):
+        built = []
+        def client(directory=None, **kw):
+            built.append((directory, kw.get("token_dir")))
+            return self.client
+        self.client.profile.return_value = mock.Mock(email=GENERAL)
+        with mock.patch.object(cli, "GmailClient", side_effect=client):
+            code, out, _ = self.go("whoami", "--account", GENERAL)
+            self.assertEqual((code, out.strip()), (0, GENERAL))
+            self.go("whoami")
+        self.assertEqual(built, [(self.gdir, os.path.join(self.gdir, GENERAL)), (self.gdir, self.gdir)])
+
+    def test_run_builds_one_client_per_gmail_account_with_a_token(self):
+        built = {}
+        def client(directory=None, **kw):
+            built[kw.get("token_dir")] = mock.Mock(name=kw.get("token_dir"))
+            return built[kw.get("token_dir")]
+        self.token()
+        with mock.patch.object(cli, "GmailClient", side_effect=client):
+            self.go("run")
+            self.assertEqual(set(self.seen["deps"].clients), {REST})
+            self.token(GENERAL)
+            self.go("run")
+        self.assertEqual(set(self.seen["deps"].clients), {REST, GENERAL})
+        self.assertIs(self.seen["deps"].clients[GENERAL], built[os.path.join(self.gdir, GENERAL)])
+
+    def test_each_client_and_whoami_carry_their_accounts_sign_in_command(self):
+        seen = []
+        def client(directory=None, **kw):
+            seen.append(kw.get("sign_in"))
+            return self.client
+        self.token()
+        self.token(GENERAL)
+        self.client.profile.side_effect = cli.GmailError("auth", None, "the Gmail token has no refresh token")
+        with mock.patch.object(cli, "GmailClient", side_effect=client):
+            self.go("run")
+            self.assertEqual(seen, ["python -m outreach.sending auth",
+                                    f"python -m outreach.sending auth --account {GENERAL}"])
+            code, _, err = self.go("whoami", "--account", GENERAL)
+        self.assertEqual(code, 1)
+        self.assertIn(f"run: python -m outreach.sending auth --account {GENERAL}", err)
 
 
 class LaunchctlTest(unittest.TestCase):

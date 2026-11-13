@@ -397,6 +397,13 @@ is_linkedin_url = _linkedin_url
 is_github_host = _github_host
 
 
+def _bounced_before(conn: sqlite3.Connection, email: str) -> bool:
+    """The address is on the dead-address list (`bounced_address`, NOCASE): it bounced from some sender account
+    before. The same read as `outreach.sending.claim.bounced_before`, kept here so the MCP server never loads the
+    sender package."""
+    return conn.execute("SELECT 1 FROM bounced_address WHERE address = ?", (email.strip(),)).fetchone() is not None
+
+
 def _refuse(code: str) -> AddResult:
     return AddResult(None, False, code)
 
@@ -437,6 +444,7 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
     """Store a person and their public source pages in one transaction, or refuse and write nothing.
 
     Refusal codes: `bad_role_kind`, `bad_name`, `company_removed`, `linkedin_source`, `bad_linkedin_url`, `bad_email`,
+    `bounced_address` (the address is on the dead-address list, `bounced_address`, any case),
     `email_source_not_allowed` (GitHub, a noreply address, or a shared mailbox such as info@ unless the source page
     is an HN post that asks for email and its stored text holds the address), `email_needs_source`, `bad_source` (an unknown kind, a page that is not plain https,
     a basis on a non-email source or a missing one on an email source, a bad date), `person_elsewhere`. A person who
@@ -469,6 +477,8 @@ def add_candidate(conn: sqlite3.Connection, *, company_id: int, name: str, title
             return _refuse("bad_email")
         if "noreply" in email or "no-reply" in email:
             return _refuse("email_source_not_allowed")
+        if _bounced_before(conn, email):
+            return _refuse("bounced_address")
     email_sources = [s for s in sources if s.kind == "email"]
     if any(_github_host(_host(s.url)) for s in email_sources):
         return _refuse("email_source_not_allowed")

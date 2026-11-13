@@ -103,11 +103,13 @@ def run_feed_seed(conn: sqlite3.Connection, client: HttpClient, *, now: str, ats
     for row in rows:
         if (row.ats, row.token.lower()) in boards or f"{row.ats}:{row.token}".lower() in aliases:
             known.append((row, boards.get((row.ats, row.token.lower()))))
-        elif row.gated_at is None or row.gate_result == "error" or _age_days(now, row.gated_at) >= config.retry_days:
+        elif (row.gated_at is None or row.gate_result in ("error", "no_us_engineering")
+              or _age_days(now, row.gated_at) >= config.retry_days):  # a board turned away for no US engineering role
+            # is read again for the feed, which adds it whenever it answers (2026-11-13)
             due.append(row)
     if not due:
         return None
     due.sort(key=lambda r: (r.gated_at is not None, r.gated_at or ""))  # stable: newest listing first within each
     return _gate_rows(conn, client, rows, known, due, now=now, ats=tuple(sorted({r.ats for r in due})), limit=limit,
                       workers=None, source=(SOURCE, SOURCE_VERSION), event_kind=EVENT_KIND, should_stop=should_stop,
-                      as_is=True)
+                      as_is=True, any_answer=True)

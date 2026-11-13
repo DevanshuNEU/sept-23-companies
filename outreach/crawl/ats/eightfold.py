@@ -12,6 +12,9 @@ reads `<token>.eightfold.ai` for `<token>.com`. A list is read page by page unti
 `count` (`short_allowed`) is a partial `ok`: what it listed is kept and nothing is closed. There is no ETag, so
 `unchanged` is the id fingerprint. A site that answers 403 "Not authorized for PCSX" (the older v2 API, Netflix) or
 429 (Microsoft, 2026-11-12) is an error and is never worked around.
+
+A head read (#263) is page 1 alone (`start=0`): the search is newest first, so it is a partial `ok` that closes
+nothing, or `unchanged` when the page lists nothing.
 """
 from __future__ import annotations
 
@@ -145,6 +148,28 @@ class EightfoldAdapter:
         note = (f"{len(jobs)} of {total} positions read ({broken} broken, {max(missing - broken, 0)} missing)"
                 if missing or broken else "")
         return finish_list(jobs.values(), resp, validators, partial_note=note)
+
+    def head(self, token: str) -> ReadResult:
+        """A head read (#251 part 2, #263): page 1 of the search, which is already newest first. A partial `ok` that
+        closes nothing, or `unchanged` when it lists nothing, so it never counts as an empty read."""
+        site = tenant(token)
+        if site is None:
+            return read_error(f"{token!r} is not an Eightfold tenant token")
+        host, domain = site
+        got = self._page(host, domain, 0)
+        if isinstance(got, ReadResult):
+            return got
+        rows, count, resp = got
+        if not rows:
+            return ReadResult("unchanged", (), Validators(), http_status=resp.status, head=True)
+        jobs: dict[str, JobRef] = {}
+        for item in rows:
+            if (parsed := _parse(host, item)) is not None:
+                jobs.setdefault(parsed.native_id, parsed)
+        if not jobs:
+            return read_error(f"none of the {len(rows)} positions on page 1 could be read", status=resp.status)
+        return ReadResult("ok", tuple(jobs.values()), Validators(), http_status=resp.status, partial=True,
+                          partial_note=f"head read: the newest {len(jobs)} of {count} positions", head=True)
 
     def body(self, token: str, job: JobRef) -> str | None:
         """The description's text, None when it is empty. A failed request, another position's answer or one with

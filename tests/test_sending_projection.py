@@ -9,12 +9,13 @@ from outreach.sending import human, projection, queue, ramp
 from outreach.sending.config import load_config
 from tests import SHIPPED_SEND_CONFIG
 from outreach.sending import status
-from tests.sendtest import prove, put_day, seed_message, seed_sent, with_ramp
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import prove, put_day, seed_message, seed_sent, with_ramp, solo
 from tests.storetest import seed_company
 from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
-CFG = with_ramp(load_config(), ramp_floor=1)
+CFG = with_ramp(solo(load_config()), ramp_floor=1)
 FRI = ny(6, 11, 6)  # Friday 2026-11-06, 11:06 New York (three company slots 60 minutes apart fit before the 15:00 close)
 
 
@@ -25,7 +26,7 @@ def day_of(at: datetime) -> date:
 class ProjectionTest(Base):
     def project(self, now=FRI):
         day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), now, CFG)
-        return projection.project(queue.prepare(self.db, now, CFG, day=day), now, CFG)
+        return projection.project(queue.prepare(self.db, now, CFG, _in_play(self.db, CFG), day=day), now, CFG)
 
     def test_nothing_approved_projects_nothing(self):
         self.assertEqual(self.project(), {})
@@ -56,7 +57,7 @@ class ProjectionTest(Base):
         got = self.project()
         # Each gap is the spread rule at factor 1.0: the minutes left until the window closes (15:00 New York, the
         # recipients are in New York) over the sends left today, clipped.
-        limit = queue.prepare(self.db, FRI, CFG, day=None).limit
+        limit = queue.prepare(self.db, FRI, CFG, _in_play(self.db, CFG), day=None).limit
         first = timedelta(minutes=human.expected_gap_minutes(
             queue.minutes_left_for([], [], FRI, CFG), limit - 1, CFG))
         self.assertEqual(got[mids[0]], FRI)
@@ -104,7 +105,7 @@ class ProjectionTest(Base):
         self.assertEqual(self.project()[mid], FRI)
         soon = FRI + timedelta(minutes=3)
         self.db.execute("UPDATE sender_account SET next_send_at = ? WHERE account_id = 1", (stamp(soon),))
-        verdict = queue.verdicts(self.db, FRI, CFG, day=None, gate=None)[0]
+        verdict = queue.verdicts(self.db, FRI, CFG, _in_play(self.db, CFG), day=None, gate=None)[0]
         self.assertEqual((verdict.reason, verdict.earliest_at), ("spacing", soon))
         self.assertEqual(self.project()[mid], soon)
 
@@ -133,12 +134,12 @@ class ShippedPacingTest(Base):
         seed_message(self.db, la, seq=1, due_on="2026-11-13")
         cfg = dataclasses.replace(CFG, spread_gap_minutes=(2, 45))  # the shipped clip (the scratch one is [2, 3])
         got = self_project(self.db, FRI, cfg)
-        limit = queue.prepare(self.db, FRI, cfg, day=None).limit
+        limit = queue.prepare(self.db, FRI, cfg, _in_play(self.db, cfg), day=None).limit
         expected = 234 / (limit - 1 + 1)  # 11:06 to 15:00 is 234 minutes
         self.assertAlmostEqual((got[b] - got[a]).total_seconds() / 60, expected, places=3)
 
     def test_shipped_pacing_literal_gap_with_a_follow_up_sent_today(self):
-        cfg = dataclasses.replace(with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=16, ramp_floor=15),
+        cfg = dataclasses.replace(with_ramp(solo(load_config(SHIPPED_SEND_CONFIG)), ramp_start=16, ramp_floor=15),
                                   day_start_jitter_minutes=0, pick_pool=1, per_company_gap_jitter_minutes=0)
         person = self.person(company=seed_company(self.db, "Done"))
         seed_sent(self.db, person, at=ny(6, 8) - timedelta(days=7))
@@ -153,7 +154,7 @@ class ShippedPacingTest(Base):
 
 def self_project(db, now, cfg):
     day = ramp.open_day(db, _accounts.primary(db, cfg), now, cfg)
-    return projection.project(queue.prepare(db, now, cfg, day=day), now, cfg)
+    return projection.project(queue.prepare(db, now, cfg, _in_play(db, cfg), day=day), now, cfg)
 
 
 class StatusProjectionTest(Base):
@@ -169,7 +170,7 @@ class StatusProjectionTest(Base):
         self.assertEqual((got, paused), ({self.mid: FRI}, True))
 
     def test_signed_out_projects_nothing(self):
-        self.db.execute("UPDATE sender SET auth_state = 'signed_out' WHERE sender_id = 1")
+        self.db.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")
         self.assertEqual(status.queue_projection(self.db, FRI, CFG), ({}, False))
 
     def test_the_old_sender_running_projects_nothing(self):

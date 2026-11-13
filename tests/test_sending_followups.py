@@ -15,10 +15,11 @@ from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.followups import (close_quiet_touches, lapse_followups, plan_followups, stop_planned,
                                         sweep_stopped, sync_followups)
 from outreach.store import transaction
-from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, solo
 from tests.storetest import fresh_store, seed_company
 
-CFG = dataclasses.replace(load_config(), followup_business_days=(3, 7, 14, 21))  # the 4-step mechanism; the shipped config is one follow-up (0018)
+CFG = dataclasses.replace(solo(load_config()), followup_business_days=(3, 7, 14, 21))  # the 4-step mechanism; the shipped config is one follow-up (0018)
 STAMP = "2026-11-20T15:00:00Z"
 ONE = dataclasses.replace(CFG, followup_business_days=(7,))  # one follow-up, for the tests about lapses and closes
 # A first email on Monday 2026-11-02: follow-ups at 3, 7, 14 and 21 business days (#9, 2026-10-31).
@@ -306,7 +307,7 @@ class CloseTest(Base):
 
 class SweepTest(Base):
     def verdicts(self):
-        return queue.verdicts(self.db, MON, CFG, day=None, gate=None)
+        return queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=None, gate=None)
 
     def sweep(self):
         verdicts = self.verdicts()

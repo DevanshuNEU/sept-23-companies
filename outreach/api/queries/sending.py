@@ -23,8 +23,8 @@ from outreach.drafts.followups import canonical_company
 from outreach.sending import calendar as cal
 from outreach.sending import accounts, signals
 from outreach.sending.config import SendConfig, load_config
-from outreach.sending.status import SendingSnapshot, sending_snapshot
-from outreach.sending.status import _gate as tick_gate  # the one gate the queue and the strip share
+from outreach.sending.status import SendingSnapshot, lead, sending_snapshot
+from outreach.sending.status import sender_gate  # the one gate the queue and the strip share
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
@@ -63,7 +63,7 @@ def _step_down(conn: sqlite3.Connection, snap: SendingSnapshot, cfg: SendConfig)
     row = conn.execute(
         f"SELECT max(at) FROM event WHERE entity = 'sender' AND entity_id = ? "
         f"AND kind IN ({','.join('?' * len(STEP_DOWN_KINDS))}) AND json_extract(detail, '$.day') = ?",
-        (accounts.primary(conn, cfg).account_id, *STEP_DOWN_KINDS, day)).fetchone()
+        (lead(accounts.in_play(conn, cfg)).account_id, *STEP_DOWN_KINDS, day)).fetchone()
     at = row[0] or cal.ny_day_bounds(date.fromisoformat(day), cfg)[0]
     return SendingStepDown(at=at, reason=reason)
 
@@ -110,7 +110,7 @@ def read_sender(conn: sqlite3.Connection, now: str, *, old_sender_loaded: bool) 
         log.warning("The sending config could not be loaded: %s", err)
         return SenderRead(None, None)
     return SenderRead(sending_snapshot(conn, moment(now), cfg, old_sender_loaded=old_sender_loaded),
-                      tick_gate(conn, old_sender_loaded))  # the tick's own order, never a copy of it
+                      sender_gate(conn, cfg, old_sender_loaded))  # the tick's own order, never a copy of it
 
 
 def summary_of(read: SenderRead) -> SenderSummary:

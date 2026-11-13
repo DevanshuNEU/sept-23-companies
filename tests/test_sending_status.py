@@ -14,10 +14,11 @@ from outreach.sending import proof, queue, ramp
 from outreach.sending.config import load_config
 from outreach.sending.status import SendingSnapshot, queue_schedule, sending_snapshot
 from outreach.store.writes import append_event
-from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_message, seed_sent, with_ramp
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_message, seed_sent, with_ramp, solo
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 LOW = with_ramp(CFG, ramp_floor=1)  # a floor of 1 lets a test set a day's limit as low as it likes
 NY = ZoneInfo("America/New_York")
 MON_DAY = date(2026, 11, 2)
@@ -64,6 +65,8 @@ class Base(unittest.TestCase):
         sets = ", ".join(f"{k} = ?" for k in columns)
         table, key = ("sender_account", "account_id") if "next_send_at" in columns else ("sender", "sender_id")
         self.db.execute(f"UPDATE {table} SET {sets} WHERE {key} = 1", tuple(columns.values()))
+        if set(columns) <= {"auth_state", "auth_error"}:  # the tick writes a sign-in on the account's own row too
+            self.db.execute(f"UPDATE sender_account SET {sets} WHERE account_id = 1", tuple(columns.values()))
 
     def signal(self, kind: str, at: datetime, *, detail=None) -> None:
         self.keys += 1
@@ -297,7 +300,7 @@ class ScheduleTest(Base):
         self.approve()
         self.approve(tz="America/Los_Angeles")
         day = ramp.open_day(self.db, _accounts.primary(self.db, CFG), MON, CFG)
-        theirs = {v.message_id: v for v in queue.verdicts(self.db, MON, CFG, day=day, gate=None)}
+        theirs = {v.message_id: v for v in queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=day, gate=None)}
         self.assertEqual(self.schedule(), theirs)
 
     def test_schedule_reason_and_time_for_each_wait(self):
@@ -398,6 +401,46 @@ class ReasonTextTest(unittest.TestCase):
         self.assertEqual(reason_text("lane_waits", proof.PROVEN, own), own)
         self.assertEqual(reason_text("lane_waits", proof.PROVEN), queue.REASON_TEXT["lane_waits"])
         self.assertEqual(schedule_text("lane_waits", None, "2026-11-02T14:00:00Z", load_config(), text=own), own)
+
+
+class PerAccountStatusTest(unittest.TestCase):
+    """The shipped shape (account 1 rests, account 2 sends the general lane): the Outbox reads each account's own
+    sign-in and marker proof, never account 1's for every message (Task A10)."""
+
+    def setUp(self):
+        from tests.sendtest import prove
+        self.db = fresh_store()
+        self.cfg = load_config()
+        self.rows = _accounts.sync(self.db, self.cfg, iso(MON))
+        self.two = self.rows["devanshuchi9@gmail.com"].account_id
+        prove(self.db)  # account 1 is proven; account 2 is new
+        self.ids = []
+        for n in range(2):
+            company = seed_company(self.db, f"Co{n}")
+            person = seed_email_person(self.db, company, f"P{n}", f"p{n}@co{n}.example")
+            self.ids.append(seed_message(self.db, person, subject=f"Hello {n}", body=f"Body number {n} of two."))
+
+    def reasons(self, **kw):
+        return {m: v.reason for m, v in queue_schedule(self.db, MON, self.cfg, **kw).items()}
+
+    def auth(self, account_id: int, state: str) -> None:
+        self.db.execute("UPDATE sender_account SET auth_state = ? WHERE account_id = ?", (state, account_id))
+
+    def test_each_account_has_its_own_proof_and_sign_in(self):
+        from outreach.sending.status import sender_gate
+        first, second = self.ids
+        self.assertEqual(self.reasons(), {first: "ready", second: "message_id_unproven"})  # account 2's first alone
+        self.assertIsNone(sender_gate(self.db, self.cfg, False))
+        self.auth(1, "signed_out")  # the resting account signed out holds nothing of account 2's
+        self.assertEqual(self.reasons()[first], "ready")
+        self.assertIsNone(sender_gate(self.db, self.cfg, False))
+        self.auth(self.two, "signed_out")
+        self.assertEqual(self.reasons(), {first: "signed_out", second: "signed_out"})
+        self.assertEqual(sender_gate(self.db, self.cfg, False), "signed_out")
+        self.auth(self.two, "ok")
+        self.assertEqual(set(self.reasons(old_sender_loaded=True).values()), {"old_sender_running"})
+        self.assertEqual(sender_gate(self.db, self.cfg, True), "old_sender_running")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,7 +83,6 @@ prune_noop_after_days = 14
 # line. `lane` is the audience the account serves ("sponsor" or "general", unset for none), at most one sending account
 # per lane. `sends = false` keeps an account out of the sender. Each account has its own ramp: start, step, floor and
 # ceiling (the ceiling stays at or under the hard 200). The first block is the old sender; it no longer sends.
-# compat until Task A10: SendConfig.from_address reads the first block's address.
 # These blocks stay last: a TOML key after a [[account]] header would belong to that block.
 [[account]]
 address = "devanshurajesh@gmail.com"

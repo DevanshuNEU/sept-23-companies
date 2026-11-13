@@ -242,7 +242,9 @@ class StopRulesTest(unittest.TestCase):
             "SELECT kind FROM event WHERE entity = 'sender' ORDER BY event_id")]
 
     def paused(self, result):
-        return result.conn.execute("SELECT paused, pause_kind FROM sender_account WHERE account_id = 1").fetchone()
+        # The account that sends (the general lane): account 1 rests, so its pauses are the sending account's.
+        return result.conn.execute("SELECT paused, pause_kind FROM sender_account WHERE address = ?",
+                                   (result.cfg.lane_account("general").address,)).fetchone()
 
     def after(self, result, at: datetime) -> list:
         return [s for s in result.sends if s.at >= at]

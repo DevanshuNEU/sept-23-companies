@@ -17,10 +17,10 @@ from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
 from outreach.store import transaction
 from outreach.store.writes import append_event
-from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
+from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 MS = 60_000
 
 
@@ -477,22 +477,25 @@ class ReviewFixTest(Base):
         self.assertEqual(len(self.gmail.sent), 2)
 
 
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
 class PerAccountTest(Base):
     """A send in doubt on one account is settled only by that account's own Sent (#9 multi-sender ruling): its
     marker is in that mailbox and nowhere else, so another account's scan would miss it and retry it."""
 
     def setUp(self):
         super().setUp()
-        rows = accounts.sync(self.db, CFG, iso(MON))
+        rows = accounts.sync(self.db, MULTI, iso(MON))
         self.one, self.two = rows["devanshurajesh@gmail.com"], rows["devanshuchi9@gmail.com"]
         self.gmail2 = FakeGmail(clock=self.clock, probe=self.probe, account=self.two.cfg.address, id_prefix="b",
-                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
 
     def in_doubt_on_two(self) -> int:
         _, mid = self.approve(company=seed_company(self.db, "Two Co"))
         self.gmail2.fail_next_send(TimeoutError(), accepted=True)
         with self.assertRaises(GmailError):
-            claim.send_one(self.db, self.gmail2, self.queued(mid), CFG, now=iso(self.clock()), clock=self.clock,
+            claim.send_one(self.db, self.gmail2, self.queued(mid), MULTI, now=iso(self.clock()), clock=self.clock,
                            rng=self.rng, account=self.two)
         self.assertEqual(self.message(mid)["state"], "send_unknown")
         return mid
@@ -504,14 +507,14 @@ class PerAccountTest(Base):
         self.assertEqual(self.send(one), "timeout")
         self.assertEqual([u.message_id for u in claim.unclear(self.db, self.one.account_id)], [one])
         self.assertEqual([u.message_id for u in claim.unclear(self.db, self.two.account_id)], [two])
-        self.clock.advance(minutes=CFG.reconcile_after_minutes + 1)
+        self.clock.advance(minutes=MULTI.reconcile_after_minutes + 1)
         # Account 1's client scans only account 1's row; a miss there settles nothing on account 2.
         found = {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
                                 u.rfc_id) for u in claim.unclear(self.db, self.one.account_id)}
         self.assertEqual(set(found), {one})
         forged = {**found, two: (None, True, self.message(two)["pending_rfc_id"])}  # a scan by the wrong client
         with transaction(self.db):
-            counts = claim.reconcile(self.db, forged, self.one.account_id, now=iso(self.clock()), cfg=CFG,
+            counts = claim.reconcile(self.db, forged, self.one.account_id, now=iso(self.clock()), cfg=MULTI,
                                      rng=self.rng)
         self.assertEqual(counts, {"sent": 0, "failed": 1, "waiting": 0, "errors": 0})
         self.assertEqual(self.message(one)["state"], "failed")
@@ -520,7 +523,7 @@ class PerAccountTest(Base):
                                                          send_returned_ms=u.send_returned_ms), u.rfc_id)
                   for u in claim.unclear(self.db, self.two.account_id)}
         with transaction(self.db):
-            counts = claim.reconcile(self.db, found2, self.two.account_id, now=iso(self.clock()), cfg=CFG,
+            counts = claim.reconcile(self.db, found2, self.two.account_id, now=iso(self.clock()), cfg=MULTI,
                                      rng=self.rng)
         self.assertEqual(counts, {"sent": 1, "failed": 0, "waiting": 0, "errors": 0})
         self.assertEqual(self.message(two)["state"], "sent")

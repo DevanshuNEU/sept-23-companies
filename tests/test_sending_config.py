@@ -185,9 +185,12 @@ class SendConfigTest(unittest.TestCase):
             load_config(config_with(clean_bounce_rate="1.5"))
         self.assertIn("between 0 and 1", str(cm.exception))
 
-    def test_from_address_is_the_first_account_block(self):  # compat until Task A10
+    def test_there_is_no_single_from_address(self):
+        # Every email goes from its own account (Task A10): the first block is account 1, and it rests.
         cfg = load_config()
-        self.assertEqual(cfg.from_address, "devanshurajesh@gmail.com")
+        self.assertFalse(hasattr(cfg, "from_address"))
+        self.assertEqual(cfg.accounts[0].address, "devanshurajesh@gmail.com")
+        self.assertFalse(cfg.accounts[0].sends)
         self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
 
     def test_unknown_or_missing_key_is_refused(self):

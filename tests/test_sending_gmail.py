@@ -224,7 +224,7 @@ class LiveGuardTest(NoNetwork):
         with mock.patch.object(gmail, "authorize") as authorize, \
                 mock.patch.dict(os.environ, {"OUTREACH_GMAIL_DIR": self.dir}):
             self.assertEqual(gmail.main(["auth"]), 0)
-        authorize.assert_called_once_with(self.dir)
+        authorize.assert_called_once_with(self.dir, self.dir, expect=None)
 
     def test_no_bypass_flag_exists(self):
         with open(gmail.__file__, encoding="utf-8") as f:
@@ -299,6 +299,66 @@ class TokenTest(NoNetwork):
             gmail._token(self.dir)
         self.assertEqual(cm.exception.kind, "auth")
         self.assertNotIn(SECRET, str(cm.exception))
+
+
+class TokenDirTest(NoNetwork):
+    """Each Gmail account has its own token (#9 multi-sender ruling, 2026-11-12): account 1 keeps
+    `<gmail_dir>/token.json`, every other one `<gmail_dir>/<address>/token.json`, or its `token_dir`."""
+
+    def setUp(self):
+        super().setUp()
+        from outreach.sending.config import load_config
+        self.cfg = load_config()
+        self.rest, self.general, self.neu = (a.address for a in self.cfg.accounts)
+
+    def test_token_dir_per_account(self):
+        self.assertEqual(gmail.token_dir_for(self.cfg, self.rest, self.dir), self.dir)
+        self.assertEqual(gmail.token_dir_for(self.cfg, self.general, self.dir), os.path.join(self.dir, self.general))
+        own = os.path.join(self.dir, "elsewhere")
+        accts = tuple(dt_replace(a, token_dir=own) if a.address == self.general else a for a in self.cfg.accounts)
+        self.assertEqual(gmail.token_dir_for(dt_replace(self.cfg, accounts=accts), self.general, self.dir), own)
+        with self.assertRaises(ValueError):
+            gmail.token_dir_for(self.cfg, self.neu, self.dir)  # Mail.app: no Gmail token
+        with self.assertRaises(ValueError):
+            gmail.token_dir_for(self.cfg, "nobody@example.com", self.dir)
+
+    def test_a_client_reads_its_own_accounts_token(self):
+        self.live(True)
+        two = os.path.join(self.dir, self.general)
+        os.makedirs(two)
+        with open(os.path.join(self.dir, "token.json"), "w") as f:
+            json.dump({"access_token": "ya29.account-one", "expires_at": 9999999999}, f)
+        with open(os.path.join(two, "token.json"), "w") as f:
+            json.dump({"access_token": "ya29.account-two", "expires_at": 9999999999}, f)
+        self.assertEqual(gmail._token(self.dir), "ya29.account-one")
+        self.assertEqual(gmail._token(self.dir, two), "ya29.account-two")
+        os.unlink(os.path.join(two, "token.json"))
+        with self.assertRaises(GmailError) as cm:
+            gmail._token(self.dir, two)  # never falls back to account 1's token
+        self.assertEqual(cm.exception.kind, "auth")
+
+    def test_a_token_folder_inside_the_real_secrets_folder_is_live_only(self):
+        self.live(False)
+        inside = os.path.join(gmail.DEFAULT_DIR, self.general)
+        with self.assertRaises(SystemExit):
+            gmail.check_auth_location(inside)
+        with self.assertRaises(SystemExit):
+            gmail.GmailClient(self.dir, token_dir=inside)
+        gmail.check_auth_location(os.path.join(self.dir, self.general))  # a scratch folder is fine
+
+    def test_sign_in_writes_the_token_into_the_accounts_folder(self):
+        self.live(False)
+        with open(os.path.join(self.dir, "client_secret.json"), "w") as f:
+            json.dump({"installed": {"client_id": "cid"}}, f)
+        two = os.path.join(self.dir, self.general)
+        with mock.patch.object(gmail, "authorize") as authorize:
+            self.assertEqual(gmail.sign_in(two, self.dir), 0)
+        authorize.assert_called_once_with(self.dir, two, expect=None)
+
+
+def dt_replace(obj, **changes):
+    import dataclasses
+    return dataclasses.replace(obj, **changes)
 
 
 class MimeTest(unittest.TestCase):

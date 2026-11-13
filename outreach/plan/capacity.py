@@ -70,12 +70,26 @@ def companies_today(remaining: int, cfg: PlanConfig) -> int:
     return max(0, min(cfg.get("queue", "companies_per_day"), remaining // cfg.get("queue", "requests_per_company")))
 
 
+def _sending_ids(conn: sqlite3.Connection) -> list[int]:
+    """The store ids of the accounts that send (`sends = true` in the sending config), in config order. An account
+    with no row yet has sent nothing and has no send day."""
+    from outreach.sending.config import load_config as load_send_config
+    ids = []
+    for acct in load_send_config().accounts:
+        row = conn.execute("SELECT account_id FROM sender_account WHERE address = ?", (acct.address,)).fetchone()
+        if acct.sends and row is not None:
+            ids.append(row[0])
+    return ids
+
+
 def current_send_limit(conn: sqlite3.Connection, today: date, cfg: PlanConfig) -> int:
-    """Today's `send_day.send_limit`, else the latest earlier row's, else `email.start_limit`. The seam #14's ramp
-    fills: this plan only reads what the ramp wrote."""
-    row = conn.execute("SELECT send_limit FROM send_day WHERE account_id = 1 AND day <= ? ORDER BY day DESC LIMIT 1",
-                       (today.isoformat(),)).fetchone()
-    return row[0] if row else cfg.get("email", "start_limit")
+    """The sum over the accounts that send of each one's `send_day.send_limit` today, else its latest earlier row's;
+    `email.start_limit` when no sending account has a row yet. The seam #14's ramp fills: this plan only reads what
+    the ramp wrote. An account that rests (account 1 since the multi-sender switch) adds nothing."""
+    limits = [row[0] for row in (conn.execute(
+        "SELECT send_limit FROM send_day WHERE account_id = ? AND day <= ? ORDER BY day DESC LIMIT 1",
+        (account_id, today.isoformat())).fetchone() for account_id in _sending_ids(conn)) if row is not None]
+    return sum(limits) if limits else cfg.get("email", "start_limit")
 
 
 def email_capacity(conn: sqlite3.Connection, today: date, cfg: PlanConfig, *,
@@ -86,9 +100,10 @@ def email_capacity(conn: sqlite3.Connection, today: date, cfg: PlanConfig, *,
         "SELECT COUNT(*) FROM message WHERE state IN ('approved', 'sending', 'send_unknown') "
         "OR (state IN ('planned', 'drafted') AND seq >= 1 AND due_on <= ?) "
         "OR (state = 'sent' AND sent_at >= ? AND sent_at < ?)", (today.isoformat(), start, end)).fetchone()[0]
-    # Account 1 is the one account until the per-account plan lands; his pause or its hard block closes the slots.
-    paused = bool(conn.execute("SELECT (SELECT paused FROM sender WHERE sender_id = 1) "
-                               "OR COALESCE((SELECT paused FROM sender_account WHERE account_id = 1), 0)").fetchone()[0])
+    # His pause closes the slots, and so does a hard block on every account that sends.
+    ids = _sending_ids(conn)
+    paused = bool(conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()[0]) or (bool(ids) and all(
+        conn.execute("SELECT paused FROM sender_account WHERE account_id = ?", (i,)).fetchone()[0] for i in ids))
     limit = limit_fn(conn, today, cfg)
     slots = 0 if paused else min(cfg.get("email", "rows_max"), max(0, limit - committed))
     return EmailCapacity(send_limit=limit, committed=committed, paused=paused, slots=slots)

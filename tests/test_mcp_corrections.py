@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from outreach.sending import queue
 from outreach.sending.config import load_config as load_send_config
+from outreach.sending.accounts import in_play as _in_play
 from tests import apiseed as seed
 from tests.mcptest import NOW, McpCase, fingerprint
 from tests.test_mcp_reads import merge, no_go, outreach_touch
@@ -169,7 +170,7 @@ class UpdatePersonTest(CorrectionsCase):
                          before)
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         found = {v.message_id: v.reason for v in
-                 queue.verdicts(self.db, now, load_send_config(), day=None, gate=None)}
+                 queue.verdicts(self.db, now, load_send_config(), _in_play(self.db, load_send_config()), day=None, gate=None)}
         self.assertEqual(found[approved], "no_address")
 
 

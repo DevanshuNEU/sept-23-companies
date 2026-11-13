@@ -96,7 +96,11 @@ def register(harness) -> None:
         conn.execute("PRAGMA fullfsync = ON")  # the tick refuses a connection without it
         clock = FakeClock(START)
         cfg = load_config()
-        gmail = FakeGmail(clock=clock, reconcile_after_minutes=cfg.reconcile_after_minutes)
+        # Account 1 rests and holds the old mailer's history; the general-lane account sends (multi-sender, A10).
+        rest = FakeGmail(clock=clock, account=cfg.accounts[0].address,
+                         reconcile_after_minutes=cfg.reconcile_after_minutes)
+        gmail = FakeGmail(clock=clock, account=cfg.lane_account("general").address, id_prefix="b",
+                          reconcile_after_minutes=cfg.reconcile_after_minutes)
         company = conn.execute("INSERT INTO company(name, status_at, created_at) VALUES (?, ?, ?)",
                                (COMPANY, STAMP, STAMP)).lastrowid
         founder, founder_touch = _person(conn, company, "Fay Founder", FOUNDER_EMAIL, "founder")
@@ -114,10 +118,10 @@ def register(harness) -> None:
         conn.execute("INSERT INTO daily_list_entry(list_date, company_id, list_group, rank, person_id, channel, "
                      "proposed_at) VALUES (?, ?, 'any_us_role', ?, ?, 'email', ?)",
                      (LIST_DATE, company, rank, founder, STAMP))
-        _seed_import(conn, gmail)
+        _seed_import(conn, rest)
         banned, usable = load_banned(BANNED)
         assert usable, "the fixture banned list must load"
-        deps = TickDeps(client=gmail, clock=clock, rng=random.Random(3), notify=lambda title, text: None,
+        deps = TickDeps(clients={rest.account: rest, gmail.account: gmail}, clock=clock, rng=random.Random(3), notify=lambda title, text: None,
                         old_sender_loaded=lambda: False, banned=banned)
         for _ in range(TICKS):
             run_tick(conn, deps, cfg)

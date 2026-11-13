@@ -15,8 +15,10 @@ from outreach.api.queries import outcomes as outcome_queries
 from outreach.outcomes.wins import is_log_win
 from outreach.sending import queue
 from outreach.store import connect
+from outreach.sending.accounts import in_play as _in_play
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import use_solo_config
 
 CFG = load_config()
 DAY_8 = "2026-11-02T15:00:00Z"  # 8 New York days before NOW (2026-11-10)
@@ -70,6 +72,7 @@ def score(conn, company_id: int, lanes=("level_role",), *, version: str = "r1",
 
 class OutcomeCase(ApiCase):
     def setUp(self):
+        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
         super().setUp()
         self.acme = s.company(self.conn, "Acme", "working")
         self.lena = s.person(self.conn, self.acme, "Lena Ortiz", channel="linkedin",
@@ -643,7 +646,7 @@ class CompanyHold(OutcomeCase):
     def verdict(self) -> str | None:
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         return found.get(self.queued)
 
     def claimable(self) -> bool:
@@ -696,7 +699,7 @@ class CompanyHold(OutcomeCase):
         self.assertEqual(self.answer(t, "replied", reply_kind="asked_to_stop").status_code, 200)
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        reasons = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        reasons = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         self.assertNotIn(approved, reasons)
         self.assertNotEqual(reasons.get(self.queued), "ready")  # the stop reply also holds the company
         self.assertIsNone(self.state_of(planned))
@@ -730,7 +733,7 @@ class ReplierStops(OutcomeCase):
     def reason(self, message_id):
         from datetime import datetime, timezone
         now = datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.conn, now, self.send_cfg, _in_play(self.conn, self.send_cfg), day=None, gate=None)}
         return found.get(message_id)
 
     def test_a_linkedin_reply_stops_that_persons_own_email_even_after_the_hold_is_released(self):

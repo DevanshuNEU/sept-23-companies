@@ -5,14 +5,15 @@ code. Every helper writes the smallest valid rows and takes moments as aware dat
 """
 import dataclasses
 import itertools
+import re
 import sqlite3
 from datetime import date, datetime, timezone
 
 from outreach.sending import accounts as _accounts
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["MON", "UTC", "iso", "with_ramp", "seed_email_person", "seed_message", "seed_sent", "bounce", "put_day",
-           "prove", "settle_and_send"]
+__all__ = ["MON", "UTC", "iso", "with_ramp", "solo", "beside", "use_solo_config", "fakes", "seed_email_person", "seed_message", "seed_sent",
+           "bounce", "put_day", "prove", "settle_and_send"]
 
 UTC = timezone.utc
 # Monday 2026-11-02, 09:00 in New York (daylight saving ended on the 1st, so UTC-5).
@@ -38,6 +39,46 @@ def with_ramp(cfg, address: str | None = None, **numbers):
     accounts = tuple(dataclasses.replace(a, **numbers) if address is None or a.address == address else a
                      for a in cfg.accounts)
     return dataclasses.replace(cfg, accounts=accounts)
+
+
+def solo(cfg):
+    """`cfg` with one account, its first block (account 1), sending the general lane: the one-account shape most
+    sending tests were written for before there were several accounts. The shipped shape (account 1 rests, account 2
+    sends the general lane, account 3 waits) is the plain `load_config()`."""
+    first = dataclasses.replace(cfg.accounts[0], sends=True, lane="general")
+    return dataclasses.replace(cfg, accounts=(first,))
+
+
+def beside(cfg):
+    """`cfg` (one account: `solo`) with the other shipped accounts after it: account 1 still sends, beside account 2
+    (the general lane) and the Northeastern account. For tests of one account's rows next to another's."""
+    from outreach.sending.config import load_config
+    return dataclasses.replace(cfg, accounts=(cfg.accounts[0],) + load_config().accounts[1:])
+
+
+def use_solo_config(case) -> None:
+    """For the rest of `case`, every default `load_config()` (the API's, the plan's, the sender's) reads a copy of
+    the scratch config with one account, account 1, sending the general lane (`solo`), as the tests written before
+    there were several accounts expect. Restored when the test ends."""
+    import pathlib
+    import tempfile
+    from outreach.sending import config as send_config
+    current = send_config.load_config.__defaults__
+    text = pathlib.Path(current[0]).read_text(encoding="utf-8")
+    blocks = re.split(r"^\[\[account\]\]$", text, flags=re.M)  # the header line only, not a comment naming it
+    first = blocks[1].replace("sends = false", 'lane = "general"\nsends = true')
+    path = pathlib.Path(tempfile.mkdtemp(prefix="outreach-sending-solo-")) / "config.toml"
+    path.write_text(blocks[0] + "[[account]]" + first, encoding="utf-8")
+    send_config.load_config.__defaults__ = (path,)
+    case.addCleanup(setattr, send_config.load_config, "__defaults__", current)
+
+
+def fakes(clock, *addresses: str, **kwargs) -> dict:
+    """`clients={address: FakeGmail(...)}` for a tick: one FakeGmail per address, signed in as it, each with its own
+    id prefix (`a`, `b`, ...) so two mailboxes never make the same Message-ID. `kwargs` go to every FakeGmail."""
+    from outreach.sending.fakegmail import FakeGmail
+    return {address: FakeGmail(clock=clock, account=address, id_prefix="" if i == 0 else chr(ord("a") + i),
+                               **kwargs) for i, address in enumerate(addresses)}
 
 
 def seed_email_person(conn: sqlite3.Connection, company_id: int, name: str, email: str, *,
@@ -115,45 +156,62 @@ def bounce(conn: sqlite3.Connection, touch_id: int, at: datetime | str) -> None:
 
 
 def put_day(conn: sqlite3.Connection, day: date | str, limit: int, *, outcome: str | None = None,
-            closed: bool = False) -> None:
+            closed: bool = False, account_id: int = 1) -> None:
     """A `send_day` row as the ramp would have left it (for tests that start part way up the ramp)."""
     day = day.isoformat() if isinstance(day, date) else day
-    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, closed_at, created_at) VALUES (1, ?, ?, ?, ?, ?)",
-                 (day, limit, outcome, _NOW_SEED if closed else None, _NOW_SEED))
+    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, closed_at, created_at) "
+                 "VALUES (?, ?, ?, ?, ?, ?)", (account_id, day, limit, outcome, _NOW_SEED if closed else None,
+                                               _NOW_SEED))
 
 
-def prove(conn: sqlite3.Connection) -> None:
-    """Gmail is shown to keep the sender's marker (one `marker_verified` event), so any number of emails may be
-    claimed. For tests of the claim, the record and the reconcile; the one first email sent before that proof
-    (`outreach.sending.proof`) has tests of its own."""
+def prove(conn: sqlite3.Connection, account_id: int = 1) -> None:
+    """Gmail is shown to keep the sender's marker on this account (one `marker_verified` event), so any number of
+    emails may be claimed from it. For tests of the claim, the record and the reconcile; the one first email sent
+    before that proof (`outreach.sending.proof`) has tests of its own. An event that names no message is account
+    1's, so another account's proof is on an old email of its own, at a company of its own."""
     from outreach.store.writes import append_event
-    append_event(conn, entity="message", entity_id=None, kind="marker_verified", actor="sender",
-                 at=_NOW_SEED, idempotency_key="sendtest:proven")
+    entity_id = None
+    if account_id != 1:
+        company = conn.execute("INSERT INTO company(name, status_at, created_at) VALUES (?, ?, ?)",
+                               (f"Proof Co {account_id}", _NOW_SEED, _NOW_SEED)).lastrowid
+        person = seed_email_person(conn, company, "Proof Person", f"proof{account_id}@proof.example")
+        entity_id = seed_sent(conn, person, at="2026-10-01T15:00:00Z", account_id=account_id)
+    append_event(conn, entity="message", entity_id=entity_id, kind="marker_verified", actor="sender",
+                 at=_NOW_SEED, idempotency_key=f"sendtest:proven:{account_id}")
 
 
-def settle_and_send(conn: sqlite3.Connection, client, clock, rng, cfg) -> str | None:
-    """One tick's settle and send steps, in the order Task 13's tick runs them (a test stand-in until it lands):
-    leftover claims; a Sent scan for each unclear send with no transaction open; reconcile and requeue in one
-    transaction; then the queue's pick and one send. Returns what `send_one` returned, the kind of the GmailError
-    it raised, or None when nothing was ready."""
+def settle_and_send(conn: sqlite3.Connection, clients, clock, rng, cfg) -> str | None:
+    """One tick's settle and send steps for one sending account, in the order the tick runs them: leftover claims; a
+    Sent scan for each of its unclear sends with no transaction open; reconcile and requeue in one transaction; then
+    the queue's pick for that account and one send. `clients` is `{address: client}` (the first sending account in
+    `cfg` with a client sends) or one client for the first sending account. Returns what `send_one` returned, the
+    kind of the GmailError it raised, or None when nothing was ready."""
     from outreach.sending import claim, queue, ramp
     from outreach.sending.mail import GmailError
     from outreach.store import transaction
     now = clock()
+    sending = [a for a in cfg.accounts if a.sends]
+    if not isinstance(clients, dict):
+        clients = {sending[0].address: clients}
+    acct = next(a for a in sending if a.address in clients)
+    client = clients[acct.address]
     claim.leftover_claims(conn, iso(now))
+    with transaction(conn):
+        rows = _accounts.sync(conn, cfg, iso(now))
+    account = rows[acct.address]
     found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
                             u.rfc_id)
-             for u in claim.unclear(conn, _accounts.primary(conn, cfg).account_id)}
+             for u in claim.unclear(conn, account.account_id)}
     with transaction(conn):
-        claim.reconcile(conn, found, _accounts.primary(conn, cfg).account_id, now=iso(now), cfg=cfg, rng=rng)
+        claim.reconcile(conn, found, account.account_id, now=iso(now), cfg=cfg, rng=rng)
         claim.requeue_failed(conn, now=iso(now), cfg=cfg)
-        day = ramp.open_day(conn, _accounts.primary(conn, cfg), now, cfg)
-    picked = queue.pick(queue.verdicts(conn, now, cfg, day=day, gate=None), queue.load_queue(conn, cfg), now=now, cfg=cfg,
-                        account=cfg.from_address)
+        day = ramp.open_day(conn, account, now, cfg)
+    rows = _accounts.in_play(conn, cfg)
+    picked = queue.pick(queue.verdicts(conn, now, cfg, rows, day={acct.address: day}, gate=None),
+                        queue.load_queue(conn, cfg), now=now, cfg=cfg, account=acct.address)
     if picked is None:
         return None
     try:
-        return claim.send_one(conn, client, picked, cfg, now=iso(now), clock=clock, rng=rng,
-                              account=_accounts.primary(conn, cfg))
+        return claim.send_one(conn, client, picked, cfg, now=iso(now), clock=clock, rng=rng, account=rows[acct.address])
     except GmailError as err:
         return err.kind

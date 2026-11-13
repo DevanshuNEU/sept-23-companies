@@ -20,10 +20,11 @@ from outreach.sending.followups import plan_followups, stop_planned
 from outreach.sending.mail import GmailError, MESSAGE_ID, Sent
 from outreach.store import transaction
 from outreach.store.writes import append_event
-from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, UTC, iso, seed_email_person, seed_message, seed_sent, settle_and_send, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 
 
 def parse(text: str) -> datetime:
@@ -226,7 +227,7 @@ class RecordSentTest(Base):
         today = cal.ny_date(MON, CFG)
         left = ramp.effective_limit(self.db, account, today, CFG) - signals.counted_sends_on(
             self.db, account.account_id, today, CFG)
-        gap = human.spread_gap(queue.minutes_left(self.db, MON, CFG, account.cfg.address), left, random.Random(7), CFG)
+        gap = human.spread_gap(queue.minutes_left(self.db, MON, CFG, account.cfg.address, accounts.in_play(self.db, CFG)), left, random.Random(7), CFG)
         expected = iso(MON + timedelta(minutes=gap))
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
         self.assertEqual(got, expected)
@@ -237,7 +238,7 @@ class RecordSentTest(Base):
         from tests import SHIPPED_SEND_CONFIG
         from tests.sendtest import with_ramp
         from tests.test_sending_human import MiddleRng
-        cfg = with_ramp(load_config(SHIPPED_SEND_CONFIG), ramp_start=16, ramp_floor=15)
+        cfg = with_ramp(solo(load_config(SHIPPED_SEND_CONFIG)), ramp_start=16, ramp_floor=15)
         done = self.person()
         seed_sent(self.db, done, at=MON - timedelta(days=7))
         seed_sent(self.db, done, at=MON - timedelta(minutes=20), seq=1)  # a follow-up already sent today
@@ -409,7 +410,7 @@ class FollowUpTest(Base):
                          ("t-9", "<two@gmail.com>", ("<one@gmail.com>", "<two@gmail.com>")))
         self.assertEqual((out.subject, out.body, out.to, out.message_id, out.marker),
                          ("Re: Hello", "Hello there.", f"p{self.n}@acme.co", "<three@gmail.com>", "<three@gmail.com>"))
-        self.assertEqual((out.from_addr, out.from_name), (CFG.from_address, CFG.from_name))
+        self.assertEqual((out.from_addr, out.from_name), (CFG.accounts[0].address, CFG.from_name))
 
     def test_placeholder_and_malformed_ids_are_left_out_but_the_thread_is_kept(self):
         person = self.person()
@@ -685,7 +686,7 @@ class NoThreadTest(Base):
         for thread in (None, ""):
             with self.subTest(thread=thread):
                 mid = self.imported_followup(thread)
-                reasons = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, CFG, day=None, gate=None)}
+                reasons = {v.message_id: v.reason for v in queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=None, gate=None)}
                 self.assertEqual(reasons[mid], "no_thread")
                 self.assertIn(reasons[mid], queue.REASONS)
                 self.assertFalse(claim.claim(self.db, self.queued(mid), self.primary,
@@ -698,7 +699,7 @@ class NoThreadTest(Base):
         _, ready = self.approve(company=seed_company(self.db, "Beta"))
         self.db.execute("UPDATE message SET approved_at = '2026-11-02T13:45:00Z' WHERE message_id = ?", (ready,))
         self.assertEqual(queue.load_queue(self.db, CFG)[-1].message_id, ready)  # the follow-up is first in line
-        picked = queue.pick(queue.verdicts(self.db, MON, CFG, day=None, gate=None), queue.load_queue(self.db, CFG))
+        picked = queue.pick(queue.verdicts(self.db, MON, CFG, _in_play(self.db, CFG), day=None, gate=None), queue.load_queue(self.db, CFG), account=CFG.accounts[0].address)
         self.assertEqual(picked.message_id, ready)
 
     def test_an_empty_thread_id_from_gmail_is_never_stored_as_empty_text(self):
@@ -725,6 +726,9 @@ class FullfsyncTest(Base):
         self.assertEqual(self.message(mid)["state"], "approved")
 
 
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
 class AccountClaimTest(Base):
     """A claim is made from one account (#9 multi-sender ruling, 2026-11-12). A first email's claim sets its touch's
     account and pins the company there in the same transaction; a touch already on another account, and a follow-up
@@ -732,12 +736,12 @@ class AccountClaimTest(Base):
 
     def setUp(self):
         super().setUp()
-        rows = accounts.sync(self.db, CFG, iso(MON))
+        rows = accounts.sync(self.db, MULTI, iso(MON))
         self.one = rows["devanshurajesh@gmail.com"]
         self.two = rows["devanshuchi9@gmail.com"]
         self.three = rows["chicholikar.d@northeastern.edu"]
         self.gmail2 = FakeGmail(clock=self.clock, account=self.two.cfg.address, id_prefix="b", probe=self.probe,
-                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
 
     def pin(self, company=None):
         return self.db.execute("SELECT account_id, pinned_by FROM company_sender WHERE company_id = ?",
@@ -770,9 +774,9 @@ class AccountClaimTest(Base):
                         "VALUES (?, ?, 'you', ?)", (self.company, self.one.account_id, iso(MON)))
         _, first = self.approve()
         _, second = self.approve()
-        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(first), CFG, now=iso(self.clock()),
+        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(first), MULTI, now=iso(self.clock()),
                                         clock=self.clock, rng=self.rng, account=self.one), "sent")
-        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(second), CFG, now=iso(self.clock()),
+        self.assertEqual(claim.send_one(self.db, self.gmail, self.queued(second), MULTI, now=iso(self.clock()),
                                         clock=self.clock, rng=self.rng, account=self.one), "sent")
         self.assertEqual(tuple(self.pin()), (self.one.account_id, "you"))
         self.assertEqual(self.pinned_events(), [])
@@ -809,21 +813,22 @@ class AccountClaimTest(Base):
 
     def test_from_is_account_address(self):
         _, mid = self.approve()
-        self.assertEqual(claim.send_one(self.db, self.gmail2, self.queued(mid), CFG, now=iso(self.clock()),
+        self.assertEqual(claim.send_one(self.db, self.gmail2, self.queued(mid), MULTI, now=iso(self.clock()),
                                         clock=self.clock, rng=self.rng, account=self.two), "sent")
         self.assertEqual(self.gmail.sent, [])
         out = self.gmail2.sent[0][0]
-        self.assertEqual((out.from_addr, out.from_name), ("devanshuchi9@gmail.com", CFG.from_name))
+        self.assertEqual((out.from_addr, out.from_name), ("devanshuchi9@gmail.com", MULTI.from_name))
         q = self.queued(self.approve()[1])
-        built = claim.outgoing_for(self.db, q, CFG, "<x.1@northeastern.edu>", self.three)
-        self.assertEqual((built.from_addr, built.from_name), ("chicholikar.d@northeastern.edu", CFG.from_name))
+        built = claim.outgoing_for(self.db, q, MULTI, "<x.1@northeastern.edu>", self.three)
+        self.assertEqual((built.from_addr, built.from_name), ("chicholikar.d@northeastern.edu", MULTI.from_name))
 
     def test_the_message_id_is_on_the_sending_accounts_domain(self):
         mail = FakeGmail(clock=self.clock, account=self.three.cfg.address, id_prefix="c",
-                         reconcile_after_minutes=CFG.reconcile_after_minutes)
+                         reconcile_after_minutes=MULTI.reconcile_after_minutes)
         _, mid = self.approve()
-        self.assertEqual(claim.send_one(self.db, mail, self.queued(mid), CFG, now=iso(self.clock()),
-                                        clock=self.clock, rng=self.rng, account=self.three), "sent")
+        three = dataclasses.replace(self.three, cfg=dataclasses.replace(self.three.cfg, sends=True))  # as in Phase B
+        self.assertEqual(claim.send_one(self.db, mail, self.queued(mid), MULTI, now=iso(self.clock()),
+                                        clock=self.clock, rng=self.rng, account=three), "sent")
         out = mail.sent[0][0]
         self.assertTrue(out.message_id.endswith("@northeastern.edu>"), out.message_id)
         self.assertEqual(out.marker, out.message_id)

@@ -130,8 +130,13 @@ def seed_log_only(conn: sqlite3.Connection, person_id: int, kind: str, on: date,
 
 
 def seed_send_day(conn: sqlite3.Connection, day: date, limit: int, outcome: str | None = None) -> None:
-    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES (1, ?, ?, ?, ?)",
-                 (day.isoformat(), limit, outcome, utcnow()))
+    """A send day on the account that sends the general lane (account 1 rests since the multi-sender switch)."""
+    from outreach.sending import accounts
+    from outreach.sending.config import load_config as load_send_config
+    send_cfg = load_send_config()
+    account_id = accounts.sync(conn, send_cfg, utcnow())[send_cfg.lane_account("general").address].account_id
+    conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES (?, ?, ?, ?, ?)",
+                 (account_id, day.isoformat(), limit, outcome, utcnow()))
 
 
 def seed_email_touch(conn: sqlite3.Connection, person_id: int, first_sent_on: date | None, *, state: str = "open",

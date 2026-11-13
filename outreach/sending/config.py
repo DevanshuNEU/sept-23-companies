@@ -71,11 +71,6 @@ class SendConfig:
     size_band_gap_jitter_minutes: tuple[int, ...]
     size_guessed_big_band: int
 
-    @property
-    def from_address(self) -> str:
-        """compat until Task A10: the first account block's address, whatever its `sends` says."""
-        return self.accounts[0].address
-
     def account(self, address: str) -> AccountConfig:
         for acct in self.accounts:
             if acct.address == address:

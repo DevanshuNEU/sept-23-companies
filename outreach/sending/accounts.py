@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
-from outreach.drafts.followups import canonical_company
+from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.sending.config import AccountConfig, SendConfig
 from outreach.store.writes import append_event
 
@@ -58,27 +58,48 @@ def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
     before touches carried one, so its thread is account 1's (as everywhere else a NULL account is). A pin to an
     account that does not send (or is not in config) counts as no pin. The company is followed through
     `merged_into`; a pin on the raw id still counts."""
-    touch = conn.execute(
-        "SELECT t.account_id, t.gmail_thread_id, p.company_id FROM touch t JOIN person p ON p.person_id = t.person_id "
-        "WHERE t.touch_id = ?", (touch_id,)).fetchone()
+    return routes(conn, cfg, [touch_id], accounts)[touch_id]
+
+
+def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[str, AccountRow]
+           ) -> dict[int, tuple[AccountRow | None, str]]:
+    """`route` for many touches with a fixed number of queries (the queue routes every approved message)."""
+    ids = sorted(set(touch_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    touches = conn.execute(
+        "SELECT t.touch_id, t.account_id, t.gmail_thread_id, p.company_id FROM touch t "
+        f"JOIN person p ON p.person_id = t.person_id WHERE t.touch_id IN ({marks})", ids).fetchall()
+    companies = company_map(conn)
+    pins = {row["company_id"]: row["account_id"] for row in conn.execute(
+        "SELECT company_id, account_id FROM company_sender")}
+    sponsors = {row[0] for row in conn.execute(
+        "SELECT DISTINCT company_id FROM company_fact WHERE (fact = 'everify' AND value = 'enrolled') "
+        "OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) OR fact = 'lca'")}
     by_id = {a.account_id: a for a in accounts.values()}
-    thread_account = touch["account_id"]
-    if thread_account is None and touch["gmail_thread_id"]:
-        thread_account = 1
-    if thread_account is not None:
-        found = by_id.get(thread_account)
-        return (found, "thread") if found is not None else (None, "thread_missing")
-    cid = canonical_company(conn, touch["company_id"])
-    pin = conn.execute("SELECT account_id FROM company_sender WHERE company_id IN (?, ?) "
-                       "ORDER BY company_id = ? DESC", (cid, touch["company_id"], cid)).fetchone()
-    if pin is not None:
-        pinned = by_id.get(pin["account_id"])
+    out: dict[int, tuple[AccountRow | None, str]] = {}
+    for touch in touches:
+        thread_account = touch["account_id"]
+        if thread_account is None and touch["gmail_thread_id"]:
+            thread_account = 1
+        if thread_account is not None:
+            found = by_id.get(thread_account)
+            out[touch["touch_id"]] = (found, "thread") if found is not None else (None, "thread_missing")
+            continue
+        raw = touch["company_id"]
+        cid = resolve_company(companies, raw)[-1] if raw in companies else raw
+        pin = pins.get(cid, pins.get(raw))
+        pinned = by_id.get(pin) if pin is not None else None
         if pinned is not None and pinned.cfg.sends:
-            return pinned, "pinned"
-    lane_cfg = cfg.lane_account(lane_of(conn, cid))
-    if lane_cfg is not None and lane_cfg.address in accounts:
-        return accounts[lane_cfg.address], "lane"
-    return None, "lane_waits"
+            out[touch["touch_id"]] = (pinned, "pinned")
+            continue
+        lane_cfg = cfg.lane_account("sponsor" if cid in sponsors else "general")
+        if lane_cfg is not None and lane_cfg.address in accounts:
+            out[touch["touch_id"]] = (accounts[lane_cfg.address], "lane")
+        else:
+            out[touch["touch_id"]] = (None, "lane_waits")
+    return out
 
 
 def pin(conn: sqlite3.Connection, company_id: int, account_id: int, by: Literal["rule", "you"], now: str) -> None:
@@ -96,10 +117,38 @@ def pin(conn: sqlite3.Connection, company_id: int, account_id: int, by: Literal[
                          "previous_account_id": prev["account_id"] if prev else None})
 
 
+def _row(row: sqlite3.Row, acct: AccountConfig) -> AccountRow:
+    return AccountRow(account_id=row["account_id"], cfg=acct, paused=bool(row["paused"]),
+                      auth_state=row["auth_state"], next_send_at=row["next_send_at"], revision=row["revision"])
+
+
+def in_play(conn: sqlite3.Connection, cfg: SendConfig) -> dict[str, AccountRow]:
+    """Read only: every configured account by its address as written in config, in config order, as `sync` would
+    return it. An account with no row yet gets the id `sync` will give it (the next free id, in config order) and a
+    fresh row's state, so a reader (status, the Outbox) sees the same routing before the first tick as after it."""
+    out: dict[str, AccountRow] = {}
+    next_id = (conn.execute("SELECT MAX(account_id) FROM sender_account").fetchone()[0] or 0) + 1
+    for acct in cfg.accounts:
+        row = conn.execute("SELECT * FROM sender_account WHERE address = ?", (acct.address,)).fetchone()
+        if row is not None:
+            out[acct.address] = _row(row, acct)
+            continue
+        out[acct.address] = AccountRow(account_id=next_id, cfg=acct, paused=False, auth_state="unknown",
+                                       next_send_at=None, revision=1)
+        next_id += 1
+    return out
+
+
+def sending(rows: dict[str, AccountRow]) -> list[AccountRow]:
+    """The accounts that send (`sends = true`), in config order."""
+    return [row for row in rows.values() if row.cfg.sends]
+
+
 def primary(conn: sqlite3.Connection, cfg: SendConfig) -> AccountRow:
-    """Read only: the row of `cfg.from_address`, the one account the tick runs until the per-account loop lands.
-    Falls back to account id 1 (where every send day is written until then) when the address has no row yet."""
-    acct = cfg.account(cfg.from_address)
+    """Read only: the row of the first account block (account 1, the old single sender, which rests now). For the
+    readers that still show one account and for tests; the tick and the queue route every message to its own account.
+    Falls back to account id 1 when the address has no row yet."""
+    acct = cfg.accounts[0]
     row = conn.execute("SELECT * FROM sender_account WHERE address = ?", (acct.address,)).fetchone()
     if row is None:
         row = conn.execute("SELECT * FROM sender_account WHERE account_id = 1").fetchone()

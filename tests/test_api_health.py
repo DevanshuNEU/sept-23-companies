@@ -11,6 +11,7 @@ from outreach.api.queries.jobs import SCHEDULED, UNSCHEDULED, expected_next_at, 
 from outreach.plan.config import default_plan_config
 from tests.apitest import ApiCase, NOW
 from tests.storetest import seed_company, seed_posting
+from tests.sendtest import use_solo_config
 
 SHA = "a" * 64
 
@@ -21,6 +22,7 @@ def iso(d: datetime) -> str:
 
 class JobRuns(ApiCase):
     def setUp(self):
+        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
         super().setUp()
         self.conn.execute("DELETE FROM job_run")  # install leaves its own `rebuild` run; each test seeds its own
 
@@ -245,6 +247,8 @@ class JobRuns(ApiCase):
         self.assertEqual(self.health()["sender"]["state"], "outside_window")
         self.set_now(NOW)
         self.sender(auth_state="signed_out")
+        # The tick writes a sign-in on the account's own row as well as on sender row 1.
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")
         self.assertEqual(self.health()["sender"]["state"], "signed_out")
         self.sender(paused=1, pause_kind="by_you", paused_at=NOW)
         self.assertEqual(self.health()["sender"]["state"], "paused_by_you")

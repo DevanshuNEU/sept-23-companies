@@ -14,11 +14,11 @@ from outreach.sending import accounts, claim, queue
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.precheck import precheck
-from tests.sendtest import MON, iso, seed_email_person, seed_message
+from tests.sendtest import MON, iso, seed_email_person, seed_message, solo
 from tests.storetest import fresh_store, seed_company
 from tests.test_drafts_checks import FIXTURE_BANNED
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 DASH = chr(0x2014)  # an em dash, written as a code point so this file has none
 
 

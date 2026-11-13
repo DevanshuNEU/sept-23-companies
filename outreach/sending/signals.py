@@ -132,17 +132,24 @@ def bounce_rate_warns(rate: float, cfg: SendConfig) -> bool:
     return rate >= cfg.clean_bounce_rate - 1e-12
 
 
-def stop_tags_in(conn: sqlite3.Connection, now: datetime | str, days: int) -> int:
+def stop_tags_in(conn: sqlite3.Connection, now: datetime | str, days: int, account_id: int | None = None) -> int:
     """Email touches tagged `asked_to_stop` whose reply came in the last `days` days (after `now - days`, up to
     `now`). The tag counts from `touch.reply_kind` or from its `outreach_touch` (an undone one does not); a touch
-    tagged in both counts once."""
+    tagged in both counts once. With `account_id`, only that account's touches count (a touch with none is account
+    1's), so stop replies to one account never pause another."""
     end = as_datetime(now)
     start = end - timedelta(days=days)
     lo, hi = start.strftime(ISO_FMT), end.strftime(ISO_FMT)
-    return conn.execute(
-        "SELECT COUNT(*) FROM ("
-        " SELECT touch_id FROM touch WHERE reply_kind = 'asked_to_stop' AND replied_at > ? AND replied_at <= ?"
+    tagged = conn.execute(
+        "SELECT touch_id FROM touch WHERE reply_kind = 'asked_to_stop' AND replied_at > ? AND replied_at <= ?"
         " UNION"
         " SELECT email_touch_id FROM outreach_touch WHERE email_touch_id IS NOT NULL"
-        "  AND reply_kind = 'asked_to_stop' AND undone_at IS NULL AND replied_at > ? AND replied_at <= ?)",
-        (lo, hi, lo, hi)).fetchone()[0]
+        "  AND reply_kind = 'asked_to_stop' AND undone_at IS NULL AND replied_at > ? AND replied_at <= ?",
+        (lo, hi, lo, hi)).fetchall()
+    if account_id is None:
+        return len(tagged)
+    ids = [row[0] for row in tagged]
+    if not ids:
+        return 0
+    return conn.execute(f"SELECT COUNT(*) FROM touch WHERE touch_id IN ({','.join('?' * len(ids))}) "
+                        "AND COALESCE(account_id, 1) = ?", (*ids, account_id)).fetchone()[0]

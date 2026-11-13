@@ -12,6 +12,7 @@ from outreach.sending.status import OLD_SENDER_TEXT
 from outreach.store.writes import append_event
 from tests import apiseed as seed
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import use_solo_config
 
 SATURDAY = "2026-11-14T15:14:00Z"
 AFTER_HOURS = "2026-11-10T20:01:00Z"  # Tuesday 15:01 in New York, one minute after the window
@@ -20,6 +21,10 @@ HARD_REASON = "Gmail said the account hit a sending limit. Sending is paused unt
 
 
 class SendingBase(ApiCase):
+    def setUp(self):
+        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
+        super().setUp()
+
     def status(self) -> dict:
         res = self.get("/api/sending")
         self.assertEqual(res.status_code, 200, res.text)

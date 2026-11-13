@@ -204,6 +204,31 @@ class EmailCapacityTest(unittest.TestCase):
         self.assertEqual(current_send_limit(self.conn, TODAY, CFG), 12)
         self.assertEqual(email_capacity(self.conn, TODAY, CFG, limit_fn=lambda c, d, g: 99).send_limit, 99)
 
+    def test_the_limit_is_the_sending_accounts_sum_and_a_resting_account_adds_nothing(self):
+        from unittest import mock
+        from dataclasses import replace
+        from outreach.sending import accounts
+        from outreach.sending.config import load_config as load_send_config
+        shipped = load_send_config()
+        rows = accounts.sync(self.conn, shipped, utcnow())
+        rest, general, neu = (rows[a.address].account_id for a in shipped.accounts)
+        put = "INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (?, ?, ?, ?)"
+        self.conn.execute(put, (rest, TODAY.isoformat(), 200, utcnow()))  # the old sender's day: it rests now
+        self.conn.execute(put, (general, TODAY.isoformat(), 15, utcnow()))
+        self.assertEqual(current_send_limit(self.conn, TODAY, CFG), 15)
+        self.conn.execute(put, (neu, TODAY.isoformat(), 18, utcnow()))
+        both = replace(shipped, accounts=tuple(replace(a, sends=True) if a.address == shipped.accounts[2].address
+                                               else a for a in shipped.accounts))
+        with mock.patch("outreach.sending.config.load_config", return_value=both):
+            self.assertEqual(current_send_limit(self.conn, TODAY, CFG), 15 + 18)
+            stamp = utcnow()
+            self.conn.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_at = ? "
+                              "WHERE account_id = ?", (stamp, general))
+            self.assertFalse(email_capacity(self.conn, TODAY, CFG).paused)  # one account still sends
+            self.conn.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_at = ? "
+                              "WHERE account_id = ?", (stamp, neu))
+            self.assertTrue(email_capacity(self.conn, TODAY, CFG).paused)
+
     def test_paused_sender_gives_zero_email_slots(self):
         now = utcnow()
         self.conn.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_at = ?", (now,))

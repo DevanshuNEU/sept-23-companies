@@ -1,10 +1,12 @@
 """The sender's status and the queue's schedule, for the API (#11) and the daily plan (#15) to read.
 
 Read only: nothing here writes, opens a transaction or calls Gmail. The snapshot is what the Outbox's sending strip
-shows; `queue_schedule` is the same `verdicts` the tick uses, with the same gate (paused, signed out, old sender
-loaded, the sender's marker not proven) and the same one first email while it is not proven (`queue.first_only`),
-so "when it will go" on the Outbox is the sender's own answer and never a second copy of the rules. A message
-waiting on the proof reads the line for where the first email stands (`reason_text`).
+shows; `queue_schedule` is the same `verdicts` the tick uses, over the same accounts (`accounts.in_play`), with the
+same waits (his pause and the old sender for every account; each account's own pause, sign-in and marker proof for
+its own messages) and the same one first email per account while its proof is open (`queue.gate_accounts`), so
+"when it will go" on the Outbox is the sender's own answer and never a second copy of the rules. A message waiting
+on the proof reads the line for where its account's first email stands (`reason_text`). Until the strip shows each
+account (Task A11) the snapshot is the lead account's: the first one that sends.
 
 The store cannot say whether the old mailer's launchd job is loaded (only a `launchctl` call can), so a caller that
 knows passes `old_sender_loaded=True`; the snapshot then shows `paused_by_you` with a reason, and every message
@@ -21,8 +23,8 @@ from outreach.sending.config import AccountConfig, SendConfig
 from outreach.sending.queue import REASON_TEXT, STOP_REASONS, Verdict
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "queue_projection", "reason_text", "OLD_SENDER_TEXT",
-           "NOTHING_APPROVED"]
+__all__ = ["SendingSnapshot", "sending_snapshot", "queue_schedule", "queue_projection", "reason_text", "sender_gate",
+           "lead", "OLD_SENDER_TEXT", "NOTHING_APPROVED"]
 
 OLD_SENDER_TEXT = "The old mail sender is still running, so the new one waits until it is stopped."
 NOTHING_APPROVED = "Nothing is approved and waiting to send."
@@ -57,21 +59,62 @@ def _stamp(at: datetime) -> str:
     return at.astimezone(timezone.utc).strftime(ISO_FMT)
 
 
-def _gate(conn: sqlite3.Connection, old_sender_loaded: bool, *, ignore_pause: bool = False) -> str | None:
-    """The reason the whole tick would give for sending nothing, in the tick's own order. A fresh store's
-    `unknown` sign-in is not a block: the first tick finds out. `ignore_pause` leaves his pause out, to ask what
-    would block the sender once he resumes."""
-    row = conn.execute("SELECT auth_state FROM sender WHERE sender_id = 1").fetchone()
-    # Account 1 is the one account the tick runs until the per-account loop lands: his pause or its hard block.
-    if accounts.pause_of(conn, 1) is not None and not ignore_pause:
-        return "sender_paused"
-    if row["auth_state"] in ("signed_out", "wrong_account"):
-        return "signed_out"
-    if old_sender_loaded:
-        return "old_sender_running"
-    if proof.phase(conn, 1) not in proof.OPEN:  # account 1's proof, as its pause above
-        return "message_id_unproven"
-    return None
+_BAD_AUTH = ("signed_out", "wrong_account")
+
+
+def _gate(conn: sqlite3.Connection, *, ignore_pause: bool = False) -> str | None:
+    """The reason every account gives for sending nothing: his pause (sender row 1). Each account's own pause,
+    sign-in, the old sender and its proof are its own messages' waits (`_account_gates`), in the tick's order.
+    `ignore_pause` leaves his pause out, to ask what would block the sender once he resumes."""
+    paused = conn.execute("SELECT paused FROM sender WHERE sender_id = 1").fetchone()["paused"]
+    return "sender_paused" if paused and not ignore_pause else None
+
+
+def sender_gate(conn: sqlite3.Connection, cfg: SendConfig, old_sender_loaded: bool) -> str | None:
+    """The reason the whole sender sends nothing now, in the tick's order, or None when some account may send: his
+    pause; else, when every sending account is held, the first one's reason (its pause, its sign-in, the old sender,
+    its marker proof not open). The old sender holds a store with no sending account too."""
+    gate = _gate(conn)
+    if gate is not None:
+        return gate
+    reasons = []
+    for row in accounts.sending(accounts.in_play(conn, cfg)):
+        if accounts.pause_of(conn, row.account_id) is not None:
+            reasons.append("sender_paused")
+        elif row.auth_state in _BAD_AUTH:
+            reasons.append("signed_out")
+        elif old_sender_loaded:
+            reasons.append("old_sender_running")
+        elif proof.phase(conn, row.account_id) not in proof.OPEN:
+            reasons.append("message_id_unproven")
+        else:
+            return None
+    return reasons[0] if reasons else ("old_sender_running" if old_sender_loaded else None)
+
+
+def _account_gates(conn: sqlite3.Connection, rows: dict[str, accounts.AccountRow], old_sender_loaded: bool
+                   ) -> tuple[dict[str | None, str | None], list[str]]:
+    """Each account's own waits in the tick's order: its sign-in as its row says (`signed_out`; a fresh store's
+    `unknown` is not a block, the first tick finds out), the old sender, then its marker proof: an account whose
+    proof is not open waits as `message_id_unproven`, and one at its first send lets its first email go alone."""
+    gates: dict[str | None, str | None] = {None: "old_sender_running" if old_sender_loaded else None}
+    first: list[str] = []
+    for address, row in rows.items():
+        stage = proof.phase(conn, row.account_id)
+        if row.auth_state in _BAD_AUTH:
+            gates[address] = "signed_out"
+        elif old_sender_loaded:
+            gates[address] = "old_sender_running"
+        elif stage not in proof.OPEN:
+            gates[address] = "message_id_unproven"
+        elif stage == proof.FIRST_SEND:
+            first.append(address)
+    return gates, first
+
+
+def lead(rows: dict[str, accounts.AccountRow]) -> accounts.AccountRow:
+    """The account a one-account reader shows: the first that sends, else the first."""
+    return next(iter(accounts.sending(rows)), None) or next(iter(rows.values()))
 
 
 def reason_text(reason: str, stage: str, text: str | None = None) -> str:
@@ -90,11 +133,12 @@ def queue_schedule(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *,
     """The tick's verdict for every approved message, by message id, in queue order: the reason it waits (or
     `ready`) and, for a wait that ends by itself, when. While Gmail is unproven and no email is claimed yet, only
     the first email keeps its own verdict, as in the tick (the marker proof, `proof`)."""
-    day = ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg)
-    gate = _gate(conn, old_sender_loaded)
-    found = queue.verdicts(conn, now, cfg, day=day, gate=gate)
-    if gate is None and proof.phase(conn, accounts.primary(conn, cfg).account_id) == proof.FIRST_SEND:
-        found = queue.first_only(found)
+    rows = accounts.in_play(conn, cfg)
+    days = {row.cfg.address: ramp.today_state(conn, row, now, cfg) for row in accounts.sending(rows)}
+    gate = _gate(conn)
+    found = queue.verdicts(conn, now, cfg, rows, day=days, gate=gate)
+    if gate is None:
+        found = queue.gate_accounts(found, *_account_gates(conn, rows, old_sender_loaded))
     return {v.message_id: v for v in found}
 
 
@@ -103,15 +147,21 @@ def queue_projection(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     """When each approved message is expected to send (`projection.project`), and whether the sender is paused.
     A pause is not a reason to show nothing: the projection runs as if he resumed now. A sign-in problem, the old
     sender and an unproven Gmail marker (the first email goes alone) are: the queue's own sentence says what is wrong, so nothing is projected."""
-    paused = accounts.pause_of(conn, accounts.primary(conn, cfg).account_id) is not None
-    if _gate(conn, old_sender_loaded, ignore_pause=True) is not None \
-            or proof.phase(conn, accounts.primary(conn, cfg).account_id) == proof.FIRST_SEND:
+    rows = accounts.in_play(conn, cfg)
+    senders = accounts.sending(rows)
+    paused = bool(senders) and all(accounts.pause_of(conn, row.account_id) is not None for row in senders)
+    if old_sender_loaded:
         return {}, paused
-    prepared = queue.prepare(conn, now, cfg, day=ramp.today_state(conn, accounts.primary(conn, cfg), now, cfg))
+    # Only the accounts that send freely are projected: a sign-in problem or an unproven marker (the first email
+    # goes alone) is the queue's own sentence for that account's mail, so its messages are not projected.
+    open_rows = {address: row for address, row in rows.items()
+                 if row.auth_state not in _BAD_AUTH and proof.phase(conn, row.account_id) == proof.PROVEN}
+    days = {row.cfg.address: ramp.today_state(conn, row, now, cfg) for row in accounts.sending(open_rows)}
+    prepared = queue.prepare(conn, now, cfg, open_rows, day=days)
     return projection.project(prepared, now, cfg), paused
 
 
-def _state(row: sqlite3.Row, pause: accounts.Pause | None, now: datetime, cfg: SendConfig,
+def _state(row: sqlite3.Row | None, pause: accounts.Pause | None, now: datetime, cfg: SendConfig,
            old_sender_loaded: bool) -> tuple[str, str]:
     """The state a person should be told, and the reason line that goes with it. A pause or a sign-in problem wins
     (it needs an action), then the old sender, then a day off, then the hours (read on the New York clock)."""
@@ -119,7 +169,7 @@ def _state(row: sqlite3.Row, pause: accounts.Pause | None, now: datetime, cfg: S
         return "paused_hard_block", pause.reason
     if pause is not None:
         return "paused_by_you", pause.reason
-    if row["auth_state"] in ("signed_out", "wrong_account"):
+    if row is not None and row["auth_state"] in _BAD_AUTH:
         return "signed_out", row["auth_error"]
     if old_sender_loaded:
         return "paused_by_you", OLD_SENDER_TEXT
@@ -200,10 +250,12 @@ def sending_snapshot(conn: sqlite3.Connection, now: datetime, cfg: SendConfig, *
     else what `limit_for` will give it (the first tick has not run yet), and 0 on a day the sender does not run."""
     sender = conn.execute("SELECT * FROM sender WHERE sender_id = 1").fetchone()
     today = cal.ny_date(now, cfg)
-    account = accounts.primary(conn, cfg)  # one account until the per-account loop lands
+    account = lead(accounts.in_play(conn, cfg))  # one account on the strip until Task A11 shows each
     acct = account.cfg
     pause = accounts.pause_of(conn, account.account_id)
-    state, reason = _state(sender, pause, now, cfg, old_sender_loaded)
+    own = conn.execute("SELECT auth_state, auth_error FROM sender_account WHERE account_id = ?",
+                       (account.account_id,)).fetchone()
+    state, reason = _state(own, pause, now, cfg, old_sender_loaded)
     row = conn.execute("SELECT send_limit FROM send_day WHERE account_id = ? AND day = ?",
                        (account.account_id, today.isoformat())).fetchone()
     start = row["send_limit"] if row is not None else ramp.limit_for(conn, account, today, cfg)

@@ -13,11 +13,16 @@ from outreach.sending.queue import REASONS
 from outreach.store.writes import append_event
 from tests import apiseed as seed
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import use_solo_config
 
 GROUPS = ("replied", "review", "approved", "sending", "checking", "sent", "paused", "closed")
 
 
 class OutboxBase(ApiCase):
+    def setUp(self):
+        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
+        super().setUp()
+
     def outbox(self) -> dict:
         res = self.get("/api/outbox")
         self.assertEqual(res.status_code, 200, res.text)

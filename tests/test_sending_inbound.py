@@ -18,10 +18,11 @@ from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.mail import GmailError, Sent
 from outreach.store import transaction
-from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, prove
+from outreach.sending.accounts import in_play as _in_play
+from tests.sendtest import MON, iso, seed_email_person, seed_message, seed_sent, prove, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = dataclasses.replace(load_config(), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
+CFG = dataclasses.replace(solo(load_config()), followup_business_days=(7,))  # built for one follow-up at 7 business days; the 4-follow-up schedule is tested in test_sending_followups
 
 
 class Base(unittest.TestCase):
@@ -105,7 +106,7 @@ class Base(unittest.TestCase):
         return row[0] if row else None
 
     def verdict(self, message_id):
-        found = {v.message_id: v.reason for v in queue.verdicts(self.db, self.clock(), CFG, day=None, gate=None)}
+        found = {v.message_id: v.reason for v in queue.verdicts(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None, gate=None)}
         return found.get(message_id)
 
     def events(self, entity, kind, entity_id=None):
@@ -369,7 +370,7 @@ class BounceTest(Base):
         self.gmail.deliver_bounce(sent, dsn="hard")
         self.sync()
         self.assertEqual(self.state(approved), "skipped")
-        self.assertNotIn(approved, {v.message_id for v in queue.verdicts(self.db, self.clock(), CFG, day=None,
+        self.assertNotIn(approved, {v.message_id for v in queue.verdicts(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None,
                                                                          gate=None)})
         self.assertEqual(due_followups(self.db, self.clock().date(), days_ahead=30), [])
 
@@ -520,13 +521,13 @@ class BounceNoGoTest(Base):
         from outreach.sending import signals
         _, _, sent = self.send_first()
         _, _, other = self.send_first()
-        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 2)
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None).sent_today, 2)
         self.gmail.deliver_bounce(sent, dsn="blocked")
         self.sync()
         today = self.clock().date()
         self.assertEqual(signals.sends_on(self.db, 1, today, CFG), 2)  # the bounce rate still sees both
         self.assertEqual(signals.counted_sends_on(self.db, 1, today, CFG), 1)
-        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, day=None).sent_today, 1)
+        self.assertEqual(queue.prepare(self.db, self.clock(), CFG, _in_play(self.db, CFG), day=None).sent_today, 1)
 
 
 class StopTagTest(Base):
@@ -750,6 +751,9 @@ GMAIL = "devanshurajesh@gmail.com"
 GENERAL = "devanshuchi9@gmail.com"
 
 
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
 class AccountInboundTest(Base):
     """Inbound mail per sender account (#9 multi-sender ruling, 2026-11-12): each account reads its own mailbox
     with its own history cursor, a Gmail thread id means something only in its own mailbox, and a reply in any
@@ -757,12 +761,12 @@ class AccountInboundTest(Base):
 
     def setUp(self):
         super().setUp()
-        self.rows = accounts.sync(self.db, CFG, iso(MON))
+        self.rows = accounts.sync(self.db, MULTI, iso(MON))
         self.one, self.two = self.rows[GMAIL], self.rows[GENERAL]
         self.gmail2 = FakeGmail(clock=self.clock, account=GENERAL, id_prefix="b", probe=self.probe,
-                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
 
-    def sync_two(self, cfg=CFG):
+    def sync_two(self, cfg=MULTI):
         return self.sync(cfg, gmail=self.gmail2, account=self.two)
 
     def on_two(self, company=None, *, thread=None):
@@ -877,10 +881,10 @@ class AccountInboundTest(Base):
     def test_a_bounce_that_fails_to_apply_lists_no_address(self):
         _, touch_id, sent = self.send_first()
         self.gmail.deliver_bounce(sent, dsn="hard")
-        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=CFG, now=self.clock())
+        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=MULTI, now=self.clock())
         with mock.patch("outreach.sending.inbound._no_go_the_bounced", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError), transaction(self.db):
-                inbound.apply_inbound(self.db, read, self.one, now=self.clock(), cfg=CFG, notify=self.notify)
+                inbound.apply_inbound(self.db, read, self.one, now=self.clock(), cfg=MULTI, notify=self.notify)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM bounced_address").fetchone()[0], 0)
         self.assertEqual(self.touch(touch_id)["state"], "open")
 
@@ -890,21 +894,24 @@ class AccountInboundTest(Base):
         replier, touch_id, sent = self.send_first()
         colleague = self.colleague()
         self.clock.advance(days=1)
-        before = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), CFG, self.rows, day=None,
+        # Account 1 rests now (the shipped accounts): it reads, and the colleague routes to account 2.
+        resting = dataclasses.replace(MULTI, accounts=load_config().accounts)
+        rows = accounts.in_play(self.db, resting)
+        before = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), resting, rows, day=None,
                                                           gate=None)}
         self.assertEqual(before[colleague].account, GENERAL)
         self.assertNotIn(before[colleague].reason, queue.STOP_REASONS + ("company_held",))
         followup = self.approve_followup(touch_id, "Re: " + self.gmail.sent[-1][0].subject)
         self.gmail.deliver_reply(sent, "p1@acme.co")
         self.sync()
-        after = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), CFG, self.rows, day=None,
+        after = {v.message_id: v for v in queue.verdicts(self.db, self.clock(), resting, rows, day=None,
                                                          gate=None)}
         # The company stop is the hold: every queued email to anyone there waits, on every account, until he
         # releases it. The replier's own follow-up is stopped for good.
         self.assertEqual((after[colleague].reason, after[colleague].account), ("company_held", GENERAL))
         self.assertEqual(self.state(followup), "skipped")
         self.assertNotIn(followup, after)
-        self.assertIsNone(queue.pick(list(after.values()), queue.load_queue(self.db, CFG), account=GENERAL))
+        self.assertIsNone(queue.pick(list(after.values()), queue.load_queue(self.db, resting), account=GENERAL))
 
     def test_seen_keys_are_per_account(self):
         self.send_first()
@@ -939,17 +946,17 @@ class AccountInboundTest(Base):
         read = inbound.InboundRead(metas=[limit], new_history_id=None, complete=False,
                                    account_id=self.two.account_id)
         with transaction(self.db):
-            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=CFG, notify=self.notify)
+            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=MULTI, notify=self.notify)
         paused = {r["account_id"]: r["pause_kind"] for r in self.db.execute(
             "SELECT account_id, pause_kind FROM sender_account WHERE paused = 1")}
         self.assertEqual(paused, {self.two.account_id: "hard_block"})
 
     def test_a_read_of_one_account_is_never_applied_as_another(self):
         self.send_first()
-        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=CFG, now=self.clock())
+        read = inbound.read_inbound(self.db, self.gmail, self.one, cfg=MULTI, now=self.clock())
         before = list(self.db.iterdump())
         with self.assertRaises(ValueError), transaction(self.db):
-            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=CFG, notify=self.notify)
+            inbound.apply_inbound(self.db, read, self.two, now=self.clock(), cfg=MULTI, notify=self.notify)
         self.assertEqual(list(self.db.iterdump()), before)
 
 

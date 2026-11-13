@@ -229,21 +229,31 @@ class _Run:
         path = str(self.folder / "outreach.db")
         install(path)
         self.conn = connect(path)
-        # The sender's account: send days are kept per account (migration 0017) and a new store has none.
+        # Every configured account has its row, as the first tick would make them (send days are per account).
         stamp = ny(scenario.start, "00:00").astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.conn.execute("INSERT INTO sender_account(account_id, address, kind, created_at, updated_at) "
-                          "VALUES (1, ?, 'gmail', ?, ?)", (cfg.from_address, stamp, stamp))
+        with transaction(self.conn):
+            accounts.sync(self.conn, cfg, stamp)
         self.conn.execute("PRAGMA fullfsync = ON")      # the tick refuses a connection without it
         self.conn.execute("PRAGMA synchronous = OFF")   # a temporary store: nothing here needs to survive a crash
         self.days = cal_days(scenario.start, scenario.days, cfg)
         self.clock = FakeClock(ny(self.days[0], DAY_START))
-        self.fake = FakeGmail(clock=self.clock, reconcile_after_minutes=cfg.reconcile_after_minutes)
+        # One fake mailbox per Gmail account. The imported email is account 1's (the old mailer's); the people are
+        # mailed from the account that sends (the general lane), and the scripted replies, bounces and sign-outs
+        # happen in its mailbox (`self.fake`).
+        gmails = [a.address for a in cfg.accounts if a.kind == "gmail"]
+        self.fakes = {address: FakeGmail(clock=self.clock, account=address, id_prefix="" if i == 0 else chr(97 + i),
+                                         reconcile_after_minutes=cfg.reconcile_after_minutes)
+                      for i, address in enumerate(gmails)}
+        sender = next(a for a in cfg.accounts if a.sends and a.address in self.fakes)
+        self.sender = sender.address
+        self.fake = self.fakes[self.sender]
+        self.old_mail = self.fakes.get(cfg.accounts[0].address, self.fake)
         self.notices: list[tuple[datetime, str, str]] = []
         self.people: dict[str, PersonInfo] = {}
         self.by_email: dict[str, PersonInfo] = {}
         self.pending = sorted(scenario.events, key=lambda e: e.at)
         self.ticks = 0
-        self.deps = TickDeps(client=self.fake, clock=self.clock, rng=self.rng, notify=self._notice,
+        self.deps = TickDeps(clients=self.fakes, clock=self.clock, rng=self.rng, notify=self._notice,
                              old_sender_loaded=lambda: False, banned=SIM_BANNED)
 
     def _notice(self, title: str, text: str) -> None:
@@ -280,7 +290,7 @@ class _Run:
             "VALUES (?, 'Old Contact', 'engineer', 'old@imported.example', 'America/New_York', 'email', 'import', "
             "?, ?)", (company, STAMP, STAMP)).lastrowid
         rfc, at = "<old.1@devanshu.local>", self.clock() - timedelta(days=3)
-        meta = self.fake.add_to_sent("old@imported.example", "An email from last week", message_id=rfc, at=at)
+        meta = self.old_mail.add_to_sent("old@imported.example", "An email from last week", message_id=rfc, at=at)
         stamp = _utc(at)
         touch = conn.execute(
             "INSERT INTO touch(person_id, origin, first_sent_at, first_rfc_id, gmail_thread_id, created_at, "
@@ -416,7 +426,7 @@ class _Run:
         candidates = [now + STEP, end]
         if self.pending:
             candidates.append(self.pending[0].at)
-        gap = accounts.primary(self.conn, self.cfg).next_send_at
+        gap = accounts.in_play(self.conn, self.cfg)[self.sender].next_send_at
         gap_at = datetime.strptime(gap, ISO_FMT).replace(tzinfo=timezone.utc) if gap else None
         if gap_at is not None and gap_at > now:
             candidates.append(gap_at)  # while the gap runs, nothing sooner can send
@@ -447,7 +457,7 @@ class _Run:
 
     def day_rows(self) -> tuple[DayRow, ...]:
         rows = []
-        account = accounts.primary(self.conn, self.cfg)
+        account = accounts.in_play(self.conn, self.cfg)[self.sender]
         for day in self.days:
             row = self.conn.execute("SELECT send_limit, outcome FROM send_day WHERE account_id = ? AND day = ?",
                                     (account.account_id, day.isoformat())).fetchone()

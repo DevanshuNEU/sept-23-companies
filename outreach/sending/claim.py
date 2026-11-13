@@ -83,8 +83,9 @@ class ClaimNotRecorded(RuntimeError):
 
 
 class WrongAccount(RuntimeError):
-    """The message belongs to another sender account than the one claiming it: a first email whose touch is already
-    on another account, or a follow-up whose thread is another account's. It is refused and nothing changes."""
+    """The message belongs to another sender account than the one claiming it (a first email whose touch is already
+    on another account, or a follow-up whose thread is another account's), or the claiming account does not send.
+    It is refused and nothing changes."""
 
 
 def _stamp(at: datetime | str) -> str:
@@ -165,13 +166,16 @@ def claim(conn: sqlite3.Connection, q: Queued, account: accounts.AccountRow, *, 
     also takes the account on its touch and pins its company there, in the same transaction (`_take_account`).
     False when nothing changed: the message moved on or was edited since `q` was read (its revision), a stop, hold,
     bounce or pause of the account landed since the pick, or it is a follow-up whose touch has no Gmail thread.
-    Raises WrongAccount when the message belongs to another account, AnotherSendInFlight when another message is
+    Raises WrongAccount when the message belongs to another account or the account does not send (`sends = false`:
+    it rests and only reads, even in its own threads), AnotherSendInFlight when another message is
     `sending`, Unproven when Gmail is not shown to keep this account's marker and a marked email was already claimed
     from it (read in this transaction, so at most one marked email per account is ever claimed before its proof),
     ClaimNotRecorded when the `claimed` event did not write (a reused token: the proof must see every claim), and
     ValueError when `rfc_id` is not one Message-ID. Nothing is written when it raises."""
     if not MESSAGE_ID.fullmatch(rfc_id or ""):
         raise ValueError("a claim needs exactly one Message-ID")
+    if not account.cfg.sends:
+        raise WrongAccount(f"{account.cfg.address} does not send (sends = false), so it claims nothing")
     stamp = _stamp(now)
     try:
         with transaction(conn):
@@ -330,7 +334,7 @@ def _push_gap(conn: sqlite3.Connection, at: str, cfg: SendConfig, rng: random.Ra
     today = cal.ny_date(when, cfg)
     sends_left = max(ramp.effective_limit(conn, account, today, cfg)
                      - signals.counted_sends_on(conn, account.account_id, today, cfg), 0)
-    minutes_left = queue.minutes_left(conn, when, cfg, account.cfg.address)
+    minutes_left = queue.minutes_left(conn, when, cfg, account.cfg.address, accounts.in_play(conn, cfg))
     candidate = (when + timedelta(minutes=human.spread_gap(minutes_left, sends_left, rng, cfg))).strftime(ISO_FMT)
     current = conn.execute("SELECT next_send_at FROM sender_account WHERE account_id = ?",
                            (account.account_id,)).fetchone()

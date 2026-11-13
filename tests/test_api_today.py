@@ -8,6 +8,7 @@ from outreach.sending.status import sending_snapshot
 from outreach.store.writes import append_event
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
+from tests.sendtest import use_solo_config
 
 TODAY = "2026-11-10"  # NOW is Tuesday 11:14 in New York
 NEXT_DAY = "2026-11-11T15:14:00Z"
@@ -18,6 +19,10 @@ CONTEXT = json.dumps({"source": "own", "lane": "own", "roleKind": "engineer", "r
 
 class TodayCase(ApiCase):
     lean_today = True  # these tests are about the lean build on read, so they turn it on
+
+    def setUp(self):
+        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
+        super().setUp()
 
     def ranked(self, name: str, points: float = 5.0, *, lanes=("level_role",), status="candidate", role=True,
                hide=None, **cols) -> int:
@@ -190,10 +195,12 @@ class Build(TodayCase):
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
         self.conn.execute("UPDATE sender SET auth_state = 'signed_out'")
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")  # as the tick does
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
         self.conn.execute("UPDATE sender SET auth_state = 'ok'")
+        self.conn.execute("UPDATE sender_account SET auth_state = 'ok' WHERE account_id = 1")
         append_event(self.conn, entity="message", entity_id=2, kind="marker_missing", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="missing")  # Gmail dropped a sent email's marker
         self.conn.execute("DELETE FROM daily_list_entry")

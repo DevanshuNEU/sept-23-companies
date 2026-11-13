@@ -372,8 +372,8 @@ def _no_go_the_bounced(conn: sqlite3.Connection, touch_id: int, meta: MessageMet
 
 
 def _signal_account(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int | None) -> accounts.AccountRow:
-    """The account a signal belongs to: the touch's own account (a touch with none is account 1's), else the one
-    account the tick runs until the per-account loop lands."""
+    """The account a signal belongs to: the touch's own account (a touch with none is account 1's), else account 1
+    (the first account block)."""
     if touch_id is not None:
         row = conn.execute("SELECT account_id FROM touch WHERE touch_id = ?", (touch_id,)).fetchone()
         found = accounts.by_id(conn, cfg, row["account_id"] if row is not None else None)
@@ -516,11 +516,13 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, account: accounts
 
 def observe_stop_tags(conn: sqlite3.Connection, *, now: datetime, cfg: SendConfig, notify: Notifier) -> int:
     """A warning (`stop_reply`, keyed by touch) for each email touch tagged `asked_to_stop` on the touch or on its
-    outreach touch (not an undone one) that has none yet; then, when this call found a new one, a hard block
-    (`stop_replies_hard`) once `stop_replies_hard` tags fall within `stop_replies_days`. Runs in the caller's
-    transaction (a savepoint). Returns how many tags were new."""
+    outreach touch (not an undone one) that has none yet; then, for each account that got a new one, a hard block
+    (`stop_replies_hard`) on that account once `stop_replies_hard` of its own tags fall within `stop_replies_days`:
+    stop replies to one account never pause another. Runs in the caller's transaction (a savepoint). Returns how many
+    tags were new."""
     stamp = _stamp(now)
-    new, last = 0, None
+    new = 0
+    last: dict[int, tuple[int, accounts.AccountRow]] = {}  # account id to its newest new tag and the account
     with atomic(conn, "observe_stop_tags"):
         for (touch_id,) in conn.execute(
                 "SELECT touch_id FROM touch WHERE reply_kind = 'asked_to_stop' UNION "
@@ -529,15 +531,16 @@ def observe_stop_tags(conn: sqlite3.Connection, *, now: datetime, cfg: SendConfi
             key = f"stop_reply:{touch_id}"
             if conn.execute("SELECT 1 FROM event WHERE idempotency_key = ?", (key,)).fetchone():
                 continue
+            account = _signal_account(conn, cfg, touch_id)
             note_signal(conn, "stop_reply", at=stamp, detail={"touch_id": touch_id}, key=key, cfg=cfg, notify=notify,
-                        now=now, account=_signal_account(conn, cfg, touch_id))
-            new, last = new + 1, touch_id
-        if new:
-            tags = signals.stop_tags_in(conn, now, cfg.stop_replies_days)
+                        now=now, account=account)
+            new += 1
+            last[account.account_id] = (touch_id, account)
+        for account_id, (touch_id, account) in sorted(last.items()):
+            tags = signals.stop_tags_in(conn, now, cfg.stop_replies_days, account_id)
             if tags >= cfg.stop_replies_hard:
-                note_signal(conn, "stop_replies_hard", at=stamp, detail={"tags": tags, "touch_id": last},
-                            key=f"stop_replies_hard:{last}", cfg=cfg, notify=notify, now=now,
-                            account=_signal_account(conn, cfg, last))
+                note_signal(conn, "stop_replies_hard", at=stamp, detail={"tags": tags, "touch_id": touch_id},
+                            key=f"stop_replies_hard:{touch_id}", cfg=cfg, notify=notify, now=now, account=account)
     return new
 
 

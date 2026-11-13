@@ -18,10 +18,10 @@ from outreach.sending.mail import GmailError
 from outreach.sending.queue import Verdict
 from outreach.store import transaction
 from outreach.store.writes import append_event
-from tests.sendtest import MON, iso, prove, seed_email_person, seed_message, seed_sent
+from tests.sendtest import MON, iso, prove, seed_email_person, seed_message, seed_sent, solo, beside
 from tests.storetest import fresh_store, seed_company
 
-CFG = load_config()
+CFG = solo(load_config())  # one account (account 1) sends every company
 
 
 class Base(unittest.TestCase):
@@ -415,6 +415,9 @@ class FirstOnlyTest(unittest.TestCase):
         self.assertEqual(queue.first_only([]), [])
 
 
+
+MULTI = beside(CFG)  # account 1 sends, beside account 2 and the Northeastern account
+
 class PerAccountTest(Base):
     """The proof is per account (#9 multi-sender ruling, 2026-11-12): account 1's old proof counts for account 1
     only, a new account sends its own first email alone and is read back by its own client, and a missing marker on
@@ -422,13 +425,13 @@ class PerAccountTest(Base):
 
     def setUp(self):
         super().setUp()
-        rows = accounts.sync(self.db, CFG, iso(MON))
+        rows = accounts.sync(self.db, MULTI, iso(MON))
         self.one, self.two = rows["devanshurajesh@gmail.com"], rows["devanshuchi9@gmail.com"]
         self.gmail2 = FakeGmail(clock=self.clock, account=self.two.cfg.address, id_prefix="b",
-                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+                                reconcile_after_minutes=MULTI.reconcile_after_minutes)
 
     def send_from(self, q: queue.Queued, account, client) -> str:
-        return claim.send_one(self.db, client, q, CFG, now=iso(self.clock()), clock=self.clock, rng=self.rng,
+        return claim.send_one(self.db, client, q, MULTI, now=iso(self.clock()), clock=self.clock, rng=self.rng,
                               account=account)
 
     def test_account_1s_old_proof_counts_for_account_1_only(self):
@@ -453,7 +456,7 @@ class PerAccountTest(Base):
         self.assertEqual(proof.verify_marker(self.db, self.gmail2, self.two.account_id, now=self.clock()),
                          {"verified": 1, "missing": 0, "errors": 0})
         self.assertEqual(proof.phase(self.db, self.two.account_id), proof.PROVEN)
-        second = next(q for q in queue.load_queue(self.db, CFG) if q.message_id == second.message_id)
+        second = next(q for q in queue.load_queue(self.db, MULTI) if q.message_id == second.message_id)
         self.assertEqual(self.send_from(second, self.two, self.gmail2), "sent")
 
     def test_each_account_reads_back_only_its_own_mail(self):

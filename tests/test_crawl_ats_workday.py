@@ -499,3 +499,28 @@ class WorkdayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeadTests(unittest.TestCase):
+    """#251 part 2: a head read is one request for page 1, answered as a partial ok that closes nothing."""
+
+    def test_one_request_for_the_first_page_only(self):
+        route = tenant({None: [posting(n) for n in range(45)]})
+        client = FakeClient({LIST_KEY: route})
+        r = make(client).head(TOKEN)
+        self.assertEqual((r.result, r.partial, r.head, len(r.jobs)), ("ok", True, True, 20))
+        self.assertEqual([q["offset"] for q in route.seen], [0])
+        self.assertIn("20 of 45", r.partial_note)
+        self.assertEqual(r.jobs[0].url, HOST + "/Careers/job/Boston-MA/Engineer-0_R-0")
+
+    def test_an_empty_first_page_is_unchanged_never_empty(self):
+        client = FakeClient({LIST_KEY: tenant({None: []})})
+        r = make(client).head(TOKEN)
+        self.assertEqual((r.result, r.head, r.jobs), ("unchanged", True, ()))
+
+    def test_a_failed_request_is_an_error(self):
+        client = FakeClient({LIST_KEY: status_response(500)})
+        self.assertEqual(make(client).head(TOKEN).result, "error")
+
+    def test_a_bad_token_is_an_error(self):
+        self.assertEqual(make(FakeClient({})).head("../x").result, "error")

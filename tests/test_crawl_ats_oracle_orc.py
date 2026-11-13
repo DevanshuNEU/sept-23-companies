@@ -327,3 +327,28 @@ class OracleBodyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+HEAD_URL = ("https://acme.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
+            "&expand=requisitionList&finder=findReqs;siteNumber=CX_1001,limit=25,offset=0,sortBy=POSTING_DATES_DESC")
+
+
+class HeadTests(unittest.TestCase):
+    """#251 part 2: a head read asks for the 25 newest postings, sorted by posting date, in one request."""
+
+    def test_one_request_for_the_newest(self):
+        client = FakeClient({HEAD_URL: json_response(envelope(240, [row(IDS[0]), row(IDS[1], "Data Engineer")]))})
+        r = OracleAdapter(client).head(TOKEN)
+        self.assertEqual((r.result, r.partial, r.head), ("ok", True, True))
+        self.assertEqual([j.native_id for j in r.jobs], IDS[:2])
+        self.assertIn("2 of 240", r.partial_note)
+        self.assertEqual(client.requests, [HEAD_URL])
+
+    def test_nothing_listed_is_unchanged(self):
+        client = FakeClient({HEAD_URL: json_response(envelope(0, []))})
+        r = OracleAdapter(client).head(TOKEN)
+        self.assertEqual((r.result, r.head), ("unchanged", True))
+
+    def test_a_failure_or_bad_token_is_an_error(self):
+        self.assertEqual(OracleAdapter(FakeClient({HEAD_URL: status_response(500)})).head(TOKEN).result, "error")
+        self.assertEqual(OracleAdapter(FakeClient({})).head("nope").result, "error")

@@ -26,6 +26,10 @@ __all__ = ["OracleAdapter"]
 
 _LIST = ("https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
          "&expand=requisitionList&finder=findReqs;siteNumber={site},limit=200,offset={offset}")
+# A head read (#251 part 2): the 25 newest postings, by posting date. The sort value is not in Oracle's docs; it was
+# measured to answer today's postings first (docs/research/2026-11-09-first-to-see-new-postings.md).
+_HEAD = ("https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
+         "&expand=requisitionList&finder=findReqs;siteNumber={site},limit=25,offset=0,sortBy=POSTING_DATES_DESC")
 _DETAIL = ("https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
            "&finder=ById;Id=\"{id}\",siteNumber={site}")
 _JOB_URL = "https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{id}"
@@ -132,6 +136,30 @@ class OracleAdapter:
         note = (f"{len(jobs)} of {total} postings read ({broken} broken, {max(missing - broken, 0)} missing)"
                 if missing or broken else "")
         return finish_list(jobs.values(), resp, validators, partial_note=note)
+
+    def head(self, token: str) -> ReadResult:
+        """A head read (#251 part 2): one request for the newest postings. A partial `ok` that closes nothing, or
+        `unchanged` when it lists none, so it never counts as an empty read."""
+        parts = _split(token)
+        if parts is None:
+            return read_error(f"{token!r} is not a valid oracle_orc token (host.oraclecloud.com/siteNumber)")
+        host, site = parts
+        got = fetch_list(self.client, _HEAD.format(host=host, site=site), Validators())
+        if isinstance(got, ReadResult):
+            return got
+        parsed = _page(got)
+        if isinstance(parsed, ReadResult):
+            return parsed
+        listed, total = parsed
+        jobs: dict[str, JobRef] = {}
+        for item in listed:
+            job = _parse(host, site, item)
+            if job is not None:
+                jobs.setdefault(job.native_id, job)
+        if not jobs:
+            return ReadResult("unchanged", (), Validators(), http_status=got.status, head=True)
+        return ReadResult("ok", tuple(jobs.values()), Validators(), http_status=got.status, partial=True,
+                          partial_note=f"head read: the newest {len(jobs)} of {total} postings", head=True)
 
     def body(self, token: str, job: JobRef) -> str | None:
         """The posting's text, or None when it has none. A failed request or a wrong shape raises, so the caller

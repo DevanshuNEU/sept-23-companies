@@ -1,6 +1,7 @@
 """Migration 0017 (#9 multi-sender design): sender accounts, per-account send days, company pins, bounced addresses.
 
 The store is built to version 16, seeded as the single-sender store was, and then migrated to the latest."""
+import dataclasses
 import json
 import shutil
 import sqlite3
@@ -8,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from outreach.sending import accounts
+from outreach.sending.config import AccountConfig, load_config
 from outreach.store.migrate import migrate, migration_files
 from tests.mcptest import store_path
 from tests.storetest import fresh_store
@@ -108,6 +111,44 @@ class SenderAccountsMigrationTest(unittest.TestCase):
         self.assertIsNone(acct(unsent))
         pins = [tuple(r) for r in self.db.execute("SELECT company_id, account_id, pinned_by FROM company_sender")]
         self.assertEqual(pins, [(sent_co, 1, "import")])
+
+    def imported(self, name, *, sent_at=None, thread=None, message_state=None):
+        co = add_company(self.db, name)
+        person = add_person(self.db, co, f"x@{name.lower().replace(' ', '')}.co")
+        touch = self.db.execute(
+            "INSERT INTO touch(person_id, origin, first_sent_at, gmail_thread_id, created_at, updated_at) "
+            "VALUES (?, 'import', ?, ?, ?, ?)", (person, sent_at, thread, T, T)).lastrowid
+        if message_state == "drafted":
+            self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, saved_by, created_at, "
+                            "updated_at) VALUES (?, 0, 'drafted', 's', 'b', 'import', ?, ?)", (touch, T, T))
+        elif message_state is not None:
+            self.db.execute("INSERT INTO message(touch_id, seq, state, subject, body, saved_by, rfc_message_id, "
+                            "sent_at, created_at, updated_at) VALUES (?, 0, 'sent', 's', 'b', 'import', ?, ?, ?, ?)",
+                            (touch, f"<{touch}@x>", T, T, T))
+        return co, touch
+
+    def test_an_imported_touch_that_never_sent_keeps_no_account_and_routes_by_lane(self):
+        # The importer puts the old mailer's unsent approvals on such a touch as a seq 0 draft: it must route by lane,
+        # not to the resting account 1 (final review, item 1).
+        self.seed_sender()
+        unsent_co, unsent = self.imported("Unsent Co", message_state="drafted")
+        sent_co, sent = self.imported("Sent Co", sent_at=T)
+        thread_co, threaded = self.imported("Thread Co", thread="th9")
+        msg_co, by_message = self.imported("Message Co", message_state="sent")
+        self.migrate()
+        acct = lambda t: self.db.execute("SELECT account_id FROM touch WHERE touch_id = ?", (t,)).fetchone()[0]
+        self.assertIsNone(acct(unsent))
+        self.assertEqual((acct(sent), acct(threaded), acct(by_message)), (1, 1, 1))
+        pins = {r[0] for r in self.db.execute("SELECT company_id FROM company_sender")}
+        self.assertEqual(pins, {sent_co, thread_co, msg_co})
+        general = "devanshuchi9@gmail.com"
+        cfg = dataclasses.replace(load_config(), accounts=(
+            AccountConfig(GMAIL, "gmail", None, False, 15, 3, 15, 100, None, None),
+            AccountConfig(general, "gmail", "general", True, 15, 3, 15, 100, None, None)))
+        rows = accounts.sync(self.db, cfg, T)
+        found, why = accounts.route(self.db, cfg, unsent, rows)
+        self.assertEqual((found.cfg.address, why), (general, "lane"))
+        self.assertEqual(accounts.route(self.db, cfg, sent, rows)[1], "thread")
 
     def test_bounced_addresses_backfilled(self):
         co = add_company(self.db, "Bounce Co")

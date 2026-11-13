@@ -47,8 +47,14 @@ INSERT INTO sender_account(account_id, address, kind, history_id, next_send_at, 
          strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
   FROM sender WHERE sender_id = 1 AND account <> '';
 
+-- A touch is account 1's only when something went out on it: a first send time, a Gmail thread, or a message that
+-- was sent or may have gone (sending, send_unknown). An imported touch that never sent (the old mailer's unsent
+-- approvals, imported as seq 0 drafts) keeps no account, so its first email routes by lane like any new one.
 UPDATE touch SET account_id = 1
-  WHERE (first_sent_at IS NOT NULL OR origin = 'import') AND EXISTS (SELECT 1 FROM sender_account WHERE account_id = 1);
+  WHERE (first_sent_at IS NOT NULL OR ifnull(gmail_thread_id, '') <> ''
+         OR EXISTS (SELECT 1 FROM message m WHERE m.touch_id = touch.touch_id
+                    AND m.state IN ('sent', 'sending', 'send_unknown')))
+    AND EXISTS (SELECT 1 FROM sender_account WHERE account_id = 1);
 
 INSERT INTO company_sender(company_id, account_id, pinned_by, pinned_at)
   SELECT p.company_id, 1, 'import', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')

@@ -137,13 +137,19 @@ class AppleAdapter:
         if bad := self._bad_token(token):
             return bad
         jobs: dict[str, JobRef] = {}
+        stopped = ""
         broken = 0
         total = 0
         resp: Response | None = None
         for n in range(1, MAX_PAGES + 1):
             got = self._page(token, n)
             if isinstance(got, ReadResult):
-                return got
+                if n == 1 or not jobs:
+                    return got
+                # A later page failed (a timeout, a 429): keep what was read as a partial ok that closes nothing,
+                # and send no further page (2026-11-13: a whole read was lost to one page, so head reads never began).
+                stopped = f"stopped at page {n}: {got.error}"
+                break
             rows, count, resp = got
             if n == 1:
                 total = count
@@ -158,6 +164,9 @@ class AppleAdapter:
                 break
         if resp is None:
             return read_error("no page was read")
+        if stopped:
+            return finish_list(jobs.values(), resp, validators,
+                               partial_note=f"{len(jobs)} of {total} jobs read, {stopped}")
         if len(jobs) > total or total - len(jobs) > short_allowed(total):
             return read_error(f"{len(jobs)} jobs listed but totalRecords is {total}", status=resp.status)
         missing = total - len(jobs)

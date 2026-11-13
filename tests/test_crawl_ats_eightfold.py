@@ -91,6 +91,17 @@ class EightfoldListTests(unittest.TestCase):
         r, _ = read({url(0): page(40, [pos(n) for n in range(10)]), url(10): page(40, [])})
         self.assertEqual((r.result, r.jobs), ("error", ()))
 
+    def test_a_later_page_that_fails_keeps_what_was_read_and_stops(self):
+        # 2026-11-13 live: Microsoft answered 429 partway through the first full read, so it never got one and its
+        # head reads never began. Now the pages read are a partial ok that closes nothing, and no page follows.
+        r, client = read({url(0): page(30, [pos(n) for n in range(10)]), url(10): status_response(429),
+                          url(20): page(30, [pos(n) for n in range(20, 30)])})
+        self.assertEqual((r.result, r.partial, len(r.jobs)), ("ok", True, 10))
+        self.assertIn("stopped at page 2", r.partial_note)
+        self.assertEqual(client.requests, [url(0), url(10)])
+        r, _ = read({url(0): status_response(429)})
+        self.assertEqual(r.result, "error")
+
     def test_a_page_with_nothing_new_stops_the_read(self):
         r, client = read({url(0): page(30, [pos(n) for n in range(10)]), url(10): page(30, [pos(n) for n in range(10)])})
         self.assertEqual(r.result, "error")

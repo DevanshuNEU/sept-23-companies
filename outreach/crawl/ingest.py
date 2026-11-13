@@ -32,7 +32,8 @@ from datetime import datetime
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.bodies import BODY_LANES, fetch_bodies, missing_body_ids, refetch_body_ids, save_body, stored_sha
 from outreach.crawl.boardstate import BoardRow, load_board, write_board_state
-from outreach.crawl.cadence import add_seconds, error_backoff_s, last_new_age_s, low_yield, next_interval_s, tier_wait_s
+from outreach.crawl.cadence import (add_seconds, error_backoff_s, head_read_due, last_new_age_s, low_yield,
+                                    next_interval_s, tier_wait_s)
 from outreach.crawl.config import CrawlConfig
 from outreach.crawl.decisions import decide_postings
 from outreach.crawl.polite import HostTripped
@@ -97,7 +98,8 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
     """
     if conn.in_transaction:
         raise ValueError("read_board sends requests, so it must start with no transaction open")
-    result = list_board(adapter, board, full=full_read_due(conn, board, now))
+    full = full_read_due(conn, board, now)
+    result = list_board(adapter, board, full=full, head=not full and head_read_due(board, now, cfg))
     title_cfg = rules_cfg if rules_cfg is not None else default_config()
     new = changed = reopened = closed = decided = bodies = 0
     any_change = False
@@ -160,16 +162,17 @@ def read_board(conn: sqlite3.Connection, board: BoardRow, adapter: Adapter, *, r
         interval_s = None
         next_read_at = add_seconds(now, error_backoff_s(streaks.error_streak, cfg))
     else:
-        interval_s = next_interval_s(last_new_age_s(conn, board, now), board.change_interval_s, any_change, cfg)
+        normal_s = next_interval_s(last_new_age_s(conn, board, now), board.change_interval_s, any_change, cfg)
+        interval_s = None if result.head else normal_s  # a head read keeps the stored interval (#251 part 2)
         # A big board with few US engineering jobs waits at least a day (#152). Only the next read moves: the stored
         # interval stays the normal one, so the board returns to its rhythm the day it stops being low yield. An empty
         # read keeps the normal wait: its postings are still open, and the second empty read closes them.
         # Speed tiers (#251): a one-request board waits 15 minutes, 2 hours or a day by what it lists. Only the next
         # read moves, as with the low-yield day below.
         tier = tier_wait_s(conn, board, now, cfg) if result.result in ("ok", "unchanged") else None
-        wait_s = interval_s if tier is None else tier
+        wait_s = normal_s if tier is None else tier
         if result.result in ("ok", "unchanged") and low_yield(conn, board.board_id, now, cfg):
-            wait_s = max(interval_s, cfg.big_board.interval_s)
+            wait_s = max(normal_s, cfg.big_board.interval_s)
         next_read_at = add_seconds(now, wait_s)
     open_now = len(_open_ids(conn, board)) if result.result == "unchanged" else 0  # used for unchanged only
     write_board_state(conn, board, result, run_id=run_id, now=now, open_postings=open_now,
@@ -195,13 +198,15 @@ def full_read_due(conn: sqlite3.Connection, board: BoardRow, now: str) -> bool:
     return newest is not None and newest < add_seconds(now, -FULL_READ_AFTER_S)
 
 
-def list_board(adapter: Adapter, board: BoardRow, *, full: bool = False) -> ReadResult:
+def list_board(adapter: Adapter, board: BoardRow, *, full: bool = False, head: bool = False) -> ReadResult:
     """The adapter's answer; any failure of the adapter itself is an `error` read (one board's bug never stops a
     tick), except a tripped host and a ruleset change, which say nothing about the board. The tick calls this itself
     first, so it can hold an error read back until it knows whether the host was down (Task 12). `full` (the weekly
     full read, `full_read_due`) sends no validators, so the answer cannot be `unchanged`."""
     validators = Validators() if full else Validators(board.etag, board.ids_fingerprint)
     try:
+        if head and hasattr(adapter, "head"):  # one newest-first request (#251 part 2); the tick's replay has none
+            return adapter.head(board.token)
         return adapter.list(board.token, validators)
     except (HostTripped, RulesetNotCurrent):
         raise

@@ -40,6 +40,8 @@ class BoardRow:
     last_error: str = ""
     # The board's last ok, unchanged or empty read (#193): a new posting's seen gap is measured from it.
     last_good_read_at: str | None = None
+    # The board's last full read (#251 part 2): a head read stores new postings between full reads and leaves it.
+    last_full_read_at: str | None = None
 
 
 _COLUMNS = tuple(f.name for f in dataclasses.fields(BoardRow))
@@ -93,10 +95,10 @@ def write_board_state(conn: sqlite3.Connection, board: BoardRow, result: ReadRes
         conn.execute(
             "UPDATE board SET last_read = ?, last_read_at = ?, empty_streak = ?, error_streak = ?, streak_since = ?, "
             "last_error = ?, etag = ?, ids_fingerprint = ?, next_read_at = ?, "
-            "change_interval_s = coalesce(?, change_interval_s), last_good_read_at = coalesce(?, last_good_read_at) "
-            "WHERE board_id = ?",
+            "change_interval_s = coalesce(?, change_interval_s), last_good_read_at = coalesce(?, last_good_read_at), "
+            "last_full_read_at = coalesce(?, last_full_read_at) WHERE board_id = ?",
             (streaks.last_read, now, streaks.empty_streak, streaks.error_streak, streaks.streak_since, error, etag,
-             fingerprint, next_read_at, interval_s, good_at, board.board_id))
+             fingerprint, next_read_at, interval_s, good_at, None if result.head else good_at, board.board_id))
         conn.execute(
             "INSERT INTO board_read(board_id, run_id, at, result, http_status, error, postings) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(board_id, run_id) DO NOTHING",

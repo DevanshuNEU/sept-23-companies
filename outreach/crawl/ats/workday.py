@@ -215,6 +215,35 @@ class WorkdayAdapter:
                 f"{max(missing - broken, 0)} missing)") if missing > 0 or broken or repeated else ""
         return finish_list(jobs, resp, validators, use_etag=False, partial_note=note)
 
+    def head(self, token: str) -> ReadResult:
+        """A head read (#251 part 2): page 1 of the unfiltered list, one request, newest first on most tenants. A
+        partial `ok` (it closes nothing); `unchanged` when page 1 lists nothing, so it never counts as an empty read."""
+        if not safe_token(self.ats, token):
+            return read_error(f"{token!r} is not a valid workday token")
+        url, tenant, wd, site = self._parts(token)
+        resp = self._post(url, 0, {})
+        if isinstance(resp, ReadResult):
+            return resp
+        got = self._rows(resp, True)
+        if isinstance(got, ReadResult):
+            return got
+        rows, total, _ = got
+        today = self._today or datetime.datetime.now(datetime.timezone.utc).date()
+        jobs: dict[str, JobRef] = {}
+        for item in rows:
+            path = _text(item.get("externalPath")) if isinstance(item, dict) else ""
+            title = _text(item.get("title")) if isinstance(item, dict) else ""
+            if not _valid_path(path) or not title or path in jobs:
+                continue
+            jobs[path] = JobRef(native_id=path, title=title,
+                                url=_POSTING.format(tenant=tenant, wd=wd, site=site, path=path),
+                                location=_text(item.get("locationsText")), country=None,
+                                posted_on=posted_on_from_relative(item.get("postedOn"), today), body=None)
+        if not jobs:
+            return ReadResult("unchanged", (), Validators(), http_status=resp.status, head=True)
+        return ReadResult("ok", tuple(jobs.values()), Validators(), http_status=resp.status, partial=True,
+                          partial_note=f"head read: the newest {len(jobs)} of {total} postings", head=True)
+
     @staticmethod
     def _parts(token: str) -> tuple[str, str, str, str]:
         host_part, site = token.split("/")

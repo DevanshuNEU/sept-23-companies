@@ -39,6 +39,9 @@ class TiersConfig:
     hot_days: int = 90
     dead_days: int = 90
     ats: tuple[str, ...] = ()
+    # ATSs whose adapter has a head read (#251 part 2): a hot board waits hot_s and is checked with one newest-first
+    # request until its normal interval since the last full read has passed.
+    head_ats: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -132,24 +135,27 @@ def _load_big_board(table: object, floor_s: int, ceiling_s: int) -> BigBoardConf
 def _load_tiers(table: object, name: str) -> TiersConfig:
     if not isinstance(table, dict):
         raise ValueError("tiers must be a table")
-    keys = ("hot_s", "warm_s", "dead_s", "hot_days", "dead_days", "ats")
+    keys = ("hot_s", "warm_s", "dead_s", "hot_days", "dead_days", "ats", "head_ats")
     unknown = sorted(set(table) - set(keys))
     if unknown:
         raise ValueError(f"[tiers] has unknown key(s): {', '.join(unknown)}")
     for key in keys:
         if key not in table:
             raise KeyError(f"tiers.{key} is missing from {name}")
-    for key in keys[:-1]:
+    for key in keys[:-2]:
         v = table[key]
         if not isinstance(v, int) or isinstance(v, bool) or v < 60:
             raise ValueError(f"tiers.{key} must be a whole number of at least 60, got {v!r}")
     if not table["hot_s"] <= table["warm_s"] <= table["dead_s"]:
         raise ValueError("tiers must wait hot_s <= warm_s <= dead_s")
-    ats = table["ats"]
-    if not isinstance(ats, list) or not all(a in ATS_HOSTS for a in ats):
-        raise ValueError(f"tiers.ats must list ATSs the crawler reads, got {ats!r}")
+    for key in ("ats", "head_ats"):
+        if not isinstance(table[key], list) or not all(a in ATS_HOSTS for a in table[key]):
+            raise ValueError(f"tiers.{key} must list ATSs the crawler reads, got {table[key]!r}")
+    if set(table["ats"]) & set(table["head_ats"]):
+        raise ValueError("an ATS is in tiers.ats or tiers.head_ats, not both")
     return TiersConfig(hot_s=table["hot_s"], warm_s=table["warm_s"], dead_s=table["dead_s"],
-                       hot_days=table["hot_days"], dead_days=table["dead_days"], ats=tuple(dict.fromkeys(ats)))
+                       hot_days=table["hot_days"], dead_days=table["dead_days"], ats=tuple(dict.fromkeys(table["ats"])),
+                       head_ats=tuple(dict.fromkeys(table["head_ats"])))
 
 
 def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:

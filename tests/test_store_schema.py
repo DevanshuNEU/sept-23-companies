@@ -338,7 +338,7 @@ class SchemaTest(unittest.TestCase):
         named = {(t, c) for t in self.tables() for c in self.columns(t)
                  if c == "at" or c.endswith("_at") or c in ("streak_since", "lease_until")}
         self.assertEqual(columns, named)
-        self.assertEqual(len(columns), 95)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193, 1 for #205
+        self.assertEqual(len(columns), 96)  # 50 before the pipeline tables (#30), 31 with them, 3 + 1 for #14, 4 for #153, 2 for #192, 3 for #193, 1 for #205, 1 for #251 (board.last_full_read_at)
         for table, column in sorted(columns):
             self.assertTrue(self._has_base(table), f"no base row for {table}")
             self.assert_bad_value_refused(table, column, bad, f"{column} IS strftime(")

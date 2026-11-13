@@ -421,13 +421,19 @@ class TierTests(StoreTestCase):
         b = self.board(self.company(), ats="lever")
         self.assertEqual(self.tiered(b), 7200)
 
-    def test_workday_keeps_its_rhythm(self):
-        b = self.board(self.company(), ats="workday")
-        self.job(b, 1, level_state="fit")
-        self.assertIsNone(self.tiered(b))
+    def test_a_hot_workday_board_waits_15_minutes_and_the_rest_keep_their_rhythm(self):
+        # #251 part 2: Workday and Oracle have head reads, so a hot board is checked every 15 minutes.
+        hot, cold = self.board(self.company(), ats="workday"), self.board(self.company(), ats="oracle_orc")
+        self.job(hot, 1, level_state="fit")
+        self.job(cold, 1, level_state="reject")
+        self.assertEqual((self.tiered(hot), self.tiered(cold)), (900, None))
+        eightfold = self.board(self.company(), ats="eightfold")
+        self.job(eightfold, 1, level_state="fit")
+        self.assertIsNone(self.tiered(eightfold))
 
     def test_the_tier_settings(self):
         self.assertEqual((CFG.tiers.hot_s, CFG.tiers.warm_s, CFG.tiers.dead_s, CFG.tiers.hot_days,
                           CFG.tiers.dead_days), (900, 7200, 86400, 90, 90))
         self.assertIn("greenhouse", CFG.tiers.ats)
         self.assertNotIn("workday", CFG.tiers.ats)
+        self.assertEqual(CFG.tiers.head_ats, ("workday", "oracle_orc"))

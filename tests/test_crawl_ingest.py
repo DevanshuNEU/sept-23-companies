@@ -1189,3 +1189,57 @@ class PartialResultShapeTests(unittest.TestCase):
             ReadResult("ok", (job,), Validators(), partial=True)
         with self.assertRaises(ValueError):
             ReadResult("ok", (job,), Validators(), partial_note="n")
+
+
+class HeadGreenhouse(GreenhouseAdapter):
+    """A Greenhouse adapter with a head read, for the plumbing (#251): `head` answers its whole list as a partial ok."""
+
+    def __init__(self, client):
+        super().__init__(client)
+        self.heads = 0
+
+    def head(self, token):
+        self.heads += 1
+        full = self.list(token, Validators())
+        return ReadResult("ok", full.jobs, Validators(), partial=True, partial_note="head read", head=True)
+
+
+class HeadReadTests(IngestTestCase):
+    """#251 part 2: a hot board on a head ATS is checked with one newest-first request between full reads."""
+
+    def setUp(self):
+        super().setUp()
+        tiers = dataclasses.replace(self.cfg.tiers, ats=(), head_ats=("greenhouse",))
+        self.head_cfg = dataclasses.replace(self.cfg, tiers=tiers)
+
+    def head_read(self, answer, now):
+        client = FakeClient(with_greenhouse_details({US: answer}, None, ids=(SWE, SALES, DATA, BACKEND)))
+        adapter = HeadGreenhouse(client)
+        self.clock[0] = now
+        board = load_board(self.conn, self.board_id)
+        out = read_board(self.conn, board, adapter, run_id=start_job(self.conn, "read_boards"), now=now,
+                         cfg=self.head_cfg)
+        return out, adapter
+
+    def test_a_full_read_records_its_time(self):
+        self.read(ok(), cfg=self.head_cfg)
+        self.assertEqual(self.board()["last_full_read_at"], T0)
+
+    def test_between_full_reads_a_head_read_stores_new_jobs_and_closes_nothing(self):
+        self.read(ok(), cfg=self.head_cfg)
+        later = add_seconds(T0, 900)
+        out, adapter = self.head_read(ok(CHANGED, '"B"'), later)
+        self.assertEqual((adapter.heads, out.result, out.partial), (1, "ok", True))
+        self.assertIsNotNone(self.posting(BACKEND))  # new, stored
+        self.assertIsNone(self.posting(SALES)["closed_at"])  # not listed on the head, still open
+        board = self.board()
+        self.assertEqual((board["last_full_read_at"], board["change_interval_s"], board["next_read_at"]),
+                         (T0, FLOOR, add_seconds(later, 900)))
+
+    def test_once_the_normal_interval_passes_the_read_is_full_again(self):
+        self.read(ok(), cfg=self.head_cfg)
+        later = add_seconds(T0, FLOOR + 60)
+        out, adapter = self.head_read(ok(CHANGED, '"B"'), later)
+        self.assertEqual(adapter.heads, 0)
+        self.assertIsNotNone(self.posting(SALES)["closed_at"])  # a full read closes what it no longer lists
+        self.assertEqual(self.board()["last_full_read_at"], later)

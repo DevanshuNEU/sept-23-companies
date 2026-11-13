@@ -39,7 +39,7 @@ decide_batch = 100
 detail_per_read = 150
 
 # One tick: boards started at most, seconds of budget before no new board starts, top companies read first.
-boards_per_tick = 500
+boards_per_tick = 1500  # #251: room for the 15 minute tier (was 500)
 tick_budget_s = 1500
 top_companies = 300
 
@@ -82,8 +82,8 @@ body_refetch_days = 30
 # host and the breaker still hold across all of them, so more threads never mean more requests a second to one host.
 [workers]
 default = 2
-greenhouse = 6
-ashby = 4
+greenhouse = 8  # #251 (was 6); host spacing still caps requests a second
+ashby = 8  # #251 (was 4)
 lever = 1
 workable = 1
 

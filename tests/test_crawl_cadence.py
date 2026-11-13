@@ -182,7 +182,7 @@ class DueBoardTests(StoreTestCase):
         late = self.board(c, last_read="ok", last_read_at=ago(2 * DAY), next_read_at=ago(3600))
         early = self.board(c, last_read="ok", last_read_at=ago(5 * DAY), next_read_at=ago(2 * DAY))
         never = self.board(c)
-        self.assertEqual(self.due(), [never, early, late])
+        self.assertEqual(self.due(), [never, late, early])  # #251: late waits 47 hours, early 72, so late first
 
     def test_plan_company_board_is_due_after_the_floor_even_if_next_read_is_later(self):
         plan = self.company()
@@ -212,6 +212,15 @@ class DueBoardTests(StoreTestCase):
         plan_late = self.board(plan, last_read="ok", last_read_at=ago(DAY), next_read_at=ago(60))
         plan_never = self.board(plan)
         self.assertEqual(self.due(plan_ids={plan}), [plan_never, plan_late, never_other, late])
+
+    def test_a_board_on_a_short_wait_comes_before_a_long_overdue_one(self):
+        # #251: a hot board (15 minute wait) is read before a warm or quiet board that has waited longer, so a
+        # backlog never holds back the boards where his jobs appear.
+        c = self.company()
+        overdue = self.board(c, last_read="ok", last_read_at=ago(3 * DAY), next_read_at=ago(DAY))
+        hot = self.board(c, last_read="ok", last_read_at=ago(960), next_read_at=ago(60))
+        warm = self.board(c, last_read="ok", last_read_at=ago(7300), next_read_at=ago(100))
+        self.assertEqual(self.due(), [hot, warm, overdue])
 
     def test_limit_applies_after_ordering(self):
         plan = self.company()

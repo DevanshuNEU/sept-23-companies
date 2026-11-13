@@ -41,6 +41,7 @@ class _Work:
     adapter: Adapter
     view: object
     full: bool
+    head: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ _DONE = object()  # on the result queue: one worker has finished
 def _list_one(work: _Work, clock: Callable[[], float]) -> Listed:
     began = clock()
     try:
-        result = list_board(work.adapter, work.board, full=work.full)
+        result = list_board(work.adapter, work.board, full=work.full, head=work.head)
     except HostTripped as e:
         return Listed(work.board, work.adapter, work.view, None, e.bucket, round((clock() - began) * 1000))
     return Listed(work.board, work.adapter, work.view, result, None, round((clock() - began) * 1000))
@@ -63,6 +64,7 @@ def _list_one(work: _Work, clock: Callable[[], float]) -> Listed:
 
 def list_boards(boards: Sequence[BoardRow], start: Callable[[BoardRow], tuple[Adapter | None, object]],
                 full: Callable[[BoardRow], bool], *, workers: Mapping[str, int] | None,
+                head: Callable[[BoardRow], bool] = lambda board: False,
                 should_stop: Callable[[], bool], clock: Callable[[], float]) -> Iterator[Listed]:
     """Yield one `Listed` per board listed. `workers=None` lists inline, in board order, on the calling thread.
     Otherwise each ATS gets a queue (in the order its first board appears) and `workers.get(ats, workers["default"])`
@@ -76,13 +78,13 @@ def list_boards(boards: Sequence[BoardRow], start: Callable[[BoardRow], tuple[Ad
             if adapter is None:
                 yield Listed(board, None, view, None, None, 0)
                 continue
-            yield _list_one(_Work(board, adapter, view, full(board)), clock)
+            yield _list_one(_Work(board, adapter, view, f := full(board), not f and head(board)), clock)
         return
-    yield from _fan_out(boards, start, full, workers, should_stop, clock)
+    yield from _fan_out(boards, start, full, workers, should_stop, clock, head)
 
 
 def _fan_out(boards: Sequence[BoardRow], start, full, workers: Mapping[str, int], should_stop,
-             clock) -> Iterator[Listed]:
+             clock, head=lambda board: False) -> Iterator[Listed]:
     results: queue.Queue = queue.Queue()
     abort = threading.Event()
     queues: dict[str, queue.Queue] = {}
@@ -120,7 +122,7 @@ def _fan_out(boards: Sequence[BoardRow], start, full, workers: Mapping[str, int]
             if adapter is None:
                 results.put(Listed(board, None, view, None, None, 0))
                 continue
-            item = _Work(board, adapter, view, full(board))
+            item = _Work(board, adapter, view, f := full(board), not f and head(board))
             q = queues.get(board.ats)
             if q is None:
                 q = queues[board.ats] = queue.Queue()

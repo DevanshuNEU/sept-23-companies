@@ -16,7 +16,7 @@ from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.config import CrawlConfig
 from outreach.store.timefmt import ISO_FMT
 
-__all__ = ["tier_wait_s", "next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "low_yield", "plan_company_ids", "due_boards",
+__all__ = ["tier_wait_s", "head_read_due", "next_interval_s", "error_backoff_s", "add_seconds", "last_new_age_s", "low_yield", "plan_company_ids", "due_boards",
            "switched_off_boards"]
 
 # Ruling 5: an erroring board waits 6, 12, then 24 hours and stays at 24. The 7-day ceiling is for quiet boards only.
@@ -88,16 +88,26 @@ _HOT_SQL = ("SELECT 1 FROM posting p JOIN decision d ON d.posting_id = p.posting
             "LIMIT 1")
 
 
+def head_read_due(board: BoardRow, now: str, cfg: CrawlConfig) -> bool:
+    """True when the board is read with one newest-first request instead of a full read (#251 part 2): its ATS has a
+    head read, its last read was no error, and its last full read is younger than its normal interval."""
+    if board.ats not in cfg.tiers.head_ats or board.last_full_read_at is None or board.last_read == "error":
+        return False
+    return add_seconds(board.last_full_read_at, board.change_interval_s or cfg.floor_s) > now
+
+
 def tier_wait_s(conn: sqlite3.Connection, board: BoardRow, now: str, cfg: CrawlConfig) -> int | None:
     """Seconds a board waits after a good read under the speed tiers (#251), or None when its ATS is not tiered.
     Hot (`cfg.tiers.hot_s`): a job at his level first seen there in the last `hot_days`. Dead (`dead_s`): nothing new
     for `dead_days`. Warm (`warm_s`): the rest."""
     t = cfg.tiers
-    if board.ats not in t.ats:
+    if board.ats not in t.ats and board.ats not in t.head_ats:
         return None
     since = add_seconds(now, -t.hot_days * 86400)
     if conn.execute(_HOT_SQL, {"board": board.board_id, "since": since}).fetchone():
         return t.hot_s
+    if board.ats in t.head_ats:
+        return None  # a head-read board that is not hot keeps the floor-and-ceiling rhythm
     if last_new_age_s(conn, board, now) > t.dead_days * 86400:
         return t.dead_s
     return t.warm_s

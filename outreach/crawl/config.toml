@@ -117,3 +117,6 @@ hot_days = 90
 dead_days = 90
 ats = ["greenhouse", "ashby", "lever", "workable", "rippling", "breezy", "recruitee", "jazzhr", "bamboohr",
        "teamtailor", "pinpoint", "smartrecruiters"]
+# Head reads (#251 part 2): a hot board here waits hot_s and is checked with one newest-first request (Workday page 1,
+# Oracle sorted by posting date) until its normal interval since the last full read has passed; then a full read.
+head_ats = ["workday", "oracle_orc"]

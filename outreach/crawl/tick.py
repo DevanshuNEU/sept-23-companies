@@ -52,7 +52,8 @@ from outreach.crawl import fanout
 from outreach.crawl.ats import adapter_for, reading_ats
 from outreach.crawl.base import Adapter, JobRef, ReadResult, Validators
 from outreach.crawl.boardstate import BoardRow
-from outreach.crawl.cadence import add_seconds, due_boards, error_backoff_s, plan_company_ids, switched_off_boards
+from outreach.crawl.cadence import (add_seconds, due_boards, error_backoff_s, head_read_due, plan_company_ids,
+                                    switched_off_boards)
 from outreach.crawl.config import CrawlConfig, load_crawl_config
 from outreach.crawl.fanout import Listed
 from outreach.crawl.ingest import full_read_due, read_board
@@ -472,7 +473,8 @@ def _read_boards(conn: sqlite3.Connection, polite: PoliteClient, select: Callabl
         if on_take is not None:
             on_take(run, len(boards), taken)
         listed = fanout.list_boards(boards, run.start, lambda b: full_read_due(conn, b, now), workers=workers,
-                                    should_stop=should_stop, clock=clock)
+                                    should_stop=should_stop, clock=clock,
+                                    head=lambda b: head_read_due(b, now, cfg))
         with contextlib.closing(listed):  # a break or a raise stops the workers now, not when the frame is collected
             try:
                 for item in listed:

@@ -52,6 +52,7 @@ class ReadResult:
     board_name: str = ""
     partial: bool = False
     partial_note: str = ""
+    head: bool = False  # a head read (#251 part 2): one newest-first request, partial by nature, never a full read
 
     def __post_init__(self):
         if self.result not in _RESULTS:
@@ -66,6 +67,8 @@ class ReadResult:
             raise ValueError("only an ok read can be partial")
         if self.partial != bool(self.partial_note):
             raise ValueError("a partial read needs a note, and only a partial read has one")
+        if self.head and not (self.result == "unchanged" or (self.result == "ok" and self.partial)):
+            raise ValueError("a head read is a partial ok or unchanged: it never closes or empties a board")
 
 
 class Adapter(Protocol):

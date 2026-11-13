@@ -28,6 +28,7 @@ import time
 from collections.abc import Callable, Mapping
 
 from outreach.crawl.ats import reading_ats
+from outreach.crawl.base import PLAIN_ICIMS_SQL
 from outreach.crawl.boardstate import BoardRow
 from outreach.crawl.cadence import add_seconds, due_boards, plan_company_ids
 from outreach.crawl.config import ATS_HOSTS, CrawlConfig
@@ -76,7 +77,7 @@ def select_check(conn: sqlite3.Connection, now: str, cfg: CrawlConfig, *,
     rows = conn.execute(
         f"SELECT {columns} FROM board b JOIN company c ON c.company_id = b.company_id "
         "WHERE b.active = 1 AND c.status NOT IN ('closed', 'removed') AND c.merged_into IS NULL "
-        "AND b.ats IN (SELECT value FROM json_each(:ats)) "
+        f"AND b.ats IN (SELECT value FROM json_each(:ats)) AND NOT {PLAIN_ICIMS_SQL} "
         "AND (b.last_read_at IS NULL OR b.last_read_at <= :recent) "
         "AND NOT (b.last_read IS 'error' AND b.next_read_at IS NOT NULL AND b.next_read_at > :now) "
         "ORDER BY (b.last_read_at IS NULL) DESC, b.last_read_at, b.board_id",

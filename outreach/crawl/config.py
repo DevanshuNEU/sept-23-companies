@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 __all__ = ["ATS_HOSTS", "BigBoardConfig", "TiersConfig", "CONFIG_PATH", "CrawlConfig", "load_crawl_config"]
@@ -21,6 +21,9 @@ ATS_HOSTS = {
     "eightfold": "eightfold.ai",  # a tenant on its own host (careers.micron.com) is its own bucket
     # Single-company sites (#263): the exact host, so the rest of google.com and apple.com never shares their bucket.
     "google": "www.google.com", "apple": "jobs.apple.com",
+    # iCIMS Jibe sites (#220): most sit on the company's own host (careers.jhuapl.edu), each its own bucket, spaced
+    # by [ats_interval_s]; the ones iCIMS hosts share jibeapply.com, split per tenant.
+    "icims": "jibeapply.com",
 }
 
 _INT_KEYS = ("floor_s", "ceiling_s", "age_divisor", "defer_s", "max_bytes", "max_redirects", "breaker_failures",
@@ -90,6 +93,9 @@ class CrawlConfig:
     ats_off: dict[str, str]  # ATS name -> why its reader is switched off (#46)
     big_board: BigBoardConfig
     tiers: TiersConfig = TiersConfig()
+    # ATS name -> seconds between two requests to one host its reader sends to, on the host's own key (#220): for an
+    # ATS whose tenants sit on their own domains, so no host suffix can bucket them (`polite.sent_by`).
+    ats_interval_s: dict[str, float] = field(default_factory=dict)
 
     def reads(self, ats: str) -> bool:
         """False for an ATS whose reader is switched off: its boards are never read, probed or slug-probed."""
@@ -164,7 +170,7 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     path = Path(path)
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for key in (*_INT_KEYS, *_NUM_KEYS, "user_agent", "host_interval_s", "split_hosts", "workers",
-                "ats_off", "big_board", "check_ats", "tiers"):
+                "ats_off", "big_board", "check_ats", "tiers", "ats_interval_s"):
         if key not in data:
             raise KeyError(f"{key} is missing from {path.name}")
     for key in _INT_KEYS:
@@ -234,6 +240,15 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
             raise ValueError(f"{key} must be a finite number above 0, got {data[key]!r}")
 
     big = _load_big_board(data["big_board"], data["floor_s"], data["ceiling_s"])
+    per_ats = data["ats_interval_s"]
+    if not isinstance(per_ats, dict):
+        raise ValueError("ats_interval_s must be a table of seconds per ATS")
+    for ats, seconds in per_ats.items():
+        if ats not in ATS_HOSTS:
+            raise ValueError(f"ats_interval_s names {ats}, which is not an ATS the crawler reads "
+                             f"(it reads: {', '.join(sorted(ATS_HOSTS))})")
+        if not _is_positive(seconds):
+            raise ValueError(f"ats_interval_s.{ats} must be finite seconds above 0, got {seconds!r}")
 
     kwargs = {k: data[k] for k in (*_INT_KEYS, *_NUM_KEYS, "user_agent")}
     kwargs["host_interval_s"] = {k.lower(): float(v) for k, v in hosts.items()}
@@ -241,6 +256,7 @@ def load_crawl_config(path: Path = CONFIG_PATH) -> CrawlConfig:
     kwargs["workers"] = dict(workers)
     kwargs["ats_off"] = {ats: reason.strip() for ats, reason in off.items()}
     kwargs["big_board"] = big
+    kwargs["ats_interval_s"] = {ats: float(v) for ats, v in per_ats.items()}
     kwargs["tiers"] = _load_tiers(data["tiers"], path.name)
     kwargs["check_ats"] = tuple(dict.fromkeys(check_ats))
     return CrawlConfig(**kwargs)

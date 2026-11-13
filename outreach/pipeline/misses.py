@@ -141,10 +141,13 @@ def _board(conn: sqlite3.Connection, key: BoardKey) -> sqlite3.Row | None:
 
 
 def _candidate_name(key: BoardKey) -> str | None:
-    """A company name read from the board token: a Workday tenant (`acme.wd5/External`), an iCIMS host's first label,
-    else the token itself (the Greenhouse, Ashby or Lever slug)."""
+    """A company name read from the board token: a Workday tenant (`acme.wd5/External`), an iCIMS host's first label
+    (`careers-acme.icims.com`, `i3-corps.jibeapply.com`), a Jibe site's domain (`careers.garmin.com` is `garmin`,
+    #220), else the token itself (the Greenhouse, Ashby or Lever slug)."""
     if not key.token:
         return None
+    if key.ats == "icims" and not key.token.endswith((".icims.com", ".jibeapply.com")):
+        return (registrable_domain(key.token) or key.token).split(".")[0]
     if key.ats in ("workday", "icims"):
         return key.token.split("/")[0].split(".")[0]
     return key.token

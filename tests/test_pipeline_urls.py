@@ -40,6 +40,12 @@ class BoardKeyTest(unittest.TestCase):
             "https://careers-acme.icims.com/jobs/2210/software-engineer/job":
                 ("icims", "careers-acme.icims.com", "2210"),
             "https://careers-acme.icims.com/jobs/2210/login": ("icims", "careers-acme.icims.com", "2210"),
+            # #220: an iCIMS Jibe site on the company's own host, as the SimplifyJobs feed links it.
+            "https://careers.jhuapl.edu/jobs/60116?icims=1&lang=en-us": ("icims", "careers.jhuapl.edu", "60116"),
+            "https://careers.pnnl.gov/jobs/12171?icims=1": ("icims", "careers.pnnl.gov", "12171"),
+            "https://Careers.Garmin.com/jobs/19695?icims=1": ("icims", "careers.garmin.com", "19695"),
+            "https://jobs.uhsinc.com/jobs/362176?icims=1": ("icims", "jobs.uhsinc.com", "362176"),
+            "https://i3-corps.jibeapply.com/jobs/1234?lang=en-us&icims=1": ("icims", "i3-corps.jibeapply.com", "1234"),
             "https://acme.applytojob.com/apply/AbC123xYz/Software-Engineer": ("jazzhr", "acme", "AbC123xYz"),
             "https://acme.applytojob.com/apply/jobs/details/AbC123xYz": ("jazzhr", "acme", "AbC123xYz"),
             # #244: the Oracle and Amazon links the SimplifyJobs feed carries.
@@ -81,7 +87,11 @@ class BoardKeyTest(unittest.TestCase):
                     "https://evil-oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX/job/1",
                     "https://acme.fa.us2.oraclecloud.com/hcmUI/other/sites/CX/job/1", "https://amazon.jobs/en/teams/x",
                     "https://amazon.jobs.evil.com/en/jobs/1", "https://www.amazon.jobs/en/jobs/abc",
-                    "https://notmyworkdayjobs.com/x/job/y", "https://jobs.lever.co.evil.com/acme/1"):
+                    "https://notmyworkdayjobs.com/x/job/y", "https://jobs.lever.co.evil.com/acme/1",
+                    # #220: a Jibe link needs icims=1 and a job number.
+                    "https://careers.jhuapl.edu/jobs/60116?lang=en-us", "https://careers.jhuapl.edu/jobs?icims=1",
+                    "https://careers.jhuapl.edu/jobs/abc?icims=1", "https://careers.jhuapl.edu/jobs/60116?icims=0",
+                    "https://careers.jhuapl.edu/about/60116?icims=1", "https://localhost/jobs/1?icims=1"):
             with self.subTest(url=url):
                 self.assertIsNone(board_key(url))
 
@@ -105,6 +115,8 @@ class PostingKeyTest(unittest.TestCase):
             ("https://acme.wd5.myworkdayjobs.com/en-US/External/job/Seattle-WA/Software-Engineer_R-1001",
              source_key("workday", "acme.wd5/External", "/job/Seattle-WA/Software-Engineer_R-1001").lower()),
             ("https://apply.workable.com/acme/j/ABC123DEF4", source_key("workable", "acme", "abc123def4")),
+            ("https://careers.jhuapl.edu/jobs/60116?icims=1&lang=en-us",
+             source_key("icims", "careers.jhuapl.edu", "60116")),  # #220: the Jibe reader keys a job by its slug
         ]
         for url, crawler_key in cases:
             with self.subTest(url=url):

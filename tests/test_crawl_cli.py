@@ -227,7 +227,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("error", out)
 
     def test_probe_of_an_ats_with_no_adapter_exits_1(self):
-        code, _, err = self.run_cli(["probe", "icims", "acme.icims.com"], FakeClient({}))
+        code, _, err = self.run_cli(["probe", "gem", "acme"], FakeClient({}))
         self.assertEqual(code, 1)
         self.assertIn("no adapter", err)
 

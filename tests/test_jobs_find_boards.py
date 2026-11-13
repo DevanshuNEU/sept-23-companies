@@ -372,6 +372,23 @@ class CareersStepTest(FindBoardsBase):
         self.assertNotIn("https://read.example/careers", self.client.requests)
         self.assertEqual(report.adapter_unknown, 0)
 
+    def test_a_plain_icims_board_still_gets_a_watched_page_once_icims_has_a_reader(self):
+        # #220: the icims reader reads Jibe sites only, so a company whose one board is on *.icims.com stays unread
+        # and keeps its watched page; a company with a Jibe board is read and gets none.
+        sys.modules.pop("outreach.crawl.ats")  # the real adapter set, which has icims
+        self.assertIn("icims", importlib.import_module("outreach.crawl.ats").supported_ats())
+        add_by_hand(self.conn, name="Icims Works", reason="a friend works there",
+                    ats="icims:careers-icimsworks.icims.com")
+        add_by_hand(self.conn, name="Jibe Works", reason="a friend works there", ats="icims:careers.jibeworks.com")
+        routes = careers_routes()
+        for host in ("orchard.io", "tidepoolapps.com"):
+            routes.setdefault(f"https://{host}/careers", status_response(404))
+            routes.setdefault(f"https://{host}/", status_response(404))
+        self.run_careers(routes)
+        watched = self.watched()
+        self.assertEqual(watched["Icims Works"]["url"], "https://careers-icimsworks.icims.com")
+        self.assertNotIn("Jibe Works", watched)
+
     def test_adapter_module_absent_skips_the_unread_board_step_and_counts_it(self):
         add_by_hand(self.conn, name="Gemco Labs", reason="a friend works there", domain="gemco.example",
                     ats="gem:gemco")

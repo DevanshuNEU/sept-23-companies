@@ -4,9 +4,14 @@ It adds nothing else: no retries, no parsing, no judgment of a status beyond "di
 declared User-Agent comes from the crawl config. A host that keeps failing trips its bucket and the crawler defers
 that bucket's boards with no streak change (a tripped bucket is an outage, not a finding about any one board). A host
 of an ATS whose reader is switched off (`ats_off`, #46) is never sent to: `HostOff`, a `HostTripped`.
+
+An ATS whose tenants sit on their own domains (iCIMS Jibe sites, #220) shares no host suffix to space by. Its reader
+sends inside `sent_by(<ats>)`, and each host it sends to waits that ATS's `[ats_interval_s]` between requests, on its
+own key; the host keeps that wait for every later request through this client, whoever sends it.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 import time
@@ -17,7 +22,22 @@ from pathlib import Path
 from outreach.crawl.config import CrawlConfig
 from outreach.net import FetchError, HttpClient, Response
 
-__all__ = ["HostTripped", "HostOff", "bucket_for", "spacing_key", "PoliteClient"]
+__all__ = ["HostTripped", "HostOff", "bucket_for", "spacing_key", "sent_by", "PoliteClient"]
+
+_sender = threading.local()
+
+
+@contextlib.contextmanager
+def sent_by(ats: str):
+    """Mark the requests this thread sends inside the block as `ats`'s reader's (#220), so a `PoliteClient` spaces each
+    host by that ATS's `[ats_interval_s]` as well as by its bucket. Any client wrapper in between passes the request on
+    in the same thread, so the mark reaches the polite client without a new argument on every client."""
+    before = getattr(_sender, "ats", None)
+    _sender.ats = ats
+    try:
+        yield
+    finally:
+        _sender.ats = before
 
 
 class HostTripped(Exception):
@@ -76,11 +96,12 @@ class PoliteClient:
         self.cfg = cfg
         self._clock = clock
         self._sleep = sleep
-        # One lock guards the two dicts below and nothing else: never a sleep, never a request. Several worker
+        # One lock guards the three dicts below and nothing else: never a sleep, never a request. Several worker
         # threads share one client (#158).
         self._lock = threading.Lock()
         self._next_start: dict[str, float] = {}
         self._failures: dict[str, int] = {}
+        self._floors: dict[str, float] = {}  # spacing key -> the longest [ats_interval_s] a reader sent to it with
 
     def tripped(self, bucket: str) -> bool:
         with self._lock:
@@ -102,9 +123,13 @@ class PoliteClient:
             raise HostOff(bucket, host, ats, self.cfg.ats_off[ats])
         key = spacing_key(host, self.cfg)
         interval = self.cfg.host_interval_s.get(bucket, self.cfg.default_host_interval_s)
+        floor = self.cfg.ats_interval_s.get(getattr(_sender, "ats", None) or "", 0.0)
         with self._lock:
             if self._failures.get(bucket, 0) >= self.cfg.breaker_failures:
                 raise HostTripped(bucket)
+            if floor > self._floors.get(key, 0.0):
+                self._floors[key] = floor
+            interval = max(interval, self._floors.get(key, 0.0))
             # Reserve this request's start slot under the lock, then wait for it outside the lock.
             now = self._clock()
             due = self._next_start.get(key, now)

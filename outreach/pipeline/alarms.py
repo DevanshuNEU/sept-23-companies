@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from outreach.crawl.ats import reading_ats
+from outreach.crawl.base import PLAIN_ICIMS_SQL
 from outreach.crawl.config import CrawlConfig, load_crawl_config
 from outreach.pipeline.config import load_pipeline_config
 from outreach.pipeline.scorecard import EVENT_KIND
@@ -143,7 +144,7 @@ def _boards_overdue(conn: sqlite3.Connection, now: str, cfg: CrawlConfig) -> lis
     count = conn.execute(
         "SELECT count(*) FROM board b JOIN company c ON c.company_id = b.company_id "
         "WHERE b.active = 1 AND c.status NOT IN ('closed', 'removed') AND c.merged_into IS NULL "
-        "AND b.next_read_at IS NOT NULL AND b.ats IN (SELECT value FROM json_each(?)) "
+        f"AND b.next_read_at IS NOT NULL AND b.ats IN (SELECT value FROM json_each(?)) AND NOT {PLAIN_ICIMS_SQL} "
         "AND julianday(b.next_read_at) < julianday(?) - coalesce(b.change_interval_s, ?) / 86400.0",
         (json.dumps(sorted(reading_ats(cfg))), iso_utc(now), cfg.floor_s)).fetchone()[0]
     if count < OVERDUE_BOARDS:

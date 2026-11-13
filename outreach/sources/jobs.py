@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 
 from outreach import identity
 from outreach.crawl import config as crawl_config  # stdlib only: the one [ats_off] list (#46)
+from outreach.crawl.base import plain_icims  # stdlib only: a *.icims.com board has no reader (#220)
 from outreach.identity import StoreResolveReport, resolve_store
 from outreach.review.config import ReviewConfig, load_review_config
 from outreach.review.items import decided_before, raise_item
@@ -562,7 +563,7 @@ def _unread_boards(conn: sqlite3.Connection, careers: _Careers, report: FindBoar
         company_id = row["company_id"]
         boards = conn.execute("SELECT ats, token FROM board WHERE company_id = ? AND active = 1 ORDER BY board_id",
                               (company_id,)).fetchall()
-        if any(b["ats"] in supported for b in boards):
+        if any(b["ats"] in supported and not plain_icims(b["ats"], b["token"]) for b in boards):
             continue
         try:
             usable, _ = _company_domains(conn, company_id)

@@ -153,6 +153,15 @@ class DiagnoseTests(MissCase):
         got = diagnose(conn, "https://jobs.ashbyhq.com/ACME/ABC-DEF")
         self.assertEqual((got.cause, got.posting_id), ("found", pid))
 
+    def test_a_jibe_link_names_its_company_by_the_domain_not_the_careers_label(self):
+        # #220: careers.garmin.com is Garmin's own site; its first label "careers" names no company.
+        garmin = seed_company(self.conn, "Garmin")
+        got = diagnose(self.conn, "https://careers.garmin.com/jobs/19695?icims=1")
+        self.assertEqual((got.cause, got.company_id), ("no_board", garmin))
+        self.assertEqual(got.detail["token"], "careers.garmin.com")
+        i3 = seed_company(self.conn, "I3 Corps")
+        self.assertEqual(diagnose(self.conn, "https://i3-corps.jibeapply.com/jobs/12?icims=1").company_id, i3)
+
     def test_workday_site_case_differs_from_the_link(self):
         conn = self.conn
         acme = seed_company(conn, "Acme")

@@ -185,6 +185,19 @@ class ApproveTest(ApproveBase):
         self.assertIn("dash", warns)
         self.assertEqual(self.message()["state"], "approved")
 
+    def test_approve_refuses_an_address_that_bounced_before(self):
+        """The dead-address list holds the address (any case): approve refuses it with a plain sentence, so the
+        draft never goes to the sender only to be sent back to drafts on every approve."""
+        self.conn.execute("INSERT INTO bounced_address(address, first_seen_at, source) VALUES "
+                          "('PAT@Acme.example', '2026-11-05T15:00:00Z', 'bounce')")
+        res = self.approve()
+        self.assertEqual(res.status_code, 409, res.text)
+        self.assertEqual(res.json()["code"], "not_allowed")
+        self.assertIn("This address bounced before, so Knock will not send to it again.", res.json()["message"])
+        row = self.message()
+        self.assertEqual((row["state"], row["revision"], row["approved_at"]), ("drafted", 1, None))
+        self.assertEqual(self.events(), [])
+
     def test_approve_stale_revision_conflicts_and_nothing_changes(self):
         res = self.approve(revision=5)
         self.assertEqual(res.status_code, 409, res.text)

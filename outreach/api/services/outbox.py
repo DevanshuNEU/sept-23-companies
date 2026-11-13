@@ -23,12 +23,14 @@ from outreach.api.revisions import bump
 from outreach.drafts.checks import draft_input, email_domain, run_checks
 from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.outcomes.correct import correct_outcome
+from outreach.sending.claim import bounced_before
 from outreach.sending.followups import stop_planned
 from outreach.store.writes import append_event
 
 NOT_SAVED = "Nothing was saved."
 CLAIMED = ("sending", "send_unknown", "sent")
 ALREADY_OUT = "It is already being sent or was sent."
+BOUNCED_BEFORE = "This address bounced before, so Knock will not send to it again."
 SKIPPABLE = ("drafted", "approved", "failed")
 
 
@@ -80,12 +82,15 @@ def mail_domain_of(conn: sqlite3.Connection, message_id: int) -> str | None:
 
 
 def approve_message(ctx: WriteCtx, message_id: int, revision: int, banned: list) -> int:
-    """Approves a clean draft and returns its touch id. Only a `drafted` message at its loaded revision; any block
-    raises `Blocked` (nothing written here)."""
+    """Approves a clean draft and returns its touch id. Only a `drafted` message at its loaded revision, to an
+    address that never bounced (`bounced_address`); any block raises `Blocked` (nothing written here)."""
     row = _message(ctx.conn, message_id)
     _fresh(row, revision)
     if row["state"] != "drafted":
         raise ApiProblem("not_allowed", "Only a draft can be approved.")
+    email = ctx.conn.execute("SELECT email FROM person WHERE person_id = ?", (row["person_id"],)).fetchone()["email"]
+    if bounced_before(ctx.conn, email):  # the dead-address list, any account, any case: the sender refuses it too
+        raise ApiProblem("not_allowed", f"{BOUNCED_BEFORE} Nothing was approved.")
     found = _checks(ctx, message_id, banned)
     if any(c["severity"] == "block" for c in found):
         raise Blocked(message_id, revision, found)

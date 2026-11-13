@@ -8,7 +8,6 @@ from outreach.sending.status import sending_snapshot
 from outreach.store.writes import append_event
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
-from tests.sendtest import use_solo_config
 
 TODAY = "2026-11-10"  # NOW is Tuesday 11:14 in New York
 NEXT_DAY = "2026-11-11T15:14:00Z"
@@ -21,7 +20,6 @@ class TodayCase(ApiCase):
     lean_today = True  # these tests are about the lean build on read, so they turn it on
 
     def setUp(self):
-        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
         super().setUp()
 
     def ranked(self, name: str, points: float = 5.0, *, lanes=("level_role",), status="candidate", role=True,
@@ -165,10 +163,16 @@ class Build(TodayCase):
         self.assertGreater(snap.limit_today, 0)
         return snap.limit_today
 
+    def general(self) -> int:
+        """The account that sends the general lane (account 1 only reads now)."""
+        from outreach.sending import accounts
+        return accounts.sync(self.conn, load_send_config(), NOW)["devanshuchi9@gmail.com"].account_id
+
     def prove(self):
-        """Gmail is shown to keep the sender's marker, so every message goes, not just the first."""
-        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
-                     at="2026-11-01T12:00:00Z", idempotency_key="proof")
+        """Gmail is shown to keep the sender's marker on the sending account, so every message goes, not just the
+        first."""
+        from tests.sendtest import prove
+        prove(self.conn, self.general())
 
     def test_capacity_is_seven_linkedin_plus_the_senders_effective_limit(self):
         self.ranked("A")
@@ -179,7 +183,8 @@ class Build(TodayCase):
         self.prove()
         limit = self.send_limit()
         self.ranked("A")
-        s.send_first(self.conn, s.touch(self.conn, s.person(self.conn, s.company(self.conn, "Elsewhere"), "Pat")),
+        s.send_first(self.conn, s.touch(self.conn, s.person(self.conn, s.company(self.conn, "Elsewhere"), "Pat"),
+                                        account_id=self.general()),
                      "2026-11-10T14:00:00Z")  # one email already went out today
         self.assertEqual(self.get("/api/sending").json()["sentToday"], 1)
         self.assertEqual(self.view()["capacity"], 7 + limit)
@@ -194,14 +199,15 @@ class Build(TodayCase):
         self.conn.execute("DELETE FROM daily_list_entry")  # a new day's list would be built from the same rule
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7 + self.send_limit())
-        self.conn.execute("UPDATE sender SET auth_state = 'signed_out'")
-        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")  # as the tick does
+        general = self.general()
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?", (general,))
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")
         self.assertEqual(self.view()["capacity"], 7)
-        self.conn.execute("UPDATE sender SET auth_state = 'ok'")
-        self.conn.execute("UPDATE sender_account SET auth_state = 'ok' WHERE account_id = 1")
-        append_event(self.conn, entity="message", entity_id=2, kind="marker_missing", actor="sender",
+        self.conn.execute("UPDATE sender_account SET auth_state = 'ok' WHERE account_id = ?", (general,))
+        proof_mail = self.conn.execute("SELECT m.message_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                                       "WHERE t.account_id = ?", (general,)).fetchone()[0]
+        append_event(self.conn, entity="message", entity_id=proof_mail, kind="marker_missing", actor="sender",
                      at="2026-11-01T12:00:00Z", idempotency_key="missing")  # Gmail dropped a sent email's marker
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")

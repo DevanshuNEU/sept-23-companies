@@ -113,14 +113,23 @@ export interface TodayView {
 }
 
 // Outbox (spec 13.4)
+// What one sender account does today (outreach.sending.status.ACCOUNT_STATES).
+export type AccountState = 'sending' | 'paused_by_you' | 'paused_hard_block' | 'signed_out' | 'reading_only' | 'not_sending_yet';
+export type AuthState = 'unknown' | 'ok' | 'signed_out' | 'wrong_account' | 'app_closed';
+// One account on the strip: its line is the address, then `text` ("4 of 15 today", "reading replies only").
+export interface AccountStatus {
+  address: string; lane: 'sponsor' | 'general' | null; sends: boolean; state: AccountState; text: string;
+  paused: boolean; pauseReason: string; authState: AuthState; sentToday: number; limit: number;
+}
 export interface SendingStatus {
   state: SenderState; pausedReason: string; pausedAt: IsoTime | null; gmailMessage: string | null;
-  sentToday: number; limitToday: number; rampLevel: number; rampLevels: number[]; nextLimitIfClean: number;
+  sentToday: number; limitToday: number; rampLevel: number; rampLevels: number[]; nextLimitIfClean: number; // sums over the sending accounts; the ramp is the lead account's
   lastStepDown: { at: IsoTime; reason: string } | null;
   signals: { bounceRate3d: number; gmailErrorsToday: number; stopRepliesToday: number };
   window: { start: string; end: string };
   nextSend: { at: IsoTime; tz: string; touchId: Id; personName: string; companyName: string } | null;
   noneReason: string | null; revision: Revision;
+  accounts: AccountStatus[]; // every account, in config order
 }
 export type CheckFix =
   | { kind: 'compare'; otherMessageId: Id } | { kind: 'review_item'; reviewId: Id }
@@ -156,7 +165,8 @@ export interface OutboxDetail {
   asOf: IsoTime; item: OutboxItem; body: string; hook: { text: string; on: IsoDate | null }; project: string; role: RoleToName | null;
   checks: Check[]; savedBy: SavedBy; savedAt: IsoTime;
   followups: { seq: 1 | 2 | 3 | 4; dueOn: IsoDate; sentAt: IsoTime | null; state: MessageState }[];
-  firstSentAt: IsoTime | null; gmailThreadUrl: string | null; // derived from touch.gmail_thread_id
+  firstSentAt: IsoTime | null; gmailThreadUrl: string | null; // derived from touch.gmail_thread_id, in the touch's own Gmail account
+  fromAccount: { address: string | null; text: string }; // the touch's account, or the one the sender would pick, or what it waits for
   reply: { from: string; at: IsoTime; text: string; kind: ReplyKind } | null; touchRevision: Revision;
   held: { touchId: Id; personName: string; state: MessageState; seq: 0 | 1 | 2 | 3 | 4; dueOn: IsoDate | null }[];
   thread: ThreadMessage[]; bounceReason: string | null;

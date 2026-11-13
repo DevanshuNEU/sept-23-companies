@@ -231,6 +231,36 @@ class SpreadAcrossWindowTest(unittest.TestCase):
             self.assertEqual(len(result.sends), 15, f"seed {seed}")
 
 
+class EverySendingAccountTest(unittest.TestCase):
+    """Two accounts send at once (Task A11): the general lane from devanshuchi9, the sponsor lane from a third Gmail
+    account standing in for Northeastern. Each runs its own ramp and its own day; a company hears from one only."""
+
+    def test_the_simulation_runs_every_sending_account(self):
+        neu = "chicholikar.d@northeastern.edu"
+        cfg = dataclasses.replace(CFG, accounts=tuple(
+            dataclasses.replace(a, kind="gmail", mailapp_account=None, sends=True) if a.address == neu else a
+            for a in CFG.accounts))
+        scenario = dataclasses.replace(short(2, [morning(1, 40), morning(2, 40)], companies=40, people=1),
+                                       sponsors=frozenset(range(0, 40, 2)))
+        result = simulate(scenario, seed=3, cfg=cfg)
+        self.addCleanup(result.close)
+        by_account = Counter(s.account for s in result.sends)
+        self.assertEqual(set(by_account), {"devanshuchi9@gmail.com", neu})
+        for s in result.sends:
+            self.assertEqual(s.account, neu if s.company % 2 == 0 else "devanshuchi9@gmail.com", s)
+        self.assertEqual(set(result.account_days), {"devanshuchi9@gmail.com", neu})
+        for address, rows in result.account_days.items():
+            self.assertEqual([r.sent for r in rows],
+                             [sum(1 for s in result.sends if s.account == address and ny_date(s.at) == r.day)
+                              for r in rows], address)
+            self.assertTrue(all(r.sent <= r.effective_limit for r in rows), address)
+        self.assertEqual(result.days, result.account_days["devanshuchi9@gmail.com"])
+        companies = defaultdict(set)
+        for s in result.sends:
+            companies[s.company].add(s.account)
+        self.assertTrue(all(len(a) == 1 for a in companies.values()))
+
+
 class StopRulesTest(unittest.TestCase):
     def run_scenario(self, scenario: Scenario):
         result = simulate(scenario, cfg=CFG)

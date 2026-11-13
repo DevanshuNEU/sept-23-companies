@@ -9,7 +9,11 @@ clock, `OUTREACH_DB` or the real Gmail folder: the store is a new temporary file
 Events stand in for people and for Gmail. Approve, resume, tag, no-go and follow-up drafting stand in for Devanshu
 and Claude, and write the store directly with seed SQL (the simulation only: the product code has no such path).
 Reply, bounce, send error and sign-out script what Gmail does. A person is named `c<company>p<index>` (company 0,
-person 0 is `c0p0`), or by `nth`, the position of a first email among those sent so far.
+person 0 is `c0p0`), or by `nth`, the position of a first email among those sent so far (from any account).
+
+Every account that sends runs, each with its own fake mailbox, ramp and day (`SimResult.account_days`); a company in
+`Scenario.sponsors` is in the sponsor lane, so its mail goes from the sponsor account when one sends. `days` and
+`fake` are the lead account's (the first that sends), which a one-account scenario reads as before.
 
 `TWO_WEEKS` is the scenario the command line prints and the main test asserts: Monday 2026-11-02 (the day after
 daylight saving ends) to Friday 2026-11-13, with a policy bounce on day 4, a Gmail 429 on day 8, a reply that holds
@@ -100,6 +104,7 @@ class Scenario:
     held_back: frozenset[int] = frozenset()   # companies `approve count` skips (only named events approve them)
     roles: Mapping[str, str] = field(default_factory=dict)  # person key to role kind (default engineer, manager, founder)
     sizes: Mapping[int, int] = field(default_factory=dict)  # company index to its size fact (#229); none: no size
+    sponsors: frozenset[int] = frozenset()  # companies that sponsor (a sponsorship fact): the sponsor lane
 
 
 @dataclass(frozen=True)
@@ -139,21 +144,23 @@ class SendRecord:
     to: str
     zone: str
     marker: str = ""     # the sender's X-Outreach-Id on it (the claimed token)
+    account: str = ""    # the account that sent it
 
 
 @dataclass
 class SimResult:
     scenario: Scenario
     cfg: SendConfig
-    days: tuple[DayRow, ...]
-    sends: tuple[SendRecord, ...]
+    days: tuple[DayRow, ...]  # the lead account's (the first that sends)
+    sends: tuple[SendRecord, ...]  # every account's, in time order
     conn: sqlite3.Connection
-    fake: FakeGmail
+    fake: FakeGmail  # the lead account's mailbox
     people: dict[str, PersonInfo]
     notices: list[tuple[datetime, str, str]]
     folder: Path
     ticks: int
     seconds: float
+    account_days: dict[str, tuple[DayRow, ...]] = field(default_factory=dict)  # each sending account's days
 
     def close(self) -> None:
         """Close the store and remove its folder."""
@@ -238,14 +245,16 @@ class _Run:
         self.days = cal_days(scenario.start, scenario.days, cfg)
         self.clock = FakeClock(ny(self.days[0], DAY_START))
         # One fake mailbox per Gmail account. The imported email is account 1's (the old mailer's); the people are
-        # mailed from the account that sends (the general lane), and the scripted replies, bounces and sign-outs
-        # happen in its mailbox (`self.fake`).
+        # mailed from every account that sends, by lane. A reply or a bounce lands in the mailbox that sent the email;
+        # a send error and a sign-out happen in the lead account's (`self.fake`) unless the event names an account.
         gmails = [a.address for a in cfg.accounts if a.kind == "gmail"]
         self.fakes = {address: FakeGmail(clock=self.clock, account=address, id_prefix="" if i == 0 else chr(97 + i),
                                          reconcile_after_minutes=cfg.reconcile_after_minutes)
                       for i, address in enumerate(gmails)}
-        sender = next(a for a in cfg.accounts if a.sends and a.address in self.fakes)
-        self.sender = sender.address
+        self.senders = [a.address for a in cfg.accounts if a.sends and a.address in self.fakes]
+        if not self.senders:
+            raise ValueError("the simulation needs an account that sends through Gmail")
+        self.sender = self.senders[0]
         self.fake = self.fakes[self.sender]
         self.old_mail = self.fakes.get(cfg.accounts[0].address, self.fake)
         self.notices: list[tuple[datetime, str, str]] = []
@@ -274,6 +283,11 @@ class _Run:
                         "INSERT INTO evidence(company_id, fact, value, num_low, num_high, confidence, source_kind, "
                         "source_ref, recorded_at) VALUES (?, 'size', 'simulated', ?, ?, 'estimate', 'hand', '', ?)",
                         (company_id, s.sizes[c], s.sizes[c], STAMP))
+                if c in s.sponsors:
+                    self.conn.execute(
+                        "INSERT INTO evidence(company_id, fact, value, confidence, source_kind, source_ref, "
+                        "recorded_at) VALUES (?, 'sponsorship', 'yes', 'confirmed', 'hand', '', ?)",
+                        (company_id, STAMP))
                 zone = s.zones[c % len(s.zones)]
                 for p in range(s.people_per_company):
                     self._seed_person(company_id, company, c, p, zone)
@@ -330,21 +344,28 @@ class _Run:
         getattr(self, "_do_" + event.action)(event.args)
 
     def _first_emails(self) -> list[tuple]:
-        return [(m, s) for m, s, _ in self.fake.sent if m.in_reply_to is None]
+        """Every first email sent so far, from any sending account, in time order, with the mailbox it left."""
+        firsts = [(at, n, m, s, self.fakes[a]) for a in self.senders
+                  for n, (m, s, at) in enumerate(self.fakes[a].sent) if m.in_reply_to is None]
+        return [(m, s, fake) for _, _, m, s, fake in sorted(firsts, key=lambda x: (x[0], x[1]))]
 
-    def _target(self, args: Mapping, what: str) -> tuple[PersonInfo, Sent]:
+    def _target(self, args: Mapping, what: str) -> tuple[PersonInfo, Sent, FakeGmail]:
         firsts = self._first_emails()
         if "nth" in args:
             try:
-                outgoing, sent = firsts[args["nth"]]
+                outgoing, sent, fake = firsts[args["nth"]]
             except IndexError:
                 raise ValueError(f"{what}: no first email number {args['nth']} was sent yet") from None
-            return self.by_email[outgoing.to], sent
+            return self.by_email[outgoing.to], sent, fake
         info = self.people[args["person"]]
-        for outgoing, sent in firsts:
+        for outgoing, sent, fake in firsts:
             if outgoing.to == info.email:
-                return info, sent
+                return info, sent, fake
         raise ValueError(f"{what}: no email to {info.key} was sent yet")
+
+    def _mailbox(self, args: Mapping) -> FakeGmail:
+        """The mailbox an event names (`account`), else the lead account's."""
+        return self.fakes[args["account"]] if "account" in args else self.fake
 
     def _do_approve(self, args: Mapping) -> None:
         stamp = _utc(self.clock())
@@ -362,15 +383,15 @@ class _Run:
                                   "WHERE message_id = ? AND state = 'drafted'", (stamp, stamp, message_id))
 
     def _do_reply(self, args: Mapping) -> None:
-        info, sent = self._target(args, "reply")
-        self.fake.deliver_reply(sent, f"{info.name} <{info.email}>", new_thread=bool(args.get("new_thread")))
+        info, sent, fake = self._target(args, "reply")
+        fake.deliver_reply(sent, f"{info.name} <{info.email}>", new_thread=bool(args.get("new_thread")))
 
     def _do_bounce(self, args: Mapping) -> None:
-        _, sent = self._target(args, "bounce")
-        self.fake.deliver_bounce(sent, dsn=args.get("dsn", "hard"))
+        _, sent, fake = self._target(args, "bounce")
+        fake.deliver_bounce(sent, dsn=args.get("dsn", "hard"))
 
     def _do_send_error(self, args: Mapping) -> None:
-        self.fake.fail_next_send(GmailError(args.get("kind", "rate_limit"), args.get("status", 429),
+        self._mailbox(args).fail_next_send(GmailError(args.get("kind", "rate_limit"), args.get("status", 429),
                                             args.get("detail", "simulated")))
 
     def _do_resume(self, args: Mapping) -> None:
@@ -381,7 +402,7 @@ class _Run:
             accounts.clear_hard_blocks(self.conn, stamp)
 
     def _do_tag(self, args: Mapping) -> None:
-        info, _ = self._target(args, "tag")
+        info, _, _ = self._target(args, "tag")
         state = self.conn.execute("SELECT state FROM touch WHERE touch_id = ?", (info.touch_id,)).fetchone()[0]
         if state != "replied":
             raise ValueError(f"tag: {info.key} has not been read as a reply yet (touch is {state})")
@@ -414,10 +435,10 @@ class _Run:
                                   (stamp, row["message_id"]))
 
     def _do_sign_out(self, args: Mapping) -> None:
-        self.fake.fail_profile(GmailError("auth", 401, "invalid_grant"))
+        self._mailbox(args).fail_profile(GmailError("auth", 401, "invalid_grant"))
 
     def _do_sign_in(self, args: Mapping) -> None:
-        self.fake.fail_profile(None)
+        self._mailbox(args).fail_profile(None)
 
     # the clock
 
@@ -426,11 +447,16 @@ class _Run:
         candidates = [now + STEP, end]
         if self.pending:
             candidates.append(self.pending[0].at)
-        gap = accounts.in_play(self.conn, self.cfg)[self.sender].next_send_at
-        gap_at = datetime.strptime(gap, ISO_FMT).replace(tzinfo=timezone.utc) if gap else None
-        if gap_at is not None and gap_at > now:
-            candidates.append(gap_at)  # while the gap runs, nothing sooner can send
-        else:
+        rows = accounts.in_play(self.conn, self.cfg)
+        free = False  # some sending account has no gap running, so the queue's own times count
+        for address in self.senders:
+            gap = rows[address].next_send_at
+            gap_at = datetime.strptime(gap, ISO_FMT).replace(tzinfo=timezone.utc) if gap else None
+            if gap_at is not None and gap_at > now:
+                candidates.append(gap_at)  # while its gap runs, nothing sooner can send from this account
+            else:
+                free = True
+        if free:
             candidates += [v.earliest_at for v in queue_schedule(self.conn, now, self.cfg).values()
                            if v.earliest_at is not None and v.earliest_at > now]
         return min(max(min(candidates), now + TICK), end)
@@ -455,9 +481,12 @@ class _Run:
 
     # the result
 
-    def day_rows(self) -> tuple[DayRow, ...]:
+    def account_days(self) -> dict[str, tuple[DayRow, ...]]:
+        return {address: self.day_rows(address) for address in self.senders}
+
+    def day_rows(self, address: str | None = None) -> tuple[DayRow, ...]:
         rows = []
-        account = accounts.in_play(self.conn, self.cfg)[self.sender]
+        account = accounts.in_play(self.conn, self.cfg)[address or self.sender]
         for day in self.days:
             row = self.conn.execute("SELECT send_limit, outcome FROM send_day WHERE account_id = ? AND day = ?",
                                     (account.account_id, day.isoformat())).fetchone()
@@ -469,15 +498,17 @@ class _Run:
 
     def send_records(self) -> tuple[SendRecord, ...]:
         out = []
-        for outgoing, sent, at in self.fake.sent:
-            info = self.by_email.get(outgoing.to)
-            if info is None:
-                continue
-            out.append(SendRecord(at=at, company=info.company, person=info.key, role_kind=info.role_kind,
-                                  seq=1 if outgoing.in_reply_to else 0, message_id=sent.rfc_message_id,
-                                  in_reply_to=outgoing.in_reply_to, thread_id=sent.thread_id, to=outgoing.to,
-                                  zone=info.zone, marker=outgoing.marker))
-        return tuple(out)
+        for address in self.senders:
+            for n, (outgoing, sent, at) in enumerate(self.fakes[address].sent):
+                info = self.by_email.get(outgoing.to)
+                if info is None:
+                    continue
+                out.append((at, n, SendRecord(
+                    at=at, company=info.company, person=info.key, role_kind=info.role_kind,
+                    seq=1 if outgoing.in_reply_to else 0, message_id=sent.rfc_message_id,
+                    in_reply_to=outgoing.in_reply_to, thread_id=sent.thread_id, to=outgoing.to, zone=info.zone,
+                    marker=outgoing.marker, account=address)))
+        return tuple(record for _, _, record in sorted(out, key=lambda x: (x[0], x[1])))
 
 
 def cal_days(start: date, n: int, cfg: SendConfig) -> list[date]:
@@ -501,7 +532,7 @@ def simulate(scenario: Scenario, *, seed: int = 7, cfg: SendConfig | None = None
         run.run()
         return SimResult(scenario=scenario, cfg=cfg, days=run.day_rows(), sends=run.send_records(), conn=run.conn,
                          fake=run.fake, people=run.people, notices=run.notices, folder=run.folder, ticks=run.ticks,
-                         seconds=time.monotonic() - began)
+                         seconds=time.monotonic() - began, account_days=run.account_days())
     except BaseException:
         run.conn.close()
         shutil.rmtree(run.folder, ignore_errors=True)
@@ -509,11 +540,17 @@ def simulate(scenario: Scenario, *, seed: int = 7, cfg: SendConfig | None = None
 
 
 def format_table(result: SimResult) -> list[str]:
-    """One line per day, then the totals: what the command line prints."""
-    lines = ["day                 start  effective  sent  outcome"]
-    for row in result.days:
-        lines.append(f"{row.day.isoformat()} {row.day.strftime('%a')}  {row.start_limit:>5}  {row.effective_limit:>9}  "
-                     f"{row.sent:>4}  {row.outcome or '-'}")
+    """One line per day for each sending account (named above its days when more than one sends), then the totals:
+    what the command line prints."""
+    lines = []
+    tables = result.account_days or {"": result.days}
+    for address, days in tables.items():
+        if len(tables) > 1:
+            lines.append(address)
+        lines.append("day                 start  effective  sent  outcome")
+        for row in days:
+            lines.append(f"{row.day.isoformat()} {row.day.strftime('%a')}  {row.start_limit:>5}  "
+                         f"{row.effective_limit:>9}  {row.sent:>4}  {row.outcome or '-'}")
     firsts = sum(1 for s in result.sends if s.seq == 0)
     lines.append(f"{len(result.sends)} emails sent ({firsts} first emails, {len(result.sends) - firsts} follow-ups), "
                  f"{len(result.notices)} notice(s), {result.ticks} ticks in {result.seconds:.1f} s")

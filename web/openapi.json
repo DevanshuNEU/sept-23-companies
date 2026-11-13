@@ -1,6 +1,91 @@
 {
   "components": {
     "schemas": {
+      "AccountStatus": {
+        "description": "One sender account on the strip: its line is `address` then `text` (\"4 of 15 today\").",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "authState": {
+            "enum": [
+              "unknown",
+              "ok",
+              "signed_out",
+              "wrong_account",
+              "app_closed"
+            ],
+            "title": "Authstate",
+            "type": "string"
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sponsor",
+                  "general"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lane"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "pauseReason": {
+            "title": "Pausereason",
+            "type": "string"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "sends": {
+            "title": "Sends",
+            "type": "boolean"
+          },
+          "sentToday": {
+            "title": "Senttoday",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "sending",
+              "paused_by_you",
+              "paused_hard_block",
+              "signed_out",
+              "reading_only",
+              "not_sending_yet"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "lane",
+          "sends",
+          "state",
+          "text",
+          "paused",
+          "pauseReason",
+          "authState",
+          "sentToday",
+          "limit"
+        ],
+        "title": "AccountStatus",
+        "type": "object"
+      },
       "AddFromBenchBody": {
         "additionalProperties": false,
         "description": "Add a bench company to today's list. `idempotencyKey` is `bench:<companyId>:add`: once it landed, the same\nkey answers with the row and writes nothing.",
@@ -2510,6 +2595,32 @@
         "title": "FindingsView",
         "type": "object"
       },
+      "FromAccount": {
+        "description": "The account an email goes from: the touch's own once sent; before that, the one the sender would pick, or\nno address and the sentence for what it waits for.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "text"
+        ],
+        "title": "FromAccount",
+        "type": "object"
+      },
       "FunnelFrom": {
         "properties": {
           "count": {
@@ -4636,6 +4747,9 @@
             "title": "Followups",
             "type": "array"
           },
+          "fromAccount": {
+            "$ref": "#/components/schemas/FromAccount"
+          },
           "gmailThreadUrl": {
             "anyOf": [
               {
@@ -4722,6 +4836,7 @@
           "savedAt",
           "followups",
           "firstSentAt",
+          "fromAccount",
           "gmailThreadUrl",
           "reply",
           "touchRevision",
@@ -8120,6 +8235,13 @@
       },
       "SendingStatus": {
         "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AccountStatus"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
           "gmailMessage": {
             "anyOf": [
               {
@@ -8238,7 +8360,8 @@
           "window",
           "nextSend",
           "noneReason",
-          "revision"
+          "revision",
+          "accounts"
         ],
         "title": "SendingStatus",
         "type": "object"

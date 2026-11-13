@@ -8,22 +8,29 @@ import json
 import unittest
 from unittest import mock
 
+from outreach.sending import accounts
+from outreach.sending.config import load_config
 from outreach.sending.status import OLD_SENDER_TEXT
 from outreach.store.writes import append_event
 from tests import apiseed as seed
 from tests.apitest import NOW, ApiCase
-from tests.sendtest import use_solo_config
+from tests.sendtest import prove
 
 SATURDAY = "2026-11-14T15:14:00Z"
 AFTER_HOURS = "2026-11-10T20:01:00Z"  # Tuesday 15:01 in New York, one minute after the window
 TODAY = "2026-11-10"
 HARD_REASON = "Gmail said the account hit a sending limit. Sending is paused until you look."
+REST, GENERAL, NEU = "devanshurajesh@gmail.com", "devanshuchi9@gmail.com", "chicholikar.d@northeastern.edu"
 
 
 class SendingBase(ApiCase):
+    """The shipped shape: account 1 (devanshurajesh) rests and is read, account 2 (devanshuchi9) sends the general
+    lane, the Northeastern account does not send yet."""
+
     def setUp(self):
-        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
         super().setUp()
+        rows = accounts.sync(self.conn, load_config(), NOW)
+        self.general = rows[GENERAL].account_id
 
     def status(self) -> dict:
         res = self.get("/api/sending")
@@ -39,8 +46,7 @@ class SendingBase(ApiCase):
                     revision=3)
 
     def prove(self):
-        append_event(self.conn, entity="message", entity_id=1, kind="marker_verified", actor="sender",
-                     at="2026-11-01T12:00:00Z", idempotency_key="proof")
+        prove(self.conn, self.general)
 
     def approved(self, company: int, name: str, approved_at: str = seed.T0) -> tuple[int, int]:
         pid = seed.person(self.conn, company, name)
@@ -53,6 +59,7 @@ class SendingBase(ApiCase):
         for i in range(n):
             tid = seed.touch(self.conn, seed.person(self.conn, company, f"Sent {i}"))
             seed.send_first(self.conn, tid, at=f"2026-11-10T14:{i:02d}:00Z")
+            self.conn.execute("UPDATE touch SET account_id = ? WHERE touch_id = ?", (self.general, tid))
             if i < bounced:
                 self.conn.execute("UPDATE touch SET state = 'bounced', bounced_at = ? WHERE touch_id = ?",
                                   (f"2026-11-10T15:0{i}:00Z", tid))
@@ -95,16 +102,16 @@ class StatusTest(SendingBase):
     def test_ramp_level_and_next_limit_if_clean(self):
         for limit, level, nxt in ((40, 3, 50), (100, 9, 100)):
             with self.subTest(limit=limit):
-                self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (1, ?, ?, ?) "
+                self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (?, ?, ?, ?) "
                                   "ON CONFLICT(account_id, day) DO UPDATE SET send_limit = excluded.send_limit",
-                                  (TODAY, limit, NOW))
+                                  (self.general, TODAY, limit, NOW))
                 s = self.status()
                 self.assertEqual((s["rampLevel"], s["nextLimitIfClean"], s["limitToday"]), (level, nxt, limit))
 
     def test_last_step_down_is_the_newest_warning_day_with_its_reason(self):
         self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES "
-                          "(1, '2026-11-06', 30, 'warning', '2026-11-06T13:00:00Z')")
-        append_event(self.conn, entity="sender", entity_id=1, kind="policy_rejection", actor="sender",
+                          "(?, '2026-11-06', 30, 'warning', '2026-11-06T13:00:00Z')", (self.general,))
+        append_event(self.conn, entity="sender", entity_id=self.general, kind="policy_rejection", actor="sender",
                      at="2026-11-06T16:20:00Z", detail={"day": "2026-11-06"}, idempotency_key="w1")
         self.assertEqual(self.status()["lastStepDown"], {"at": "2026-11-06T16:20:00Z", "reason": "policy_rejection"})
 
@@ -117,9 +124,9 @@ class StatusTest(SendingBase):
 
     def test_gmail_error_and_stop_reply_counts_come_from_sender_events(self):
         for n, kind in enumerate(("gmail_limit", "gmail_policy")):
-            append_event(self.conn, entity="sender", entity_id=1, kind=kind, actor="sender", at=NOW,
+            append_event(self.conn, entity="sender", entity_id=self.general, kind=kind, actor="sender", at=NOW,
                          detail={"day": TODAY, "error_kind": "rate_limit", "status": 429}, idempotency_key=f"g{n}")
-        append_event(self.conn, entity="sender", entity_id=1, kind="gmail_limit", actor="sender",
+        append_event(self.conn, entity="sender", entity_id=self.general, kind="gmail_limit", actor="sender",
                      at="2026-11-09T15:00:00Z", detail={"day": "2026-11-09"}, idempotency_key="yesterday")
         cid = seed.company(self.conn, "Acme", status="working")
         tid = seed.touch(self.conn, seed.person(self.conn, cid), "replied", reply_kind="asked_to_stop",
@@ -153,6 +160,43 @@ class StatusTest(SendingBase):
             res = self.get("/api/health")
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["sender"], {"state": "paused_hard_block", "sentToday": 0, "limitToday": 0})
+
+    def test_status_lists_accounts(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        self.sent_today(cid, 4)
+        s = self.status()
+        self.assertEqual(s["accounts"], [
+            {"address": REST, "lane": None, "sends": False, "state": "reading_only", "text": "reading replies only",
+             "paused": False, "pauseReason": "", "authState": "unknown", "sentToday": 0, "limit": 0},
+            {"address": GENERAL, "lane": "general", "sends": True, "state": "sending", "text": "4 of 20 today",
+             "paused": False, "pauseReason": "", "authState": "unknown", "sentToday": 4, "limit": 20},
+            {"address": NEU, "lane": "sponsor", "sends": False, "state": "not_sending_yet",
+             "text": "waits, not sending yet", "paused": False, "pauseReason": "", "authState": "unknown",
+             "sentToday": 0, "limit": 0},
+        ])
+        self.assertEqual((s["sentToday"], s["limitToday"]), (4, 20))
+
+    def test_the_account_states_are_the_senders_own(self):
+        from typing import get_args
+        from outreach.api.models.outbox import AccountState
+        from outreach.sending.status import ACCOUNT_STATES
+        self.assertEqual(get_args(AccountState), ACCOUNT_STATES)
+
+    def test_a_signed_out_account_reads_as_its_own_line(self):
+        command = f"python -m outreach.sending auth --account {GENERAL}"
+        self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out', auth_error = ? WHERE account_id = ?",
+                          (f"no Gmail token; run: {command}", self.general))
+        self.conn.execute("UPDATE sender_account SET auth_state = 'ok' WHERE account_id = 1")
+        lines = {a["address"]: f"{a['address']}: {a['text']}" for a in self.status()["accounts"]}
+        self.assertEqual(lines[GENERAL], f"{GENERAL}: not signed in yet. Run: {command}")
+        self.assertEqual(lines[REST], f"{REST}: reading replies only")
+
+    def test_his_pause_reads_on_every_sending_account_and_stays_on_sender_row_1(self):
+        res = self.post("/api/sending/pause", {"revision": 1})
+        self.assertEqual(res.status_code, 200, res.text)
+        states = {a["address"]: a["state"] for a in res.json()["accounts"]}
+        self.assertEqual(states, {REST: "reading_only", GENERAL: "paused_by_you", NEU: "not_sending_yet"})
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sender_account WHERE paused = 1").fetchone()[0], 0)
 
     def test_health_reads_the_same_snapshot(self):
         self.hard_block()

@@ -16,6 +16,7 @@ from outreach.sending.status import SendingSnapshot, queue_schedule, sending_sna
 from outreach.store.writes import append_event
 from outreach.sending.accounts import in_play as _in_play
 from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_message, seed_sent, with_ramp, solo
+from tests import SHIPPED_SEND_CONFIG
 from tests.storetest import fresh_store, seed_company
 
 CFG = solo(load_config())  # one account (account 1) sends every company
@@ -125,7 +126,8 @@ class EmptyStoreTest(Base):
         self.sender(paused=0, pause_kind=None, paused_reason="", paused_at=None)
         self.sender(auth_state="signed_out", auth_error="invalid_grant")
         s = self.snap()
-        self.assertEqual((s.state, s.paused_reason), ("signed_out", "invalid_grant"))
+        self.assertEqual((s.state, s.paused_reason),
+                         ("signed_out", "devanshurajesh@gmail.com: signed out. Run: python -m outreach.sending auth"))
         self.sender(auth_state="wrong_account", auth_error="the token signs in as other@gmail.com, not me@gmail.com")
         s = self.snap()
         self.assertEqual(s.state, "signed_out")
@@ -440,6 +442,137 @@ class PerAccountStatusTest(unittest.TestCase):
         self.auth(self.two, "ok")
         self.assertEqual(set(self.reasons(old_sender_loaded=True).values()), {"old_sender_running"})
         self.assertEqual(sender_gate(self.db, self.cfg, True), "old_sender_running")
+
+
+REST, GENERAL, NEU = "devanshurajesh@gmail.com", "devanshuchi9@gmail.com", "chicholikar.d@northeastern.edu"
+
+
+class AccountsSnapshotTest(unittest.TestCase):
+    """The strip shows every account on its own line (Task A11): what each one does today, in plain words, and the
+    day's totals summed over the accounts that send."""
+
+    def setUp(self):
+        self.db = fresh_store()
+        self.cfg = load_config()
+        self.rows = _accounts.sync(self.db, self.cfg, iso(MON))
+        self.two = self.rows[GENERAL].account_id
+        self.three = self.rows[NEU].account_id
+
+    def snap(self, cfg=None, now=MON):
+        before = self.db.total_changes
+        out = sending_snapshot(self.db, now, cfg or self.cfg)
+        self.assertEqual(self.db.total_changes, before, "the snapshot wrote to the store")
+        return out
+
+    def lines(self, snap) -> dict[str, str]:
+        return {a.address: f"{a.address}: {a.text}" for a in snap.accounts}
+
+    def auth(self, account_id: int, state: str, error: str = "") -> None:
+        self.db.execute("UPDATE sender_account SET auth_state = ?, auth_error = ? WHERE account_id = ?",
+                        (state, error, account_id))
+
+    def sent(self, account_id: int, n: int) -> None:
+        company = seed_company(self.db, f"Sent Co {account_id}")
+        for i in range(n):
+            person = seed_email_person(self.db, company, f"S{account_id}{i}", f"s{account_id}.{i}@sent.example")
+            seed_sent(self.db, person, at=MON - timedelta(minutes=30 - i), account_id=account_id)
+
+    def test_status_lists_accounts(self):
+        self.sent(self.two, 4)
+        self.sent(1, 2)  # account 1's old sends today: it rests, so they count for nobody's limit
+        s = self.snap()
+        self.assertEqual([a.address for a in s.accounts], [REST, GENERAL, NEU])
+        rest, general, neu = s.accounts
+        self.assertEqual((general.lane, general.sends, general.state, general.sent_today, general.limit),
+                         ("general", True, "sending", 4, 20))
+        self.assertEqual((rest.lane, rest.sends, rest.state, rest.limit), (None, False, "reading_only", 0))
+        self.assertEqual((neu.lane, neu.sends, neu.state, neu.limit), ("sponsor", False, "not_sending_yet", 0))
+        self.assertEqual(self.lines(s), {
+            REST: f"{REST}: reading replies only",
+            GENERAL: f"{GENERAL}: 4 of 20 today",
+            NEU: f"{NEU}: waits, not sending yet",
+        })
+        self.assertEqual((s.sent_today, s.limit_today), (4, 20), "the totals are the sending accounts' only")
+        for a in s.accounts:
+            self.assertEqual((a.paused, a.pause_reason), (False, ""))
+
+    def test_totals_are_sums_over_the_sending_accounts(self):
+        both = dataclasses.replace(self.cfg, accounts=tuple(
+            dataclasses.replace(a, kind="gmail", mailapp_account=None, sends=True) if a.address == NEU else a
+            for a in self.cfg.accounts))
+        both = with_ramp(both, NEU, ramp_start=30, ramp_floor=30)
+        self.sent(self.two, 4)
+        self.sent(self.three, 3)
+        s = self.snap(both)
+        self.assertEqual((s.sent_today, s.limit_today), (7, 20 + 30))
+        self.assertEqual(self.lines(s)[NEU], f"{NEU}: 3 of 30 today")
+
+    def test_a_signed_out_account_names_its_own_sign_in_command(self):
+        self.auth(self.two, "signed_out", f"no Gmail token; run: python -m outreach.sending auth --account {GENERAL}")
+        s = self.snap()
+        general = s.accounts[1]
+        self.assertEqual((general.state, general.auth_state), ("signed_out", "signed_out"))
+        self.assertEqual(self.lines(s)[GENERAL], f"{GENERAL}: not signed in yet. Run: python -m outreach.sending "
+                                                 f"auth --account {GENERAL}")
+        self.assertEqual(self.lines(s)[REST], f"{REST}: reading replies only")
+        self.assertEqual(s.state, "signed_out", "the only sending account is signed out, so nothing sends")
+        self.assertIn(f"python -m outreach.sending auth --account {GENERAL}", s.paused_reason)
+        self.auth(self.two, "signed_out", "invalid_grant")  # a token that worked once and died
+        self.assertEqual(self.lines(self.snap())[GENERAL],
+                         f"{GENERAL}: signed out. Run: python -m outreach.sending auth --account {GENERAL}")
+        self.auth(self.two, "wrong_account", f"the token for {GENERAL} signs in as other@gmail.com")
+        s = self.snap()
+        self.assertEqual(s.accounts[1].state, "signed_out")
+        self.assertIn("python -m outreach.sending auth --account", self.lines(s)[GENERAL])
+        self.assertIn("other@gmail.com", s.paused_reason)
+
+    def test_a_signed_out_resting_account_says_its_replies_are_not_read(self):
+        self.auth(1, "signed_out", "no Gmail token; run: python -m outreach.sending auth")
+        s = self.snap()
+        self.assertEqual(self.lines(s)[REST], f"{REST}: not signed in yet, so its replies are not read. "
+                                              "Run: python -m outreach.sending auth")
+        self.assertEqual(s.state, "running", "account 2 still sends")
+
+    def test_pauses_per_account_and_his_pause_on_every_sending_account(self):
+        reason = f"Sending from {GENERAL} is paused because Gmail said the account hit its sending limit."
+        self.db.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, "
+                        "paused_at = ? WHERE account_id = ?", (reason, iso(MON), self.two))
+        s = self.snap()
+        general = s.accounts[1]
+        self.assertEqual((general.state, general.paused, general.pause_reason), ("paused_hard_block", True, reason))
+        self.assertEqual(self.lines(s)[GENERAL], f"{GENERAL}: paused: hard block, 0 of 20 today")
+        self.assertEqual((s.state, s.paused_reason), ("paused_hard_block", reason))
+        self.db.execute("UPDATE sender_account SET paused = 0, pause_kind = NULL, paused_reason = '', "
+                        "paused_at = NULL WHERE account_id = ?", (self.two,))
+        self.db.execute("UPDATE sender SET paused = 1, pause_kind = 'by_you', paused_reason = 'Paused by you', "
+                        "paused_at = ? WHERE sender_id = 1", (iso(MON),))
+        s = self.snap()
+        self.assertEqual((s.state, s.accounts[1].state), ("paused_by_you", "paused_by_you"))
+        self.assertEqual(self.lines(s)[GENERAL], f"{GENERAL}: paused by you, 0 of 20 today")
+        self.assertEqual(self.lines(s)[REST], f"{REST}: reading replies only")
+
+    def test_one_blocked_account_leaves_the_sender_running_on_the_other(self):
+        both = dataclasses.replace(self.cfg, accounts=tuple(
+            dataclasses.replace(a, kind="gmail", mailapp_account=None, sends=True) if a.address == NEU else a
+            for a in self.cfg.accounts))
+        self.db.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = 'r', "
+                        "paused_at = ? WHERE account_id = ?", (iso(MON), self.two))
+        s = self.snap(both)
+        self.assertEqual(s.state, "running")
+        self.assertEqual([a.state for a in s.accounts], ["reading_only", "paused_hard_block", "sending"])
+        self.auth(self.three, "signed_out", "invalid_grant")
+        self.assertEqual(self.snap(both).state, "paused_hard_block", "no sending account can send")
+
+    def test_a_stale_limit_row_reads_as_the_accounts_ceiling(self):
+        shipped = load_config(SHIPPED_SEND_CONFIG)
+        put_day(self.db, MON_DAY, 200, account_id=self.two)
+        s = self.snap(shipped)
+        self.assertEqual((s.accounts[1].limit, s.limit_today), (40, 40))
+
+    def test_a_weekend_says_no_sending_today(self):
+        s = self.snap(now=ny(7, 10))
+        self.assertEqual(self.lines(s)[GENERAL], f"{GENERAL}: no sending today")
+        self.assertEqual((s.accounts[1].limit, s.limit_today), (0, 0))
 
 
 if __name__ == "__main__":

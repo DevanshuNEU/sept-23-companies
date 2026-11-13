@@ -18,7 +18,6 @@ from outreach.store import connect
 from outreach.sending.accounts import in_play as _in_play
 from tests import apiseed as s
 from tests.apitest import NOW, ApiCase
-from tests.sendtest import use_solo_config
 
 CFG = load_config()
 DAY_8 = "2026-11-02T15:00:00Z"  # 8 New York days before NOW (2026-11-10)
@@ -72,7 +71,6 @@ def score(conn, company_id: int, lanes=("level_role",), *, version: str = "r1",
 
 class OutcomeCase(ApiCase):
     def setUp(self):
-        use_solo_config(self)  # one account sends every company: the API shows one account until Task A11
         super().setUp()
         self.acme = s.company(self.conn, "Acme", "working")
         self.lena = s.person(self.conn, self.acme, "Lena Ortiz", channel="linkedin",
@@ -653,7 +651,8 @@ class CompanyHold(OutcomeCase):
         """Whether the claim's own stop re-check would let the queued email go (it never reaches Gmail here)."""
         from outreach.sending import accounts, claim
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.queued)
-        taken = claim.claim(self.conn, q, accounts.primary(self.conn, self.send_cfg), rfc_id="<hold.test@gmail.com>",
+        general = accounts.sync(self.conn, self.send_cfg, NOW)[self.send_cfg.lane_account("general").address]
+        taken = claim.claim(self.conn, q, general, rfc_id="<hold.test@gmail.com>",
                             now=NOW)
         if taken:  # put it back: this test only asks whether the claim would go ahead
             self.conn.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (self.queued,))
@@ -747,8 +746,8 @@ class ReplierStops(OutcomeCase):
                      actor="devanshu", at="2026-11-10T16:00:00Z")  # #11 Task 19's release, when it lands
         self.assertEqual(self.reason(self.lena_email), "reply_stop")
         q = next(q for q in queue.load_queue(self.conn, self.send_cfg) if q.message_id == self.lena_email)
-        self.assertFalse(claim.claim(self.conn, q, accounts.primary(self.conn, self.send_cfg),
-                                     rfc_id="<lena.1@gmail.com>", now=NOW))
+        general = accounts.sync(self.conn, self.send_cfg, NOW)[self.send_cfg.lane_account("general").address]
+        self.assertFalse(claim.claim(self.conn, q, general, rfc_id="<lena.1@gmail.com>", now=NOW))
 
     def test_a_cleared_reply_does_not_stop_the_persons_email(self):
         t = touch(self.conn, self.acme, self.lena, channel="linkedin_message")

@@ -5,15 +5,14 @@ code. Every helper writes the smallest valid rows and takes moments as aware dat
 """
 import dataclasses
 import itertools
-import re
 import sqlite3
 from datetime import date, datetime, timezone
 
 from outreach.sending import accounts as _accounts
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
-__all__ = ["MON", "UTC", "iso", "with_ramp", "solo", "beside", "use_solo_config", "fakes", "seed_email_person", "seed_message", "seed_sent",
-           "bounce", "put_day", "prove", "settle_and_send"]
+__all__ = ["MON", "UTC", "iso", "with_ramp", "solo", "beside", "fakes", "seed_email_person", "seed_message",
+           "seed_sent", "bounce", "put_day", "prove", "settle_and_send"]
 
 UTC = timezone.utc
 # Monday 2026-11-02, 09:00 in New York (daylight saving ended on the 1st, so UTC-5).
@@ -54,23 +53,6 @@ def beside(cfg):
     (the general lane) and the Northeastern account. For tests of one account's rows next to another's."""
     from outreach.sending.config import load_config
     return dataclasses.replace(cfg, accounts=(cfg.accounts[0],) + load_config().accounts[1:])
-
-
-def use_solo_config(case) -> None:
-    """For the rest of `case`, every default `load_config()` (the API's, the plan's, the sender's) reads a copy of
-    the scratch config with one account, account 1, sending the general lane (`solo`), as the tests written before
-    there were several accounts expect. Restored when the test ends."""
-    import pathlib
-    import tempfile
-    from outreach.sending import config as send_config
-    current = send_config.load_config.__defaults__
-    text = pathlib.Path(current[0]).read_text(encoding="utf-8")
-    blocks = re.split(r"^\[\[account\]\]$", text, flags=re.M)  # the header line only, not a comment naming it
-    first = blocks[1].replace("sends = false", 'lane = "general"\nsends = true')
-    path = pathlib.Path(tempfile.mkdtemp(prefix="outreach-sending-solo-")) / "config.toml"
-    path.write_text(blocks[0] + "[[account]]" + first, encoding="utf-8")
-    send_config.load_config.__defaults__ = (path,)
-    case.addCleanup(setattr, send_config.load_config, "__defaults__", current)
 
 
 def fakes(clock, *addresses: str, **kwargs) -> dict:

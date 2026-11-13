@@ -348,19 +348,25 @@ def _account_day(conn: sqlite3.Connection, account: AccountRow, today: date, cfg
 
 
 def _route(conn: sqlite3.Connection, cfg: SendConfig, q: Queued, routed: tuple[AccountRow | None, str]) -> Route:
-    """`accounts.route`'s answer for one message (`routed`), with the sentence for a message no sending account can
-    take: it names the account it waits for."""
+    return route_line(conn, cfg, q.touch_id, q.company_id, routed)
+
+
+def route_line(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int, company_id: int,
+               routed: tuple[AccountRow | None, str]) -> Route:
+    """`accounts.route`'s answer for one touch (`routed`; `company_id` is its surviving company), with the sentence
+    for an email no sending account can take: it names the account it waits for. Read only. The queue and the
+    Outbox's "from" line share it."""
     account, why = routed
     if account is not None and not account.cfg.sends:  # a thread on an account that rests
         return Route(None, f"Waits: its thread is on {account.cfg.address}, which only reads now.")
     if why == "thread_missing":
         row = conn.execute("SELECT a.address, COALESCE(t.account_id, 1) AS account_id FROM touch t LEFT JOIN "
                            "sender_account a ON a.account_id = COALESCE(t.account_id, 1) WHERE t.touch_id = ?",
-                           (q.touch_id,)).fetchone()
+                           (touch_id,)).fetchone()
         address = row["address"] or f"account {row['account_id']}"
         return Route(None, f"Waits: its thread is on {address}, which is not set up to send now.")
     if account is None:
-        lane = _accounts.lane_of(conn, q.company_id)
+        lane = _accounts.lane_of(conn, company_id)
         named = next((a for a in cfg.accounts if a.lane == lane), None)
         if named is None:
             return Route(None, "Waits: no account is set up to send to this company yet.")

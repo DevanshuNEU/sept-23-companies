@@ -1,11 +1,13 @@
 """The sending strip and the global pause: the sender's own snapshot on the wire, and his pause and resume.
 
 `SendingStatus` is `outreach.sending.status.sending_snapshot` reshaped, never a second reading of the sender's
-rules; health's one-line sender summary reads the same snapshot. The one thing the store cannot say is whether the
-old mailer's launchd job is still loaded, so the app passes that in (`old_sender_check`).
+rules: one line per account, today's count and limit summed over the accounts that send; health's one-line sender
+summary reads the same snapshot. The one thing the store cannot say is whether the old mailer's launchd job is still
+loaded, so the app passes that in (`old_sender_check`).
 
-A pause is his (`pause_kind 'by_you'`). A plain resume clears only his pause: a hard block (a Gmail limit, a hard
-bounce rate) stays until a resume says `acknowledgeBlock`, and the refusal shows its reason.
+A pause is his (`pause_kind 'by_you'`, on `sender` row 1: it holds every account). A plain resume clears only his
+pause: a hard block (a Gmail limit, a hard bounce rate) stays until a resume says `acknowledgeBlock`, and the refusal
+shows its reason.
 A pause never overwrites a hard block, so a plain resume can never clear one.
 """
 import logging
@@ -17,7 +19,8 @@ from datetime import date, datetime, timezone
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.models.health import SenderSummary
-from outreach.api.models.outbox import NextSend, SendingSignals, SendingStatus, SendingStepDown, SendingWindow
+from outreach.api.models.outbox import (AccountStatus, NextSend, SendingSignals, SendingStatus, SendingStepDown,
+                                       SendingWindow)
 from outreach.api.revisions import bump
 from outreach.drafts.followups import canonical_company
 from outreach.sending import calendar as cal
@@ -90,7 +93,10 @@ def sending_status(conn: sqlite3.Connection, now: str, cfg: SendConfig, *, old_s
         signals=SendingSignals(bounce_rate_3d=snap.bounce_rate_3d, gmail_errors_today=snap.gmail_errors_today,
                                stop_replies_today=snap.stop_replies_today),
         window=SendingWindow(start=cfg.window_start.strftime("%H:%M"), end=cfg.window_end.strftime("%H:%M")),
-        next_send=_next_send(conn, snap), none_reason=snap.none_reason, revision=snap.revision)
+        next_send=_next_send(conn, snap), none_reason=snap.none_reason, revision=snap.revision,
+        accounts=[AccountStatus(address=a.address, lane=a.lane, sends=a.sends, state=a.state, text=a.text,
+                                paused=a.paused, pause_reason=a.pause_reason, auth_state=a.auth_state,
+                                sent_today=a.sent_today, limit=a.limit) for a in snap.accounts])
 
 
 @dataclass(frozen=True)

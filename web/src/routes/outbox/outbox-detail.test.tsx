@@ -769,7 +769,7 @@ describe('reply', () => {
     expect(alert).toHaveTextContent('Tom Becker (follow-up 1, due today)');
     expect(alert).toHaveTextContent('This app never sends a reply.');
     const link = within(alert).getByRole('link', { name: /Open in Gmail/ });
-    expect(link).toHaveAttribute('href', 'https://mail.google.com/mail/u/0/#inbox/thread-priya-natarajan');
+    expect(link).toHaveAttribute('href', 'https://mail.google.com/mail/?authuser=devanshuchi9@gmail.com#all/thread-priya-natarajan');
     expect(within(screen.getByRole('article')).getByText(/Does Thursday at 2 PT work for 20 minutes\?/)).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Reply kind' })).getByRole('button', { name: 'Interested' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();

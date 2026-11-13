@@ -118,9 +118,48 @@ describe('SendingStrip', () => {
     expect(screen.getByRole('group', { name: 'Sender' })).toHaveTextContent('Gmail signed out');
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Gmail is signed out')).toBeInTheDocument();
-    expect(within(alert).getByText(/Sign in again with mail\/gmail\.py auth in the live checkout\./)).toBeInTheDocument();
+    expect(within(alert).getByText(/python -m outreach\.sending auth --account devanshuchi9@gmail\.com/)).toBeInTheDocument();
     expect(within(alert).getByText(/Approve still works/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Resume sending/ })).toBeNull();
+  });
+
+  const accountLines = () =>
+    within(screen.getByRole('list', { name: 'Accounts' }))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+
+  it('shows one line per account: what sends, then what will, then what only reads', async () => {
+    await outbox();
+    expect(accountLines()).toEqual([
+      'devanshuchi9@gmail.com20 of 30 today',
+      'chicholikar.d@northeastern.eduwaits, not sending yet',
+      'devanshurajesh@gmail.comreading replies only',
+    ]);
+    const items = within(screen.getByRole('list', { name: 'Accounts' })).getAllByRole('listitem');
+    expect(items.map((li) => li.getAttribute('data-tone'))).toEqual(['ok', 'idle', 'idle']);
+  });
+
+  it('a signed out account names its own sign-in command, set as code', async () => {
+    await outbox({ scenario: 'signed_out' });
+    const [general] = within(screen.getByRole('list', { name: 'Accounts' })).getAllByRole('listitem');
+    expect(general).toHaveAttribute('data-tone', 'bad');
+    expect(general).toHaveTextContent('devanshuchi9@gmail.comsigned out. Run python -m outreach.sending auth --account devanshuchi9@gmail.com');
+    expect(within(general!).getByText('python -m outreach.sending auth --account devanshuchi9@gmail.com').tagName).toBe('CODE');
+    expect(accountLines()[2]).toBe('devanshurajesh@gmail.comreading replies only');
+  });
+
+  it('a hard block shows on its account, with the reason on hover', async () => {
+    await outbox({ scenario: 'hard_block' });
+    const [general] = within(screen.getByRole('list', { name: 'Accounts' })).getAllByRole('listitem');
+    expect(general).toHaveAttribute('data-tone', 'bad');
+    expect(general).toHaveTextContent('paused: hard block, 20 of 30 today');
+    expect(general).toHaveAttribute('title', 'Gmail said the daily limit was reached');
+  });
+
+  it('pausing reads on the sending account', async () => {
+    await outbox();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause sending' }));
+    await waitFor(() => expect(accountLines()[0]).toBe('devanshuchi9@gmail.compaused by you, 20 of 30 today'));
   });
 });
 

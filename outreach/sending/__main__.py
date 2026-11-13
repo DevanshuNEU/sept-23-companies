@@ -147,6 +147,8 @@ def _status(now: datetime | None, old_sender_loaded: Callable[[], bool] | None) 
     if snap.gmail_message:
         print(f"gmail: {snap.gmail_message}")
     print(f"sent today: {snap.sent_today} of {snap.limit_today}")
+    for account in snap.accounts:
+        print(f"  {account.address}: {account.text}")
     print(f"ramp: starts at {snap.start_limit} (level {snap.ramp_level} of {len(snap.ramp_levels)}), "
           f"{snap.next_limit_if_clean} next sending day if today is clean")
     if snap.last_step_down:

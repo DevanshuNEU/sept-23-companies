@@ -1432,6 +1432,25 @@ class MultiAccountTest(MultiBase):
         self.assertIn(GENERAL, self.notices[0][1])
         self.assertEqual(self.problems, [])
 
+    def test_one_signed_out_account_makes_the_run_partial_and_exit_1_while_the_others_work(self):
+        from outreach.sending.__main__ import _exit_code
+        self.cfg = THREE
+        three = accounts.sync(self.db, THREE, iso(MON))[NEU]
+        prove(self.db, three.account_id)
+        gmail3 = FakeGmail(clock=self.clock, account=NEU, probe=self.probe, id_prefix="c",
+                           reconcile_after_minutes=CFG.reconcile_after_minutes)
+        self.clients = {REST: self.gmail, GENERAL: self.gmail2, NEU: gmail3}
+        sponsor = self.approve()
+        self.sponsor(sponsor)
+        self.clients = {REST: self.gmail, NEU: gmail3}  # account 2 has no token
+        report = self.tick()
+        self.assertEqual(report.sent, (sponsor,))  # account 3 sends
+        self.assertIn("thread", self.gmail.calls)  # account 1 is read
+        self.assertEqual(report.accounts, {REST: "ok", GENERAL: "signed_out", NEU: "ok"})
+        self.assertEqual(report.auth, "signed_out")  # the worst sign-in of the tick
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.assertEqual(_exit_code(self.db, report, False), 1)
+
     def test_a_send_in_doubt_on_account_2_is_scanned_only_by_account_2(self):
         mid = self.approve()
         self.gmail2.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)

@@ -241,6 +241,16 @@ allowed = [
   "web engineer",
 ]
 
+# Client wording (#257, #9 job board ruling point 3): a recruiter's posting for an unnamed client says so in its
+# opening ("Our client is a 15-person AI company"). Read by staffing.py over the first client_window_chars of the body.
+# The plural "our clients" is a consultancy or a bank describing its customers and never counts.
+[staffing]
+client_phrases = [
+  "our client is", "our client, a", "our client, an", "our client has", "my client",
+  "on behalf of our client", "on behalf of a client", "a client of ours", "for our client",
+]
+client_window_chars = 400
+
 [years]
 # refresh/finalcheck.py:41 YOE (a number of years counts only when one of these follows 'years' in the sentence)
 experience_words = [

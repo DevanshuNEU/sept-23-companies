@@ -458,6 +458,16 @@ class RecordEvidenceTests(RebuildTestCase):
         row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
         self.assertEqual(rebuild_module.stored_decision(row).role, "software")
 
+    def test_decision_row_stores_for_client(self):
+        # #257: a recruiter's posting for an unnamed client.
+        pid = self.posting("Software Engineer", "Our client is a 15-person consumer AI company.")
+        decide_and_store(self.conn, pid)
+        self.assertEqual(self.conn.execute("SELECT for_client FROM posting_decision WHERE posting_id = ?",
+                                           (pid,)).fetchone()[0], 1)
+        self.conn.execute("UPDATE decision SET for_client = NULL")
+        row = self.conn.execute("SELECT * FROM current_decision WHERE posting_id = ?", (pid,)).fetchone()
+        self.assertFalse(rebuild_module.stored_decision(row).for_client)
+
     def test_the_role_column_refuses_other_values(self):
         pid = self.posting()
         decide_and_store(self.conn, pid)

@@ -331,7 +331,7 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(names, ["lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us",
                                  "sponsorship", "sponsorship_quote", "citizenship", "citizenship_quote",
                                  "eligibility", "eligibility_reason", "eligibility_quote", "start_2027",
-                                 "level_state", "years_ms", "role"])
+                                 "level_state", "years_ms", "role", "for_client"])
 
     def test_only_rules_classify(self):
         # Done-when line 2: nothing outside outreach/rules reads titles, locations or sponsorship wording.

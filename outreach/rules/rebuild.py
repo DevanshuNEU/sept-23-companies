@@ -39,7 +39,7 @@ BATCH_SIZE = 500
 
 _COLUMNS = ("lane", "level_tier", "level_ok", "level_basis", "years_asked", "years_quote", "us", "sponsorship",
             "sponsorship_quote", "citizenship", "citizenship_quote", "eligibility", "eligibility_reason",
-            "eligibility_quote", "start_2027", "level_state", "years_ms", "role")
+            "eligibility_quote", "start_2027", "level_state", "years_ms", "role", "for_client")
 _WRITTEN = _COLUMNS + ("provisional", "reader_version")
 _UPSERT = (
     "INSERT INTO decision(posting_id, ruleset_version, decided_at, " + ", ".join(_WRITTEN) + ") VALUES (?, ?, ?, "
@@ -94,7 +94,8 @@ def stored_decision(row: sqlite3.Row) -> Decision:
     """A Decision from a decision-table row (or a current_decision or posting_decision row). Ranking and the reader
     read stored rows through this."""
     values = {c: row[c] for c in _COLUMNS}
-    for flag in ("level_ok", "citizenship", "start_2027"):
+    values["for_client"] = values["for_client"] or 0  # NULL: stored before 0015, not a client posting
+    for flag in ("level_ok", "citizenship", "start_2027", "for_client"):
         values[flag] = bool(values[flag])
     if values["level_state"] is None:  # a row stored before 0007 and not yet rebuilt
         values["level_state"] = interim_level_state(values["level_ok"], values["level_tier"])

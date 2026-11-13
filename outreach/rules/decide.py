@@ -10,6 +10,7 @@ from .config import Config, default_config
 from .eligibility import eligibility, starts_2027
 from .location import us_status
 from .role import role_of
+from .staffing import for_client
 from .sponsorship import citizenship_required, sponsorship_stance
 from .text import clean_text
 from .title import III_BASIS, classify_title
@@ -51,6 +52,7 @@ class Decision:
     level_state: str  # fit, reject or uncertain (#154): every builder states it
     years_ms: int | None = None  # years asked of a master's degree holder, None when the posting gives none
     role: str = "software"  # software or other (#250): the Jobs list shows software roles only
+    for_client: bool = False  # the body opens with client wording, a recruiter's posting (#257)
 
     def as_row(self) -> dict:
         """The `decision` table's columns (without posting_id, ruleset_version and decided_at), booleans as 0 or 1."""
@@ -62,6 +64,7 @@ class Decision:
             "eligibility": self.eligibility, "eligibility_reason": self.eligibility_reason,
             "eligibility_quote": self.eligibility_quote, "start_2027": int(self.start_2027),
             "level_state": self.level_state, "years_ms": self.years_ms, "role": self.role,
+            "for_client": int(self.for_client),
         }
 
 
@@ -151,7 +154,7 @@ def decide(p: PostingInput, cfg: Config | None = None) -> Decision:
         us=us_status(location, country, cfg, title), sponsorship=stance, sponsorship_quote=stance_quote,
         citizenship=citizen, citizenship_quote=citizen_quote, eligibility=status, eligibility_reason=reason,
         eligibility_quote=elig_quote, start_2027=starts_2027(title, body, cfg),
-        level_state=state, years_ms=asked.ms, role=role_of(title, cfg),
+        level_state=state, years_ms=asked.ms, role=role_of(title, cfg), for_client=for_client(body, cfg),
     )
 
 

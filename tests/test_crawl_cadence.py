@@ -437,7 +437,7 @@ class TierTests(StoreTestCase):
         self.job(cold, 1, level_state="reject")
         self.assertEqual((self.tiered(hot), self.tiered(cold)), (900, None))
         # #263: Eightfold, Google and Apple have head reads too; Amazon does not, so it keeps its rhythm.
-        for ats in ("eightfold", "google", "apple"):
+        for ats in ("eightfold", "google", "apple", "icims"):  # #220: iCIMS Jibe too
             board = self.board(self.company(), ats=ats)
             self.job(board, 1, level_state="fit")
             self.assertEqual(self.tiered(board), 900, ats)
@@ -450,4 +450,5 @@ class TierTests(StoreTestCase):
                           CFG.tiers.dead_days), (900, 3600, 86400, 90, 90))  # warm 1 hour (#251, 2026-11-13)
         self.assertIn("greenhouse", CFG.tiers.ats)
         self.assertNotIn("workday", CFG.tiers.ats)
-        self.assertEqual(CFG.tiers.head_ats, ("workday", "oracle_orc", "eightfold", "google", "apple"))  # #263
+        # #263 added Eightfold, Google and Apple; #220 iCIMS Jibe.
+        self.assertEqual(CFG.tiers.head_ats, ("workday", "oracle_orc", "eightfold", "google", "apple", "icims"))

@@ -207,7 +207,8 @@ class AddBoardTest(unittest.TestCase):
         self.assertEqual(normalize_token("icims", " Careers.JHUAPL.edu "), "careers.jhuapl.edu")  # a Jibe host (#220)
         for ats, token in (("workday", "riverside/External"), ("workday", "riverside.wd5"),
                            ("workday", "riverside.wd5/"), ("oracle_orc", "ebwg.example.com/CX"),
-                           ("oracle_orc", "ebwg.fa.us2.oraclecloud.com"), ("icims", "acme"), ("icims", "acme.example.com/jobs"),
+                           ("oracle_orc", "ebwg.fa.us2.oraclecloud.com"), ("icims", "acme"),
+                           ("icims", "acme.example.com/jobs"),
                            ("greenhouse", ""), ("greenhouse", "a b"), ("greenhouse", "ac%me"),
                            ("greenhouse", "acme/jobs"), ("ashby", "-acme")):
             with self.subTest(ats=ats, token=token):

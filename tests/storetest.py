@@ -47,7 +47,7 @@ def seed_sender_account(conn: sqlite3.Connection, account_id: int = 1, address: 
                  "VALUES (?, ?, ?, ?, ?)", (account_id, address, kind, now, now))
 
 
-# The 14 ATSs the crawler plan builds an adapter for (#21). The other board.ats values (gem, icims, cornerstone and
+# The 14 ATSs the crawler plan builds an adapter for (#21). The other board.ats values (gem, cornerstone and
 # so on) have none, so #31 gives a company that only has those a watched careers page.
 PLANNED_ADAPTERS = frozenset({
     "greenhouse", "lever", "ashby", "smartrecruiters", "workday", "workable", "oracle_orc", "rippling", "breezy",

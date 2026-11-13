@@ -50,6 +50,34 @@ def _with_workers(lines):
 
 
 _OFF_TABLE = re.compile(r"(?ms)^\[ats_off\]\n.*?(?=^\[|\Z)")
+_ATS_INTERVAL_TABLE = re.compile(r"(?ms)^\[ats_interval_s\]\n.*?(?=^\[|\Z)")
+
+
+def _with_ats_interval(lines):
+    """The shipped config with its `[ats_interval_s]` table replaced by these lines (None drops the table)."""
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert _ATS_INTERVAL_TABLE.search(text), "the shipped config has an [ats_interval_s] table"
+    table = "" if lines is None else "[ats_interval_s]\n" + "".join(line + "\n" for line in lines) + "\n"
+    return _ATS_INTERVAL_TABLE.sub(lambda _: table, text)
+
+
+class AtsIntervalTests(unittest.TestCase):
+    """Spacing per ATS (#220): Jibe tenants sit on their own hosts, so no host suffix can space them."""
+
+    def test_the_shipped_value_is_the_jibe_crawl_delay(self):
+        self.assertEqual(load_crawl_config().ats_interval_s, {"icims": 5.0})
+        self.assertEqual(_load_text(_with_ats_interval([])).ats_interval_s, {})
+
+    def test_the_table_must_be_there(self):
+        with self.assertRaisesRegex(KeyError, "ats_interval_s is missing"):
+            _load_text(_with_ats_interval(None))
+
+    def test_bad_entries_fail_at_load(self):
+        with self.assertRaisesRegex(ValueError, "ats_interval_s names gem, which is not an ATS the crawler reads"):
+            _load_text(_with_ats_interval(["gem = 5.0"]))
+        for value in ("0", "-1", '"5"', "true", "inf"):
+            with self.assertRaisesRegex(ValueError, "ats_interval_s.icims must be finite seconds above 0"):
+                _load_text(_with_ats_interval([f"icims = {value}"]))
 
 
 def _with_off(lines):
@@ -82,7 +110,7 @@ class AtsSwitchTests(unittest.TestCase):
         self.assertTrue(all(everything.reads(a) for a in supported_ats()))
 
     def test_an_unknown_ats_name_fails_at_load(self):
-        for name in ("smartrecruiter", "SmartRecruiters", "icims", "dover"):
+        for name in ("smartrecruiter", "SmartRecruiters", "gem", "dover"):
             with self.assertRaisesRegex(ValueError, f"ats_off names {name}, which is not an ATS the crawler reads"):
                 _load_text(_with_off([f'{name} = "a reason"']))
 
@@ -124,7 +152,8 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual((cfg.tick_budget_s, cfg.top_companies), (1500, 300))
         self.assertEqual((cfg.watch_interval_s, cfg.watch_per_tick, cfg.watch_min_text_chars), (604800, 40, 200))
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
-        self.assertEqual(len(cfg.host_interval_s), 23)  # + eu.greenhouse.io (2026-11-13)  # www.google.com and jobs.apple.com joined 2026-11-13 (#263)
+        # eu.greenhouse.io, www.google.com and jobs.apple.com joined 2026-11-13 (#263), jibeapply.com with #220
+        self.assertEqual(len(cfg.host_interval_s), 24)
 
     def test_rates(self):
         hosts = load_crawl_config().host_interval_s
@@ -134,7 +163,8 @@ class CrawlConfigTests(unittest.TestCase):
         cfg = load_crawl_config()
         self.assertIsInstance(cfg.split_hosts, frozenset)
         self.assertEqual(cfg.split_hosts, frozenset({"myworkdayjobs.com", "oraclecloud.com", "bamboohr.com", "breezy.hr",
-                                                     "teamtailor.com", "recruitee.com", "applytojob.com"}))
+                                                     "teamtailor.com", "recruitee.com", "applytojob.com",
+                                                     "jibeapply.com"}))
 
     def test_split_hosts_are_known_buckets(self):
         with self.assertRaisesRegex(ValueError, "split_hosts.*nowhere.example"):
@@ -233,8 +263,8 @@ class CrawlConfigTests(unittest.TestCase):
         self.assertEqual(_load_with(check_skip_recent_s=0).check_skip_recent_s, 0)
         with self.assertRaisesRegex(ValueError, "check_skip_recent_s must not be negative"):
             _load_with(check_skip_recent_s=-1)
-        with self.assertRaisesRegex(ValueError, "check_ats names icims"):
-            _load_with(check_ats='["greenhouse", "icims"]')
+        with self.assertRaisesRegex(ValueError, "check_ats names gem"):
+            _load_with(check_ats='["greenhouse", "gem"]')
         with self.assertRaisesRegex(ValueError, "check_ats must be a list"):
             _load_with(check_ats='"greenhouse"')
 

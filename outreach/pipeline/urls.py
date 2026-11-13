@@ -136,8 +136,8 @@ def _jibe(host: str, segments: list[str], query: dict[str, list[str]]) -> BoardK
 def board_key(url: str) -> BoardKey | None:
     """The board and job a link names, or None when the site is not one Knock reads.
 
-    Any host with a numeric `gh_jid` query is a Greenhouse posting with no known board, and any host with `/jobs/<number>`
-    and an `icims=1` query is an iCIMS Jibe site (#220). Locale segments (`en-US`) are
+    Any host with a numeric `gh_jid` query is a Greenhouse posting with no known board, and any host with
+    `/jobs/<number>` and an `icims=1` query is an iCIMS Jibe site (#220). Locale segments (`en-US`) are
     skipped. A link to a board with no job gives a key with `native_id` None.
     """
     if not isinstance(url, str) or not url.strip():

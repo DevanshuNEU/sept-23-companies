@@ -153,7 +153,8 @@ class TokenTests(unittest.TestCase):
         self.assertFalse(valid_token("oracle_orc", "evil.example.com/CX_1"))
         self.assertFalse(valid_token("icims", "Careers.icims.com"))
         # #220: an iCIMS Jibe site sits on the company's own host, and that host is its token.
-        for host in ("careers.jhuapl.edu", "careers.84lumber.com", "i3-corps.jibeapply.com", "careers-acme.example.com"):
+        for host in ("careers.jhuapl.edu", "careers.84lumber.com", "i3-corps.jibeapply.com",
+                     "careers-acme.example.com"):
             self.assertTrue(valid_token("icims", host), host)
         for bad in ("Careers.jhuapl.edu", "jhuapl", "careers.jhuapl.edu/jobs", "-careers.acme.com", "careers..acme.com",
                     "careers.acme.com.", "careers.acme-.com", "", "careers.acme.com:8080"):

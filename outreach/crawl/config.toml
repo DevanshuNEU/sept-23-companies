@@ -29,7 +29,7 @@ default_host_interval_s = 1.0
 # Buckets below whose hosts are spaced one by one: each tenant is its own server, so tenants do not wait on each other.
 # The breaker still counts failures per bucket. Every entry must be a [host_interval_s] key.
 split_hosts = ["myworkdayjobs.com", "oraclecloud.com", "bamboohr.com", "breezy.hr", "teamtailor.com", "recruitee.com",
-               "applytojob.com"]
+               "applytojob.com", "jibeapply.com"]
 # Failures in a row on one bucket before the breaker opens.
 breaker_failures = 5
 
@@ -83,6 +83,15 @@ body_refetch_days = 30
 # Google and Apple (#263): one careers page each, read gently (Google page 1 only, robots.txt allows no other).
 "www.google.com" = 3.0
 "jobs.apple.com" = 2.0
+# iCIMS Jibe sites that iCIMS hosts (i3-corps.jibeapply.com, #220): robots.txt crawl-delay 5, as on careers.jhuapl.edu.
+"jibeapply.com" = 5.0
+
+# Seconds between two requests to one host, for an ATS whose tenants sit on their own domains, so no suffix above can
+# bucket them (#220). Every host the ATS's reader sends to waits this long on its own key (tenants never wait on each
+# other), and keeps the wait for any later request to it. Every name must be an ATS the crawler reads.
+[ats_interval_s]
+# Jibe careers sites (careers.jhuapl.edu, careers.garmin.com): robots.txt says crawl-delay: 5 (checked 2026-11-13).
+icims = 5.0
 
 # Threads that list boards at once (#158), per ATS; `default` is every ATS not named here (1 to 16 each). Spacing per
 # host and the breaker still hold across all of them, so more threads never mean more requests a second to one host.
@@ -124,6 +133,6 @@ dead_days = 90
 ats = ["greenhouse", "ashby", "lever", "workable", "rippling", "breezy", "recruitee", "jazzhr", "bamboohr",
        "teamtailor", "pinpoint", "smartrecruiters"]
 # Head reads (#251 part 2): a hot board here waits hot_s and is checked with one newest-first request (Workday page 1,
-# Oracle sorted by posting date, Eightfold, Google and Apple page 1, #263) until its normal interval since the last
-# full read has passed; then a full read.
-head_ats = ["workday", "oracle_orc", "eightfold", "google", "apple"]
+# Oracle sorted by posting date, Eightfold, Google and Apple page 1, #263, iCIMS Jibe page 1, #220) until its normal
+# interval since the last full read has passed; then a full read.
+head_ats = ["workday", "oracle_orc", "eightfold", "google", "apple", "icims"]

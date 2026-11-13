@@ -1,6 +1,6 @@
 # Multi-sender design (2026-11-12)
 
-Status: draft for Devanshu's review. Becomes current once the matching #9 ruling is posted.
+Current: #9 multi-sender ruling posted 2026-11-12; phase A built.
 
 ## Why
 

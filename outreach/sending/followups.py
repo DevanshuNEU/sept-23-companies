@@ -1,5 +1,5 @@
-"""Follow-ups (#9, 2026-10-31: 4, at 3, 7, 14 and 21 business days), their lapse, closing quiet touches and stopping
-messages.
+"""Follow-ups (#9 multi-sender ruling, 2026-11-12: one, 7 business days after the first email), their lapse,
+closing quiet touches and stopping messages.
 
 `plan_followups` runs when a first email goes out; `sync_followups`, `lapse_followups`, `close_quiet_touches` and
 `sweep_stopped` run on every tick; `stop_touch_messages` is what a reply or a bounce does to the touch's queue. Every

@@ -13,7 +13,7 @@ from tests.test_sending_queue import LA, NY, Base, ny, stamp
 
 # A floor of 1 so a test can set a day's limit as low as it likes: the floor lifts any lower row (#9, 2026-11-06).
 CFG = dataclasses.replace(load_config(), ramp_floor=1)
-FRI = ny(6, 13, 6)  # Friday 2026-11-06, 13:06 New York
+FRI = ny(6, 11, 6)  # Friday 2026-11-06, 11:06 New York (three company slots 60 minutes apart fit before the 15:00 close)
 
 
 def day_of(at: datetime) -> date:
@@ -43,11 +43,11 @@ class ProjectionTest(Base):
 
     def test_after_the_window_the_first_goes_on_the_next_business_day_at_open(self):
         _, mid = self.approve()
-        self.assertEqual(self.project(ny(6, 17))[mid], ny(9, 8, 30))
+        self.assertEqual(self.project(ny(6, 17))[mid], ny(9, 8, 0))
 
     def test_a_weekend_projects_to_monday_at_open(self):
         _, mid = self.approve()
-        self.assertEqual(self.project(ny(7, 11))[mid], ny(9, 8, 30))
+        self.assertEqual(self.project(ny(7, 11))[mid], ny(9, 8, 0))
 
     def test_spacing_separates_different_companies_by_the_mean_gap(self):
         mids = [self.approve(company=seed_company(self.db, f"Co{i}"))[1] for i in range(3)]
@@ -66,11 +66,11 @@ class ProjectionTest(Base):
     def test_a_pacific_recipient_projects_inside_their_own_window(self):
         _, mid = self.approve(tz="America/Los_Angeles")
         got = self.project(ny(6, 20))[mid]  # 17:00 in Los Angeles: closed
-        self.assertEqual(got.astimezone(LA), datetime(2026, 11, 9, 8, 30, tzinfo=LA))
+        self.assertEqual(got.astimezone(LA), datetime(2026, 11, 9, 8, 0, tzinfo=LA))
 
     def test_a_follow_up_waits_for_its_due_day(self):
         _, mid = self.approve_followup("2026-11-11")
-        self.assertGreaterEqual(self.project()[mid], ny(11, 8, 30))
+        self.assertGreaterEqual(self.project()[mid], ny(11, 8, 0))
 
     def test_recruiter_goes_after_the_others_at_the_company(self):
         _, recruiter = self.approve(role="recruiter", approved_at="2026-11-06T10:00:00Z")

@@ -8,12 +8,12 @@ from zoneinfo import ZoneInfo
 from outreach.sending import notify, ramp, signals
 from outreach.sending.config import load_config
 from outreach.store.writes import log_touch
-from tests import SHIPPED_SEND_CONFIG
+from tests import SHIPPED_SEND_CONFIG, flat_200
 from tests.sendtest import MON, UTC, bounce, iso, put_day, seed_email_person, seed_sent
 from tests.storetest import fresh_store, seed_company
 
 CFG = load_config()  # the tests' scratch copy: the adaptive ramp, 20 up to 100
-FLAT = load_config(SHIPPED_SEND_CONFIG)  # what ships: flat 200 (#9, 2026-11-12)
+FLAT = flat_200(load_config(SHIPPED_SEND_CONFIG))  # flat 200 (#9, 2026-11-12); the shipped ramp is per account now, compat until Task A5
 NY = ZoneInfo("America/New_York")
 BASE = date(2026, 11, 2)  # a Monday
 STAMP = "2026-11-02T15:00:00Z"
@@ -234,8 +234,10 @@ class RampTest(Base):
 class FlatLimitTest(Base):
     """The shipped limit is flat 200 a day (#9, 2026-11-12, #227): no warning lowers it, and a stale lower row lifts."""
 
-    def test_the_shipped_config_is_flat_200(self):
+    def test_the_flat_config_is_flat_200(self):
         self.assertEqual((FLAT.ramp_start, FLAT.ramp_floor, FLAT.ramp_ceiling), (200, 200, 200))
+        # The shipped accounts each keep their ceiling at or under the hard 200.
+        self.assertTrue(all(a.ramp_ceiling <= 200 for a in load_config(SHIPPED_SEND_CONFIG).accounts))
 
     def test_a_day_with_no_row_gets_200(self):
         self.assertEqual(ramp.limit_for(self.db, d(0), FLAT), 200)

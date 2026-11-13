@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass, fields
 from datetime import date, time
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from outreach.drafts.followups import MAX_FOLLOWUPS
@@ -14,15 +15,37 @@ HARD_CEILING = 200  # #9 (2026-11-12, #227); also the send_day.send_limit CHECK 
 DEFAULT_PATH = Path(__file__).with_name("config.toml")
 
 
+KINDS = ("gmail", "mailapp")
+LANES = ("sponsor", "general")
+
+
+@dataclass(frozen=True)
+class AccountConfig:
+    """One sender account: where it sends from, which lane it serves and its own daily ramp."""
+    address: str
+    kind: Literal["gmail", "mailapp"]
+    lane: Literal["sponsor", "general"] | None
+    sends: bool
+    ramp_start: int
+    ramp_step: int
+    ramp_floor: int
+    ramp_ceiling: int
+    mailapp_account: str | None  # Mail.app account name, mailapp only
+    token_dir: str | None  # gmail only; None means the default token folder (account 1)
+
+
 @dataclass(frozen=True)
 class SendConfig:
-    from_address: str
+    accounts: tuple[AccountConfig, ...]
     from_name: str
     day_tz: str
+    # compat until Task A5: the old global ramp, derived from accounts[0] at load (not in config.toml).
     ramp_start: int
     ramp_step: int
     ramp_ceiling: int
     ramp_floor: int
+    spread_jitter: tuple[float, float]
+    spread_gap_minutes: tuple[int, int]
     clean_bounce_rate: float
     bounce_days: int
     stop_replies_hard: int
@@ -56,17 +79,39 @@ class SendConfig:
     size_band_gap_jitter_minutes: tuple[int, ...]
     size_guessed_big_band: int
 
+    @property
+    def from_address(self) -> str:
+        """compat until Task A10: the first account block's address, whatever its `sends` says."""
+        return self.accounts[0].address
+
+    def account(self, address: str) -> AccountConfig:
+        for acct in self.accounts:
+            if acct.address == address:
+                return acct
+        raise KeyError(address)
+
+    def lane_account(self, lane: str) -> AccountConfig | None:
+        """The sending account for a lane, or None when no account in it sends."""
+        for acct in self.accounts:
+            if acct.lane == lane and acct.sends:
+                return acct
+        return None
+
+
+# Fields that are not top-level keys in config.toml: `accounts` comes from [[account]] blocks, the ramp numbers are
+# derived from accounts[0] (compat until Task A5).
+DERIVED_FIELDS = ("accounts", "ramp_start", "ramp_step", "ramp_ceiling", "ramp_floor")
+
 
 # Whole numbers that count things, so zero or less makes no sense.
-COUNT_KEYS = ("ramp_step", "bounce_days", "stop_replies_hard",
+COUNT_KEYS = ("bounce_days", "stop_replies_hard",
               "stop_replies_days", "per_company_daily", "followup_lapse_business_days", "close_after_business_days",
               "reconcile_after_minutes", "max_send_attempts", "rethread_days", "inbound_meta_cap",
               "prune_noop_after_days", "pick_pool")
 # Whole numbers that may be zero.
-WHOLE_KEYS = ("ramp_start", "ramp_ceiling", "ramp_floor", "per_company_gap_minutes", "day_start_jitter_minutes",
-              "per_company_gap_jitter_minutes")
+WHOLE_KEYS = ("per_company_gap_minutes", "day_start_jitter_minutes", "per_company_gap_jitter_minutes")
 RATE_KEYS = ("clean_bounce_rate", "break_chance")
-TEXT_KEYS = ("from_address", "from_name", "day_tz", "old_sender_label")
+TEXT_KEYS = ("from_name", "day_tz", "old_sender_label")
 
 
 def _whole(value) -> bool:
@@ -117,14 +162,86 @@ def _ints(key: str, value) -> tuple[int, ...]:
     return tuple(value)
 
 
+ACCOUNT_REQUIRED = ("address", "kind", "sends", "ramp_start", "ramp_step", "ramp_floor", "ramp_ceiling")
+ACCOUNT_OPTIONAL = ("lane", "mailapp_account", "token_dir")
+
+
+def _account(index: int, raw: dict) -> AccountConfig:
+    """One [[account]] block into an AccountConfig, naming the bad key and the block."""
+    where = f"[[account]] #{index + 1}"
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where} must be a table, not {raw!r}")
+    for key in sorted(raw.keys() - set(ACCOUNT_REQUIRED) - set(ACCOUNT_OPTIONAL)):
+        raise ValueError(f"{key} is not an account setting ({where})")
+    for key in ACCOUNT_REQUIRED:
+        if key not in raw:
+            raise KeyError(f"{key} is missing from {where}")
+    address = raw["address"]
+    if not isinstance(address, str) or not address.strip():
+        raise ValueError(f"address must be non-empty text, not {address!r} ({where})")
+    where = f"account {address}"
+    if raw["kind"] not in KINDS:
+        raise ValueError(f"kind must be one of {list(KINDS)}, not {raw['kind']!r} ({where})")
+    lane = raw.get("lane")
+    if lane is not None and lane not in LANES:
+        raise ValueError(f"lane must be one of {list(LANES)} or unset, not {lane!r} ({where})")
+    if not isinstance(raw["sends"], bool):
+        raise ValueError(f"sends must be true or false, not {raw['sends']!r} ({where})")
+    for key in ("ramp_start", "ramp_step", "ramp_floor", "ramp_ceiling"):
+        if not _whole(raw[key]) or raw[key] < 1:
+            raise ValueError(f"{key} must be a whole number of at least 1, not {raw[key]!r} ({where})")
+    for key in ("mailapp_account", "token_dir"):
+        value = raw.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{key} must be non-empty text when set, not {value!r} ({where})")
+    if raw["kind"] == "mailapp" and raw.get("mailapp_account") is None:
+        raise ValueError(f"mailapp_account is needed when kind is \"mailapp\" ({where})")
+    if raw["kind"] == "gmail" and raw.get("mailapp_account") is not None:
+        raise ValueError(f"mailapp_account is for kind \"mailapp\" only ({where})")
+    if raw["kind"] == "mailapp" and raw.get("token_dir") is not None:
+        raise ValueError(f"token_dir is for kind \"gmail\" only ({where})")
+    acct = AccountConfig(address=address, kind=raw["kind"], lane=lane, sends=raw["sends"],
+                         ramp_start=raw["ramp_start"], ramp_step=raw["ramp_step"], ramp_floor=raw["ramp_floor"],
+                         ramp_ceiling=raw["ramp_ceiling"], mailapp_account=raw.get("mailapp_account"),
+                         token_dir=raw.get("token_dir"))
+    if not 0 < acct.ramp_ceiling <= HARD_CEILING:
+        raise ValueError(f"ramp_ceiling must be 1 to {HARD_CEILING} (#9's hard ceiling), not {acct.ramp_ceiling} "
+                         f"({where})")
+    if acct.ramp_floor > acct.ramp_ceiling:
+        raise ValueError(f"ramp_floor must be 1 to ramp_ceiling ({acct.ramp_ceiling}), not {acct.ramp_floor} ({where})")
+    if not acct.ramp_floor <= acct.ramp_start <= acct.ramp_ceiling:
+        raise ValueError(f"ramp_start must be ramp_floor..ramp_ceiling ({acct.ramp_floor}..{acct.ramp_ceiling}), "
+                         f"not {acct.ramp_start} ({where})")
+    return acct
+
+
+def _accounts(raw) -> tuple[AccountConfig, ...]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("account must hold at least one [[account]] block")
+    accounts = tuple(_account(i, block) for i, block in enumerate(raw))
+    seen = set()
+    for acct in accounts:
+        if acct.address in seen:
+            raise ValueError(f"address {acct.address} is on two [[account]] blocks")
+        seen.add(acct.address)
+    for lane in LANES:
+        sending = [a.address for a in accounts if a.lane == lane and a.sends]
+        if len(sending) > 1:
+            raise ValueError(f"lane {lane} has {len(sending)} sending accounts ({', '.join(sending)}), at most 1")
+    return accounts
+
+
+def _pair(key: str, value, kind, low_min) -> tuple:
+    if (not isinstance(value, list) or len(value) != 2
+            or not all(isinstance(v, kind) and not isinstance(v, bool) for v in value)):
+        raise ValueError(f"{key} must be [low, high], not {value!r}")
+    low, high = value
+    if low <= low_min or low > high:
+        raise ValueError(f"{key} must be [low, high] with {low_min} < low <= high, not {value!r}")
+    return (low, high)
+
+
 def _check(cfg: SendConfig) -> None:
-    if not 0 < cfg.ramp_ceiling <= HARD_CEILING:
-        raise ValueError(f"ramp_ceiling must be 1 to {HARD_CEILING} (#9's hard ceiling), not {cfg.ramp_ceiling}")
-    if cfg.ramp_floor < 1 or cfg.ramp_floor > cfg.ramp_ceiling:
-        raise ValueError(f"ramp_floor must be 1 to ramp_ceiling ({cfg.ramp_ceiling}), not {cfg.ramp_floor}")
-    if not cfg.ramp_floor <= cfg.ramp_start <= cfg.ramp_ceiling:
-        raise ValueError(f"ramp_start must be ramp_floor..ramp_ceiling ({cfg.ramp_floor}..{cfg.ramp_ceiling}), "
-                         f"not {cfg.ramp_start}")
     days = cfg.followup_business_days
     if not days:
         raise ValueError("followup_business_days must name at least one day")
@@ -176,13 +293,21 @@ def load_config(path: Path = DEFAULT_PATH) -> SendConfig:
     unknown."""
     with open(path, "rb") as handle:
         raw = tomllib.load(handle)
-    names = {f.name for f in fields(SendConfig)}
+    names = {f.name for f in fields(SendConfig)} - set(DERIVED_FIELDS) | {"account"}
     for key in sorted(raw.keys() - names):
         raise ValueError(f"{key} is not a sending setting")
     for key in sorted(names - raw.keys()):
         raise ValueError(f"{key} is missing from the sending config")
     _types(raw)
     values = dict(raw)
+    del values["account"]
+    values["accounts"] = _accounts(raw["account"])
+    first = values["accounts"][0]
+    # compat until Task A5: ramp.py, queue.py and status.py still read the global ramp.
+    values.update(ramp_start=first.ramp_start, ramp_step=first.ramp_step, ramp_ceiling=first.ramp_ceiling,
+                  ramp_floor=first.ramp_floor)
+    values["spread_jitter"] = _pair("spread_jitter", raw["spread_jitter"], (int, float), 0)
+    values["spread_gap_minutes"] = _pair("spread_gap_minutes", raw["spread_gap_minutes"], int, 0)
     values["window_start"] = _time("window_start", raw["window_start"])
     values["window_end"] = _time("window_end", raw["window_end"])
     values["weekdays"] = _ints("weekdays", raw["weekdays"])

@@ -76,7 +76,7 @@ class HumanPacingTest(Base):
 
     def test_the_first_send_of_the_day_starts_a_little_after_the_window_opens(self):
         _, message = self.approve()
-        opens = ny(2, 8, 30)
+        opens = ny(2, 8, 0)
         offset = human.day_start_offset(MON_DAY, HUMAN)
         self.assertGreater(offset, timedelta(0))
         verdict = self.verdicts_with_human(opens)[message]
@@ -190,7 +190,7 @@ class LimitsTest(Base):
         self.sent_at(seed_company(self.db, "Fourth"), ny(2, 8, 30))
         verdict = self.verdicts_at()[message]
         self.assertEqual(verdict.reason, "daily_limit")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
 
     def claim(self, company, at):
         """A message claimed at `at` that may or may not have gone out."""
@@ -248,7 +248,7 @@ class LimitsTest(Base):
             self.sent_at(self.company, ny(2, hour))
         verdict = self.verdicts_at()[message]
         self.assertEqual(verdict.reason, "per_company_limit")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
 
     def test_a_follow_up_never_waits_for_the_company_limit(self):
         # #9, 2026-10-31: the per-company limit counts first emails only.
@@ -365,12 +365,12 @@ class TimingTest(Base):
         _, message = self.approve_followup("2026-11-03")
         verdict = self.verdicts_at(ny(2, 16))[message]
         self.assertEqual(verdict.reason, "followup_not_due")
-        self.assertEqual(verdict.earliest_at, ny(3, 8, 30))
-        self.assertEqual(self.reason(message, ny(3, 8, 30)), "ready")
+        self.assertEqual(verdict.earliest_at, ny(3, 8, 0))
+        self.assertEqual(self.reason(message, ny(3, 8, 0)), "ready")
 
     def test_follow_up_due_on_a_weekend_waits_for_monday(self):
         _, message = self.approve_followup("2026-11-07")
-        self.assertEqual(self.verdicts_at(ny(6, 12))[message].earliest_at, ny(9, 8, 30))
+        self.assertEqual(self.verdicts_at(ny(6, 12))[message].earliest_at, ny(9, 8, 0))
 
     def test_window_is_per_recipient(self):
         now = ny(2, 16, 45)
@@ -378,20 +378,20 @@ class TimingTest(Base):
         _, west = self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
         verdicts = self.verdicts_at(now)
         self.assertEqual(verdicts[east].reason, "window")
-        self.assertEqual(verdicts[east].earliest_at, ny(3, 8, 30))
+        self.assertEqual(verdicts[east].earliest_at, ny(3, 8, 0))
         self.assertEqual(verdicts[west].reason, "ready")
         self.assertEqual(now.astimezone(LA).hour, 13)
 
     def test_before_the_window_opens_the_earliest_time_is_today(self):
         _, message = self.approve()
         verdict = self.verdicts_at(ny(2, 7, 0))[message]
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 8, 0)))
 
     def test_weekend_is_not_a_business_day(self):
         _, message = self.approve()
         verdict = self.verdicts_at(ny(7, 10))[message]
         self.assertEqual(verdict.reason, "not_business_day")
-        self.assertEqual(verdict.earliest_at, ny(9, 8, 30))
+        self.assertEqual(verdict.earliest_at, ny(9, 8, 0))
 
     def test_bad_timezone_waits_and_says_so(self):
         _, message = self.approve(tz="Mars/Olympus")
@@ -597,12 +597,12 @@ class WindowEdgeTest(Base):
         _, message = self.approve(tz="Asia/Tokyo")
         verdict = self.verdicts_at(now)[message]
         self.assertEqual(verdict.reason, "window")
-        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 9, 8, 30, tzinfo=ZoneInfo("Asia/Tokyo")))
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 9, 8, 0, tzinfo=ZoneInfo("Asia/Tokyo")))
 
-    def test_16_30_exactly_is_inside_the_window_and_16_31_is_not(self):
+    def test_15_00_exactly_is_inside_the_window_and_15_01_is_not(self):
         _, message = self.approve()
-        self.assertEqual(self.reason(message, ny(2, 16, 30)), "ready")
-        self.assertEqual(self.reason(message, ny(2, 16, 31)), "window")
+        self.assertEqual(self.reason(message, ny(2, 15, 0)), "ready")
+        self.assertEqual(self.reason(message, ny(2, 15, 1)), "window")
 
 
 class ReasonsTest(Base):
@@ -730,7 +730,7 @@ class FollowupOrderTest(Base):
         second = seed_message(self.db, person, seq=2, due_on="2026-11-02")
         verdict = self.verdicts_at()[second]
         self.assertEqual(verdict.reason, "followup_not_due")
-        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 30, tzinfo=ZoneInfo("America/New_York")))
+        self.assertEqual(verdict.earliest_at, datetime(2026, 11, 5, 8, 0, tzinfo=ZoneInfo("America/New_York")))
         self.assertEqual(self.reason(second, now=datetime(2026, 11, 5, 9, 0, tzinfo=ZoneInfo("America/New_York"))),
                          "ready")
 

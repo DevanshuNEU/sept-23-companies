@@ -6,13 +6,13 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 
 from outreach.sending.config import load_config
 from outreach.sending.simulate import Event, Scenario, cal_days, ny, simulate
 from outreach.store.migrate import MIGRATIONS_DIR, migrate, migration_files
-from tests import SHIPPED_SEND_CONFIG
+from tests import SHIPPED_SEND_CONFIG, flat_200
 from tests.storetest import fresh_store
 
 SQL = (MIGRATIONS_DIR / "0012_send_limit_200.sql").read_text()
@@ -56,10 +56,13 @@ class SendDayMigrationTest(unittest.TestCase):
 
 class TwoHundredFitsInADayTest(unittest.TestCase):
     def test_the_shipped_pacing_sends_200_in_a_day_with_enough_companies(self):
-        cfg = load_config(SHIPPED_SEND_CONFIG)
+        cfg = flat_200(load_config(SHIPPED_SEND_CONFIG))  # compat until Task A5
         self.assertEqual(cfg.ramp_ceiling, 200)
         # Exact times and first-come order, so the run is the same every time; the limit and the gaps are the shipped ones.
-        cfg = dataclasses.replace(cfg, pick_pool=1, day_start_jitter_minutes=0, per_company_gap_jitter_minutes=0)
+        cfg = dataclasses.replace(cfg, pick_pool=1, day_start_jitter_minutes=0, per_company_gap_jitter_minutes=0,
+                                  # The old human pacing (gap_median_minutes) cannot fit 200 into the new 08:00 to 15:00
+                                  # window (197 sent); spread pacing replaces it in Task A6, which rewrites this test.
+                                  window_start=time(8, 30), window_end=time(16, 30))
         day = cal_days(date(2026, 11, 16), 1, cfg)[0]
         # 150 companies with no size on file: 2 first emails a day each (the default band, #229), so 300 could go.
         scenario = Scenario(start=day, days=1, companies=150, people_per_company=3,

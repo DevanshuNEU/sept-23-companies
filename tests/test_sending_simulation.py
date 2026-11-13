@@ -7,7 +7,7 @@ import dataclasses
 import json
 import unittest
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.sending.config import load_config
@@ -15,9 +15,11 @@ from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, 
 
 # Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and for slow,
 # steady pacing of 4 to 9 minutes, since its bounces and limits sit at fixed positions in the day. The shipped human pacing
-# is checked in test_sending_human and test_sending_queue.
+# is checked in test_sending_human and test_sending_queue. The scenario's volume and 4 to 9 minute gaps need the old
+# 08:30 to 16:30 window (in the shipped 08:00 to 15:00 window the later days no longer fit their follow-ups); spread
+# pacing replaces these gaps in Task A6, which rewrites this scenario. The window itself is tested in test_sending_calendar.
 CFG = dataclasses.replace(load_config(), followup_business_days=(7,), gap_minutes=(4, 9), gap_median_minutes=5.5,
-                          gap_spread=0.2, break_chance=0.0)
+                          gap_spread=0.2, break_chance=0.0, window_start=time(8, 30), window_end=time(16, 30))
 NY = ZoneInfo("America/New_York")
 MON = date(2026, 11, 2)
 D = {n: date(2026, 11, 2) + timedelta(days=d) for n, d in

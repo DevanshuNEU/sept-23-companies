@@ -305,17 +305,17 @@ class ProjectionTest(OutboxBase):
                          ["2026-11-10", "2026-11-10", "2026-11-10", "2026-11-11"])
         self.assertEqual(rows[ts[0]]["schedule"]["projectedAt"], NOW)
         self.assertEqual([rows[t]["schedule"]["projectedClock"] for t in (ts[0], ts[3])],
-                         ["about 10:15 ET", "about 8:30 ET"])
+                         ["about 10:15 ET", "about 8:00 ET"])
         self.assertEqual([rows[t]["schedule"]["text"] for t in (ts[0], ts[3])],
-                         ["Sends about 10:15 ET", "Sends tomorrow about 8:30 ET"])
-        self.assertEqual(rows[ts[3]]["summary"], "Sends tomorrow about 8:30 ET")
+                         ["Sends about 10:15 ET", "Sends tomorrow about 8:00 ET"])
+        self.assertEqual(rows[ts[3]]["summary"], "Sends tomorrow about 8:00 ET")
         self.assertEqual(rows[ts[3]]["at"], rows[ts[3]]["schedule"]["projectedAt"])
 
     def test_a_later_day_reads_as_a_date(self):
         self.prove()
         cid = seed.company(self.conn, "Acme", status="working")
         ts = self.approved(cid, *[f"P{i}" for i in range(7)])
-        self.assertEqual(self.by_touch(self.outbox())[ts[6]]["schedule"]["text"], "Sends Thu Nov 12, about 8:30 ET")
+        self.assertEqual(self.by_touch(self.outbox())[ts[6]]["schedule"]["text"], "Sends Thu Nov 12, about 8:00 ET")
 
     def test_approved_rows_sort_by_projected_time(self):
         self.prove()

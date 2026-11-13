@@ -307,13 +307,13 @@ class ScheduleTest(Base):
         seed_sent(self.db, self.person(company=sent_company), at=ny(2, 8))
         waiting = self.approve()
         verdict = self.only(waiting)
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("daily_limit", ny(3, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("daily_limit", ny(3, 8, 0)))
 
     def test_not_business_day(self):
         self.prove()
         message = self.approve()
         verdict = self.only(message, ny(7, 11))
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("not_business_day", ny(9, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("not_business_day", ny(9, 8, 0)))
 
     def test_spacing(self):
         self.prove()
@@ -326,7 +326,7 @@ class ScheduleTest(Base):
         self.prove()
         message = self.approve(tz="America/Los_Angeles")
         verdict = self.only(message, ny(2, 9))  # 06:00 in Los Angeles
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 11, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("window", ny(2, 11, 0)))
 
     def test_followup_not_due(self):
         self.prove()
@@ -334,7 +334,7 @@ class ScheduleTest(Base):
         seed_sent(self.db, person, at=ny(2, 8, 30) - timedelta(days=7))
         message = seed_message(self.db, person, seq=1, due_on="2026-11-04")
         verdict = self.only(message, ny(2, 9))
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("followup_not_due", ny(4, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("followup_not_due", ny(4, 8, 0)))
 
     def test_per_company_limit(self):
         self.prove()
@@ -343,7 +343,7 @@ class ScheduleTest(Base):
             seed_sent(self.db, self.person(company=company), at=ny(2, 8, 30) + timedelta(hours=2 * i))
         message = self.approve(company=company)
         verdict = self.only(message, ny(2, 15))
-        self.assertEqual((verdict.reason, verdict.earliest_at), ("per_company_limit", ny(3, 8, 30)))
+        self.assertEqual((verdict.reason, verdict.earliest_at), ("per_company_limit", ny(3, 8, 0)))
 
     def test_per_company_gap(self):
         self.prove()

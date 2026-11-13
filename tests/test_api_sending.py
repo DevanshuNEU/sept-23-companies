@@ -14,7 +14,7 @@ from tests import apiseed as seed
 from tests.apitest import NOW, ApiCase
 
 SATURDAY = "2026-11-14T15:14:00Z"
-AFTER_HOURS = "2026-11-10T21:31:00Z"  # Tuesday 16:31 in New York, one minute after the window
+AFTER_HOURS = "2026-11-10T20:01:00Z"  # Tuesday 15:01 in New York, one minute after the window
 TODAY = "2026-11-10"
 HARD_REASON = "Gmail said the account hit a sending limit. Sending is paused until you look."
 
@@ -63,7 +63,7 @@ class StatusTest(SendingBase):
         self.assertEqual(s["state"], "running")
         self.assertEqual((s["sentToday"], s["limitToday"], s["rampLevel"], s["nextLimitIfClean"]), (0, 20, 1, 30))
         self.assertEqual(s["rampLevels"], [20, 30, 40, 50, 60, 70, 80, 90, 100])
-        self.assertEqual(s["window"], {"start": "08:30", "end": "16:30"})
+        self.assertEqual(s["window"], {"start": "08:00", "end": "15:00"})
         self.assertEqual(s["signals"], {"bounceRate3d": 0.0, "gmailErrorsToday": 0, "stopRepliesToday": 0})
         self.assertEqual((s["nextSend"], s["noneReason"]), (None, "Nothing is approved and waiting to send."))
         self.assertEqual((s["pausedReason"], s["pausedAt"], s["gmailMessage"], s["lastStepDown"]), ("", None, None, None))

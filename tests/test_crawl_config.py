@@ -120,7 +120,7 @@ class CrawlConfigTests(unittest.TestCase):
                          (1800, 30, 20_000_000, 3))
         self.assertEqual((cfg.default_host_interval_s, cfg.breaker_failures), (1.0, 5))
         self.assertEqual((cfg.batch_rows, cfg.decide_batch, cfg.detail_per_read, cfg.boards_per_tick),
-                         (2000, 100, 150, 500))
+                         (2000, 100, 150, 1500))  # #251: 1,500 boards a tick, for the 15 minute tier
         self.assertEqual((cfg.tick_budget_s, cfg.top_companies), (1500, 300))
         self.assertEqual((cfg.watch_interval_s, cfg.watch_per_tick, cfg.watch_min_text_chars), (604800, 40, 200))
         self.assertEqual(cfg.host_interval_s["workable.com"], 2.0)
@@ -270,7 +270,7 @@ class CrawlConfigTests(unittest.TestCase):
 
     def test_shipped_workers(self):
         self.assertEqual(load_crawl_config().workers,
-                         {"default": 2, "greenhouse": 6, "ashby": 4, "lever": 1, "workable": 1})
+                         {"default": 2, "greenhouse": 8, "ashby": 8, "lever": 1, "workable": 1})  # #251
 
     def test_workers_default_is_required(self):
         with self.assertRaisesRegex(ValueError, "workers.default"):

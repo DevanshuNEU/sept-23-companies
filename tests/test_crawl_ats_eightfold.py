@@ -147,6 +147,10 @@ class EightfoldHeadTests(unittest.TestCase):
         r, client = head({u: page(30, [pos(1)])}, token="microsoft")
         self.assertEqual((r.result, client.requests), ("ok", [u]))
 
+    def test_eightfold_is_a_head_ats(self):
+        from outreach.crawl.config import load_crawl_config
+        self.assertIn("eightfold", load_crawl_config().tiers.head_ats)
+
     def test_an_empty_page_is_unchanged(self):
         r, _ = head({url(0): page(0, [])})
         self.assertEqual((r.result, r.head, r.jobs), ("unchanged", True, ()))

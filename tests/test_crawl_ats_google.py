@@ -153,6 +153,15 @@ class GoogleTests(unittest.TestCase):
                 r, client = read({}, token=token, head=head)
                 self.assertEqual((r.result, client.requests), ("error", []), token)
 
+    def test_its_host_is_spaced_three_seconds(self):
+        from outreach.crawl.config import ATS_HOSTS, load_crawl_config
+        from outreach.crawl.polite import bucket_for
+        cfg = load_crawl_config()
+        self.assertEqual(ATS_HOSTS["google"], "www.google.com")
+        self.assertEqual(bucket_for("www.google.com", cfg), "www.google.com")
+        self.assertEqual(cfg.host_interval_s["www.google.com"], 3.0)
+        self.assertIn("google", cfg.tiers.head_ats)
+
     def test_body_is_never_fetched(self):
         client = FakeClient({})
         self.assertIsNone(GoogleAdapter(client).body("early-software", None))

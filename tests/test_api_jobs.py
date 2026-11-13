@@ -53,7 +53,7 @@ class ListTest(JobsCase):
         self.assertEqual(
             sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
                                  "companyId", "companyName", "size", "big", "saysNoSponsorship", "everify", "yc",
-                                 "contactedOn"]))
+                                 "contactedOn", "maybeStaffing", "forClient"]))
         self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["firstSeenAt"]),
                          ("Acme", 40, False, "new grad", "2026-11-09T12:00:00Z"))
 

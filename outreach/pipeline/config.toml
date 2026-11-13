@@ -8,3 +8,19 @@ url = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.gi
 categories = ["Software", "Software Engineering", "AI/ML/Data", "Data Science, AI & Machine Learning"]
 # false skips the poll: no request, no write, no streak change.
 enabled = true
+
+# Staffing firms (#257, #9 job board ruling 2026-11-12 point 3). A company is a known staffing firm, and its postings
+# are on no tab and in no count, when its name is on `known` (case blind), its name has one of `name_words`, or at
+# least `client_min` of its open engineering postings, and at least `client_share` of them, open with client wording
+# (the rules' `for_client`). Read at list time: adding a firm here needs no rebuild.
+[staffing]
+known = [
+  "Raydar", "True Talent Solutions Partners", "Pragmatike", "DistantJob", "OnHires", "Lavendo", "Bee Genius",
+  "CodeRoad",
+]
+name_words = [
+  "staffing", "recruiting", "recruitment", "recruiters", "headhunter", "headhunters", "talent solutions",
+  "talent partners", "search partners", "placement", "placements",
+]
+client_min = 3
+client_share = 0.5

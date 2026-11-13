@@ -49,8 +49,10 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from outreach.pipeline import reached
+from outreach.pipeline.config import StaffingConfig, load_pipeline_config
 from outreach.plan.outbound import load_outbound
 from outreach.ranking.common import canonical_ids
+from outreach.rules.config import phrases
 from outreach.store.timefmt import ISO_FMT, iso_utc
 
 __all__ = ["JobFilters", "JobRow", "JobPage", "query", "passed_posting_ids", "applied_posting_ids", "explain",
@@ -88,7 +90,8 @@ LEVEL_KEY_SQL = ("(CASE WHEN c.state = 'uncertain' THEN 'not_stated' "
 LISTED_SQL = ("p.closed_at IS NULL AND d.lane = 'engineering' AND d.us <> 'no' AND d.citizenship = 0 "
               "AND d.eligibility = 'ok' AND d.level_tier <> 'senior' "
               "AND p.company_id NOT IN (SELECT value FROM json_each(:nogo)) "
-              "AND p.posting_id NOT IN (SELECT value FROM json_each(:passed))")
+              "AND p.posting_id NOT IN (SELECT value FROM json_each(:passed)) "
+              "AND p.company_id NOT IN (SELECT value FROM json_each(:staffing))")
 # A software role (#250): what the two level tabs and Check now's new count read. A row stored before 0014 and not yet
 # rebuilt has no role and counts as software, so the list never empties in between.
 SOFTWARE_SQL = "COALESCE(d.role, 'software') = 'software'"
@@ -126,6 +129,8 @@ class JobRow:
     everify: bool
     yc: bool
     contacted_on: str | None  # the newest day he reached it: a person contacted there, or his own Done mark
+    maybe_staffing: bool = False  # work tier 3 (staffing-flagged by the LCA rules), not promoted (#257)
+    for_client: bool = False  # the posting opens with client wording, a recruiter's (#257)
 
 
 @dataclass(frozen=True)
@@ -168,6 +173,7 @@ WITH canon(src, dst) AS (SELECT key, value FROM json_each(:canon)),
 cand AS MATERIALIZED (
   SELECT p.posting_id, p.title, p.url, p.location, COALESCE(cn.dst, p.company_id) AS cid,
          d.level_tier, {state} AS state, d.sponsorship, d.us, {software} AS software,
+         COALESCE(d.for_client, 0) AS for_client,
          p.list_at, p.posted_at, p.first_seen_at, p.seen_gap_s, rp.first_seen_at AS reposted_from,
          CASE WHEN p.list_at IS NULL THEN 1 ELSE 0 END AS unk, COALESCE(p.list_at, p.first_seen_at) AS at
   FROM posting p
@@ -200,7 +206,9 @@ co0 AS MATERIALIZED (
          EXISTS (SELECT 1 FROM company_fact f WHERE f.company_id = x.cid AND f.fact = 'everify'
                   AND f.value = 'enrolled') AS everify,
          EXISTS (SELECT 1 FROM company_fact f WHERE f.company_id = x.cid AND f.fact = 'stage'
-                  AND f.value = 'yc') AS yc
+                  AND f.value = 'yc') AS yc,
+         EXISTS (SELECT 1 FROM work_tier w WHERE w.company_id = x.cid AND w.tier = 3
+                  AND w.promoted = 0) AS maybe_staffing
   FROM (SELECT DISTINCT cid FROM cand) x JOIN company c ON c.company_id = x.cid
   WHERE x.cid NOT IN (SELECT value FROM json_each(:nogo))
 ),
@@ -216,7 +224,8 @@ co AS (
   SELECT co1.*, CASE WHEN co1.size > :big OR co1.big_guess = 1 THEN 1 ELSE 0 END AS big FROM co1
 ),
 rows AS (
-  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc,
+  SELECT c.posting_id, c.title, c.url, c.location, c.cid, co.name, co.size, co.everify, co.yc, co.maybe_staffing,
+         c.for_client,
          c.list_at, c.posted_at, c.first_seen_at, c.seen_gap_s, c.reposted_from, c.unk, c.at,
          c.level_tier, c.state, c.sponsorship,
          co.big,
@@ -297,8 +306,35 @@ def _check(f: JobFilters, limit: int) -> None:
         raise ValueError("limit must be at least 1")
 
 
+# Open engineering postings per company under the current ruleset, and how many open with client wording (#257).
+_CLIENT_SQL = ("SELECT p.company_id, COUNT(*) AS n, SUM(COALESCE(d.for_client, 0)) AS k FROM posting p "
+               "JOIN decision d ON d.posting_id = p.posting_id "
+               "AND d.ruleset_version = (SELECT ruleset_version FROM ruleset WHERE is_current = 1) "
+               "WHERE p.closed_at IS NULL AND d.lane = 'engineering' GROUP BY p.company_id")
+
+
+def staffing_ids(conn: sqlite3.Connection, canon: dict[int, int] | None = None,
+                 cfg: StaffingConfig | None = None) -> frozenset[int]:
+    """The companies that are known staffing firms (#257): a name on `cfg.known` (case blind), a name with one of
+    `cfg.name_words`, or at least `cfg.client_min` open engineering postings with client wording making up at least
+    `cfg.client_share` of them, counted over the company after any merge. Every company merged into one is one too."""
+    canon = canonical_ids(conn) if canon is None else canon
+    cfg = load_pipeline_config().staffing if cfg is None else cfg
+    known = {n.casefold() for n in cfg.known}
+    words = phrases(list(cfg.name_words))
+    firms = {cid for cid, name in conn.execute("SELECT company_id, name FROM company")
+             if name.strip().casefold() in known or words.search(name)}
+    totals: dict[int, list[int]] = {}
+    for cid, n, k in conn.execute(_CLIENT_SQL):
+        t = totals.setdefault(canon.get(cid, cid), [0, 0])
+        t[0], t[1] = t[0] + n, t[1] + k
+    firms |= {cid for cid, (n, k) in totals.items() if k >= cfg.client_min and k >= cfg.client_share * n}
+    heads = {canon.get(cid, cid) for cid in firms}
+    return frozenset(firms | heads | {src for src, dst in canon.items() if dst in heads})
+
+
 def listed_params(conn: sqlite3.Connection, canon: dict[int, int] | None = None) -> dict:
-    """The `:nogo` and `:passed` parameters of `LISTED_SQL`. `canon` defaults to `canonical_ids(conn)`."""
+    """The `:nogo`, `:passed` and `:staffing` parameters of `LISTED_SQL`. `canon` defaults to `canonical_ids(conn)`."""
     canon = canonical_ids(conn) if canon is None else canon
     held = {r[0] for r in conn.execute(
         "SELECT company_id FROM no_go WHERE company_id IS NOT NULL AND lifted_at IS NULL")}
@@ -306,7 +342,8 @@ def listed_params(conn: sqlite3.Connection, canon: dict[int, int] | None = None)
     nogo = sorted(held | {src for src, dst in canon.items() if dst in held})
     # `:passed` is every posting he took off the list: passed or applied to.
     hidden = passed_posting_ids(conn) | applied_posting_ids(conn)
-    return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(hidden))}
+    return {"nogo": json.dumps(nogo), "passed": json.dumps(sorted(hidden)),
+            "staffing": json.dumps(sorted(staffing_ids(conn, canon)))}
 
 
 def _params(conn: sqlite3.Connection, now: str, today: date, f: JobFilters, canon: dict[int, int],
@@ -389,7 +426,8 @@ def _row(r: sqlite3.Row, contacted: dict[int, date]) -> JobRow:
         first_seen_at=r["first_seen_at"], seen_gap_s=r["seen_gap_s"], first_read=r["seen_gap_s"] is None,
         reposted_from=r["reposted_from"], company_id=r["cid"], company_name=r["name"],
         size=size, big=bool(r["big"]), says_no_sponsorship=r["sponsorship"] == "no",
-        everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None)
+        everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None,
+        maybe_staffing=bool(r["maybe_staffing"]), for_client=bool(r["for_client"]))
 
 
 def explain(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> list[str]:

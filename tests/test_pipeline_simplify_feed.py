@@ -201,13 +201,26 @@ class UsLocationTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-    def load(self, text):
+    def load(self, text, staffing=True):
+        """`text` with a good [staffing] section after it (#257) unless `staffing` is false."""
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "config.toml"
-            p.write_text(text)
+            p.write_text(text + (self.STAFFING if staffing and text else ""))
             return load_pipeline_config(p)
 
     GOOD = 'url = "https://example.com/x.json"\ncategories = ["Software"]\nenabled = true\n'
+    STAFFING = '\n[staffing]\nknown = ["Raydar"]\nname_words = ["staffing"]\nclient_min = 3\nclient_share = 0.5\n'
+
+    def test_the_staffing_section(self):
+        # #257: the known staffing firms; every key is required and checked.
+        self.assertEqual(load_pipeline_config().staffing.client_min, 3)
+        self.assertIn("Raydar", load_pipeline_config().staffing.known)
+        with self.assertRaisesRegex(KeyError, "staffing"):
+            self.load("[simplify]\n" + self.GOOD, staffing=False)
+        for old, new in (("client_min = 3", "client_min = 0"), ("client_share = 0.5", "client_share = 2"),
+                         ('known = ["Raydar"]', 'known = "Raydar"'), ("client_min = 3", "client_min = 3\nx = 1")):
+            with self.subTest(change=new), self.assertRaises(ValueError):
+                self.load("[simplify]\n" + self.GOOD + self.STAFFING.replace(old, new), staffing=False)
 
     def test_shipped_config(self):
         cfg = load_pipeline_config()

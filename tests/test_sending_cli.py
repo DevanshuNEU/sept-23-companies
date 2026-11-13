@@ -263,6 +263,22 @@ class AccountFlagTest(_LiveRun):
         self.assertEqual(set(self.seen["deps"].clients), {REST, GENERAL})
         self.assertIs(self.seen["deps"].clients[GENERAL], built[os.path.join(self.gdir, GENERAL)])
 
+    def test_each_client_and_whoami_carry_their_accounts_sign_in_command(self):
+        seen = []
+        def client(directory=None, **kw):
+            seen.append(kw.get("sign_in"))
+            return self.client
+        self.token()
+        self.token(GENERAL)
+        self.client.profile.side_effect = cli.GmailError("auth", None, "the Gmail token has no refresh token")
+        with mock.patch.object(cli, "GmailClient", side_effect=client):
+            self.go("run")
+            self.assertEqual(seen, ["python -m outreach.sending auth",
+                                    f"python -m outreach.sending auth --account {GENERAL}"])
+            code, _, err = self.go("whoami", "--account", GENERAL)
+        self.assertEqual(code, 1)
+        self.assertIn(f"run: python -m outreach.sending auth --account {GENERAL}", err)
+
 
 class LaunchctlTest(unittest.TestCase):
     def test_loaded_is_launchctl_print_exiting_zero(self):

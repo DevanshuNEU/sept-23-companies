@@ -235,6 +235,7 @@ class _Tick:
         self.rows: dict[str, accounts.AccountRow] = {}  # the accounts in play, by address, in config order
         self.signed: dict[str, str] = {}  # each account's sign-in this tick: ok, signed_out, wrong_account, ...
         self.emails: dict[str, str] = {}  # the address each token signed in as
+        self.no_token: set[str] = set()  # the Gmail accounts with no token file (never signed in, or it was removed)
         self.day: DayState | None = None  # the first sending account's day
         self.days: dict[str, DayState | None] = {}
         self.reconciled: dict[str, int] = {}
@@ -402,6 +403,7 @@ class _Tick:
                 continue
             if client is None:
                 state, text = "signed_out", f"no Gmail token; run: {_sign_in_command(self.cfg, address)}"
+                self.no_token.add(address)
             else:
                 try:
                     profile = client.profile()
@@ -469,10 +471,15 @@ class _Tick:
         append_event(self.conn, entity="sender", entity_id=row.account_id, kind="signed_out", actor="sender",
                      at=self.stamp, detail={"error": text, "address": address},
                      idempotency_key=f"signed_out:{row.account_id}:{self.today.isoformat()}")
-        what = "nothing is sent from it and its replies are not read" if row.cfg.sends else "its replies are not read"
-        notify_once(self.conn, self.notify, "signed_out", self.today, STOP_TITLE,
-                    f"Gmail is signed out on {address}, so {what}. Sign in again to resume: "
-                    f"{_sign_in_command(self.cfg, address)}", at=self.stamp, account_id=row.account_id)
+        command = _sign_in_command(self.cfg, address)
+        if address in self.no_token:
+            start = f"start sending from {address}" if row.cfg.sends else f"read the replies to {address}"
+            notice = f"{address} has no Gmail sign-in yet. Sign in to {start}: {command}"
+        else:
+            what = "nothing is sent from it and its replies are not read" if row.cfg.sends else "its replies are not read"
+            notice = f"Gmail is signed out on {address}, so {what}. Sign in again to resume: {command}"
+        notify_once(self.conn, self.notify, "signed_out", self.today, STOP_TITLE, notice, at=self.stamp,
+                    account_id=row.account_id)
 
     def _wrong_account(self, row: accounts.AccountRow, text: str) -> None:
         address, email = row.cfg.address, self.emails.get(row.cfg.address, "")
@@ -822,7 +829,6 @@ class _Tick:
 
 
 def _sign_in_command(cfg: SendConfig, address: str) -> str:
-    """How he signs this account in: account 1 (the first block) as before accounts, every other with `--account`."""
-    if cfg.accounts and cfg.accounts[0].address.lower() == address.lower():
-        return "python -m outreach.sending auth"
-    return f"python -m outreach.sending auth --account {address}"
+    """How he signs this account in (`gmail.sign_in_command`; imported here so the tick needs no Gmail module)."""
+    from outreach.sending.gmail import sign_in_command
+    return sign_in_command(cfg, address)

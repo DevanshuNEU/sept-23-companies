@@ -47,7 +47,8 @@ from outreach.sending.mail import (MARKER_HEADER, META_HEADERS, ORIGINAL_ID_HEAD
                                    check_outgoing, classify_http, miss_is_proof, normalise_message_id, page_reaches,
                                    scrub, settle_minutes)
 
-__all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "token_dir_for", "build_mime", "new_message_id",
+__all__ = ["DEFAULT_DIR", "SCOPES", "gmail_dir", "is_default_dir", "token_dir_for", "sign_in_command", "build_mime",
+           "new_message_id",
            "GmailClient", "check_auth_location", "authorize", "sign_in", "main"]
 
 DEFAULT_DIR = os.path.expanduser("~/Library/Application Support/outreach-mail")
@@ -219,10 +220,19 @@ def _google_error(err: urllib.error.HTTPError) -> str:
         err.close()
 
 
-def _token(directory: str, token_dir: str | None = None) -> str:
+def sign_in_command(cfg, address: str) -> str:
+    """How he signs this account in: account 1 (the first account block) with the plain command, every other Gmail
+    account with `--account`, so a hint never sends him to overwrite another account's token."""
+    if cfg.accounts and cfg.accounts[0].address.lower() == address.lower():
+        return "python -m outreach.sending auth"
+    return f"python -m outreach.sending auth --account {address}"
+
+
+def _token(directory: str, token_dir: str | None = None, sign_in: str = SIGN_IN) -> str:
     """Every Gmail call reads the token here, so this is the one place the live-checkout rule is enforced. The OAuth
     client is in `directory`; the token is in `token_dir` (the account's own folder; default `directory`), and an
-    account never falls back to another account's token."""
+    account never falls back to another account's token. `sign_in` is that account's own sign-in command, named in
+    every sign-in error."""
     if not live_checkout.is_live():
         raise SystemExit(f"the real Gmail token is only used from the live checkout ({live_checkout.LIVE_ROOT})")
     path = os.path.join(token_dir or directory, TOKEN_FILE)
@@ -230,18 +240,18 @@ def _token(directory: str, token_dir: str | None = None) -> str:
         with open(path) as f:
             tok = json.load(f)
     except FileNotFoundError:
-        raise GmailError("auth", None, f"not signed in to Gmail; run: {SIGN_IN}") from None
+        raise GmailError("auth", None, f"not signed in to Gmail; run: {sign_in}") from None
     except (OSError, ValueError):
-        raise GmailError("auth", None, f"the Gmail token file is unreadable; run: {SIGN_IN}") from None
+        raise GmailError("auth", None, f"the Gmail token file is unreadable; run: {sign_in}") from None
     if not isinstance(tok, dict) or not (tok.get("access_token") or tok.get("refresh_token")):
-        raise GmailError("auth", None, f"the Gmail token file holds no token; run: {SIGN_IN}")
+        raise GmailError("auth", None, f"the Gmail token file holds no token; run: {sign_in}")
     try:
         expires_at = float(tok.get("expires_at", 0))
     except (TypeError, ValueError):
         expires_at = 0.0
     if time.time() >= expires_at or not tok.get("access_token"):
         if not tok.get("refresh_token"):
-            raise GmailError("auth", None, f"the Gmail token has no refresh token; run: {SIGN_IN}")
+            raise GmailError("auth", None, f"the Gmail token has no refresh token; run: {sign_in}")
         try:
             c = _client(directory)
         except (OSError, ValueError, AttributeError):
@@ -337,8 +347,9 @@ class GmailClient(MailClient):
     accepted with a transport. `clock` (aware now) is for tests of find_sent's timing."""
 
     def __init__(self, directory: str | None = None, *, token_dir: str | None = None,
-                 transport: Transport | None = None, token_provider: Callable[[], str] | None = None,
-                 clock: Callable[[], datetime] | None = None, reconcile_after_minutes: int | None = None):
+                 sign_in: str = SIGN_IN, transport: Transport | None = None,
+                 token_provider: Callable[[], str] | None = None, clock: Callable[[], datetime] | None = None,
+                 reconcile_after_minutes: int | None = None):
         if token_provider is not None and transport is None:
             raise ValueError("a token_provider replaces the real token only with a fake transport")
         self.directory = _normalise(directory or gmail_dir())
@@ -346,7 +357,7 @@ class GmailClient(MailClient):
         if is_default_dir(self.directory) or _in_default_dir(self.token_dir):
             live_checkout.require_live("the real Gmail client")
         self._transport = transport
-        self._token_provider = token_provider or (lambda: _token(self.directory, self.token_dir))
+        self._token_provider = token_provider or (lambda: _token(self.directory, self.token_dir, sign_in))
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.settle_minutes = settle_minutes(reconcile_after_minutes)
 

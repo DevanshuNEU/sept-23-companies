@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 import live_checkout
 from outreach.drafts.checks import load_banned
 from outreach.sending.config import load_config
-from outreach.sending.gmail import TOKEN_FILE, GmailClient, gmail_dir, token_dir_for
+from outreach.sending.gmail import TOKEN_FILE, GmailClient, gmail_dir, sign_in_command, token_dir_for
 from outreach.sending.mail import GmailError
 from outreach.sending.notify import mac_notifier
 from outreach.sending.tick import BUSY_LINE, TickDeps, run_tick
@@ -95,7 +95,7 @@ def _clients(cfg) -> dict:
             continue
         folder = token_dir_for(cfg, acct.address, base)
         if os.path.exists(os.path.join(folder, TOKEN_FILE)):
-            out[acct.address] = GmailClient(base, token_dir=folder)
+            out[acct.address] = GmailClient(base, token_dir=folder, sign_in=sign_in_command(cfg, acct.address))
     return out
 
 
@@ -173,11 +173,11 @@ def _whoami(address: str | None) -> int:
     cfg = load_config()
     acct = _account(cfg, address)
     base = gmail_dir()
-    flag = "" if acct is cfg.accounts[0] else f" --account {acct.address}"
+    command = sign_in_command(cfg, acct.address)
     try:
-        print(GmailClient(base, token_dir=token_dir_for(cfg, acct.address, base)).profile().email)
+        print(GmailClient(base, token_dir=token_dir_for(cfg, acct.address, base), sign_in=command).profile().email)
     except GmailError as err:
-        _say(f"Gmail sign-in is not working for {acct.address} ({err}); run: python -m outreach.sending auth{flag}")
+        _say(f"Gmail sign-in is not working for {acct.address} ({err}); run: {command}")
         return 1
     return 0
 

@@ -1335,6 +1335,53 @@ class MultiAccountTest(MultiBase):
         self.assertEqual(len(self.notices), 1)  # one notice a day
         self.assertEqual(self.runs()[-1]["status"], "partial")
 
+    def test_a_never_signed_in_account_is_asked_to_sign_in_not_to_sign_in_again(self):
+        self.clients = {REST: self.gmail}  # no token file for account 2 yet (first deploy)
+        self.tick()
+        self.assertEqual(self.notices, [(tick.STOP_TITLE, f"{GENERAL} has no Gmail sign-in yet. Sign in to start "
+                                         f"sending from {GENERAL}: python -m outreach.sending auth --account "
+                                         f"{GENERAL}")])
+
+    def test_a_dead_token_is_asked_to_sign_in_again(self):
+        self.gmail2.fail_profile(GmailError("auth", 401, "invalid_grant"))
+        self.tick()
+        self.assertEqual(self.notices, [(tick.STOP_TITLE, f"Gmail is signed out on {GENERAL}, so nothing is sent "
+                                         "from it and its replies are not read. Sign in again to resume: "
+                                         f"python -m outreach.sending auth --account {GENERAL}")])
+
+    def held_and_fresh(self) -> tuple[int, int]:
+        """A company account 1 emailed, with a colleague's first email queued (it routes to account 2), and a fresh
+        company's first email."""
+        old = seed_company(self.db, "Old Co")
+        self.rest_thread(old, "Olga", "olga@old.example")
+        person = seed_email_person(self.db, old, "Nina", "nina@old.example")
+        held = seed_message(self.db, person, subject="Your team and the backend role 80", body=body(80))
+        return held, self.approve()
+
+    def test_a_gmail_500_on_account_1s_sign_in_check_holds_only_the_companies_it_emailed(self):
+        held, fresh = self.held_and_fresh()
+        self.gmail.fail_profile(GmailError("server", 500, "backend error"))
+        report = self.tick()
+        self.assertEqual(report.accounts, {REST: "unknown", GENERAL: "ok", NEU: "not_read"})
+        self.assertEqual(report.sent, (fresh,))
+        self.assertEqual(self.message(held)["state"], "approved")
+        self.assertEqual(report.waiting, {"inbound_unread": 1})
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        self.assertEqual(self.problems, [])
+
+    def test_a_gmail_500_on_account_1s_inbound_read_holds_only_the_companies_it_emailed(self):
+        held, fresh = self.held_and_fresh()
+        def fail():
+            raise GmailError("server", 500, "backend error")
+        self.hooks["thread"] = fail  # account 1 is read first (config order): its first thread read fails
+        report = self.tick()
+        self.assertEqual(report.accounts[REST], "ok")
+        self.assertTrue(any(f"{REST} was not fully read" in line for line in report.lines))
+        self.assertEqual(report.sent, (fresh,))
+        self.assertEqual(self.message(held)["state"], "approved")
+        self.assertEqual(report.waiting, {"inbound_unread": 1})
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+
     def test_the_northeastern_account_has_no_client_and_sponsor_mail_waits(self):
         mid = self.approve()
         self.sponsor(mid)

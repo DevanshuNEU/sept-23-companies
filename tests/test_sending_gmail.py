@@ -337,6 +337,27 @@ class TokenDirTest(NoNetwork):
             gmail._token(self.dir, two)  # never falls back to account 1's token
         self.assertEqual(cm.exception.kind, "auth")
 
+    def test_a_sign_in_error_names_the_accounts_own_command(self):
+        self.live(True)
+        two = os.path.join(self.dir, self.general)
+        os.makedirs(two)
+        with open(os.path.join(two, "token.json"), "w") as f:
+            json.dump({"access_token": "ya29.old", "expires_at": 0}, f)  # expired, and no refresh token
+        command = gmail.sign_in_command(self.cfg, self.general)
+        self.assertEqual(command, f"python -m outreach.sending auth --account {self.general}")
+        self.assertEqual(gmail.sign_in_command(self.cfg, self.rest), "python -m outreach.sending auth")
+        client = gmail.GmailClient(self.dir, token_dir=two, sign_in=command)
+        with self.assertRaises(GmailError) as cm:
+            client.profile()
+        self.assertEqual(cm.exception.kind, "auth")
+        self.assertIn(f"--account {self.general}", str(cm.exception))
+        for broken in ("{", "{}"):  # unreadable, then no token at all
+            with open(os.path.join(two, "token.json"), "w") as f:
+                f.write(broken)
+            with self.assertRaises(GmailError) as cm:
+                client.profile()
+            self.assertIn(f"--account {self.general}", str(cm.exception))
+
     def test_a_token_folder_inside_the_real_secrets_folder_is_live_only(self):
         self.live(False)
         inside = os.path.join(gmail.DEFAULT_DIR, self.general)

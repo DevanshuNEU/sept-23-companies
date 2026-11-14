@@ -481,6 +481,52 @@ describe('the Jobs page', () => {
       await waitFor(() => expect(rows().some((r) => r.getAttribute('data-job') === '9001')).toBe(false));
     });
 
+    it('the row stays gone when the list read after the commit does not answer', async () => {
+      // The live list takes seconds to read and answers 503 busy when Knock is loaded. The write went through, so the
+      // posting must stay off even though the list on screen was read before it.
+      const user = userEvent.setup();
+      const { client } = await open();
+      const saved = vi.spyOn(client, 'markApplied');
+      await user.click(appliedButton());
+      const reads = vi.spyOn(client, 'jobs').mockRejectedValue(new ApiError('network', 'Knock is busy right now. Nothing was saved. Try again in a moment.'));
+      await leavePage();
+      await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(reads).toHaveBeenCalled());
+      await settle(0);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(rows().some((r) => r.getAttribute('data-job') === '9000')).toBe(false);
+      expect(screen.getByText('21 at your level in the last 30 days')).toBeInTheDocument();
+    });
+
+    it('a passed row stays gone when the list read after the commit does not answer', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      const saved = vi.spyOn(client, 'passJob');
+      await user.click(within(rows()[0] as HTMLElement).getByRole('button', { name: /^Pass/ }));
+      const reads = vi.spyOn(client, 'jobs').mockRejectedValue(new ApiError('network', 'Knock is busy right now. Nothing was saved. Try again in a moment.'));
+      await leavePage();
+      await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(reads).toHaveBeenCalled());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(rows().some((r) => r.getAttribute('data-job') === '9000')).toBe(false);
+      expect(screen.getByText('21 at your level in the last 30 days')).toBeInTheDocument();
+    });
+
+    it('a click on the row he is on moves him to the next row, not back to the top', async () => {
+      const user = userEvent.setup();
+      await open();
+      press('ArrowDown');
+      press('ArrowDown');
+      const next = rows()[3]?.getAttribute('data-job');
+      await user.click(appliedButton(2));
+      expect(rows()[2]?.getAttribute('data-job')).toBe(next);
+      expect(rows()[2]).toHaveAttribute('aria-current', 'true');
+    });
+
     it('puts the row back and says what happened when it did not go through', async () => {
       const user = userEvent.setup();
       const { client } = await open();
@@ -520,6 +566,20 @@ describe('the Jobs page', () => {
       // The list read again says the same: the mark is the company's reached day now.
       await waitFor(() => expect(retell().every((r) => /Reached Nov 10/.test(r.textContent ?? ''))).toBe(true));
       expect(rows()).toHaveLength(20); // the postings stay where they were
+    });
+
+    it('every row of the company keeps its reached tag when the list read after the commit does not answer', async () => {
+      const user = userEvent.setup();
+      const { client } = await open();
+      await user.click(reachedButton(rows()[0] as HTMLElement));
+      const reads = vi.spyOn(client, 'jobs').mockRejectedValue(new ApiError('network', 'Knock is busy right now. Nothing was saved. Try again in a moment.'));
+      await leavePage();
+      expect(await within(rows()[0] as HTMLElement).findByText('Marked Retell AI reached.')).toBeInTheDocument();
+      await waitFor(() => expect(reads).toHaveBeenCalled());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      for (const r of retell()) expect(r).toHaveTextContent('Reached Nov 10');
     });
 
     it('Reached can be undone in the undo window', async () => {

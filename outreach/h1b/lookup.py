@@ -18,13 +18,14 @@ from pathlib import Path
 from outreach.h1b import h1b_key
 from outreach.store.db import db_path
 
-__all__ = ["NO_RECORD", "H1bTag", "h1b_dir", "tag_for", "forget", "stamp"]
+__all__ = ["NO_RECORD", "H1bTag", "h1b_dir", "tag_for", "built_on", "has_list", "forget", "stamp"]
 
 NO_RECORD = "No H-1B on record"
 _YEAR = re.compile(r"FY(\d{4})")
 
 _lock = threading.Lock()
-_cache: dict = {"stamp": None, "path": None, "rows": None}
+_cache: dict = {"stamp": None, "path": None, "rows": None, "built": None}
+_BUILT = re.compile(r"^Built (\d{4}-\d{2}-\d{2})", re.M)
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class H1bTag:
     total: int  # approvals over the years the list shows
     trend: str  # rising, falling, steady, new, stopped, one year, none
     years: tuple[tuple[int, int], ...] = ()  # (fiscal year, approvals)
+    uscis_name: str = ""  # the USCIS employer name(s) the list matched, as it prints them
 
     @property
     def label(self) -> str:
@@ -54,7 +56,7 @@ def h1b_dir() -> Path:
 def forget() -> None:
     """Drop the parsed file (a test, or after a rebuild in the same process)."""
     with _lock:
-        _cache.update(stamp=None, path=None, rows=None)
+        _cache.update(stamp=None, path=None, rows=None, built=None)
 
 
 def stamp() -> tuple[int, int] | None:
@@ -96,11 +98,12 @@ def _parse(text: str) -> dict[str, H1bTag] | None:
         if not total or not key:
             continue
         if key not in rows or total > rows[key].total:
-            rows[key] = H1bTag(total, cells[trend_at], counts)
+            rows[key] = H1bTag(total, cells[trend_at], counts, cells[trend_at + 1] if len(cells) > trend_at + 1 else "")
     return rows if years is not None else None
 
 
 def _load() -> dict[str, H1bTag] | None:
+    """The parsed list, None without a usable one."""
     path = h1b_dir() / "companies.md"
     seen = stamp()
     if seen is None:
@@ -109,12 +112,27 @@ def _load() -> dict[str, H1bTag] | None:
         if _cache["path"] == path and _cache["stamp"] == seen:
             return _cache["rows"]
     try:
-        rows = _parse(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        rows = _parse(text)
     except (OSError, UnicodeDecodeError):
         return None
+    built = _BUILT.search(text)
     with _lock:
-        _cache.update(stamp=seen, path=path, rows=rows)
+        _cache.update(stamp=seen, path=path, rows=rows, built=built.group(1) if built else None)
     return rows
+
+
+def has_list() -> bool:
+    """True when a usable list is built."""
+    return _load() is not None
+
+
+def built_on() -> str | None:
+    """The day the list was built (YYYY-MM-DD), None without a usable list or a build line."""
+    if _load() is None:
+        return None
+    with _lock:
+        return _cache["built"]
 
 
 def tag_for(name: str | None) -> H1bTag | None:

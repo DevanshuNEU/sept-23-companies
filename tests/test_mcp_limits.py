@@ -11,6 +11,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -41,7 +42,8 @@ ALL_TOOLS = ("ranked_companies", "company", "person", "followups_due", "record_r
             "mark_no_go",
             "save_draft", "save_followup", "save_linkedin_note", "add_people", "reader_next", "reader_submit",
             "prepare_targets", "submit_candidates", "knock_status", "contact_check", "intake", "log_sent", "draft_brief",
-             "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person", "check_draft")
+             "connect_followups", "log_miss", "update_person", "mark_email_bounced", "move_person", "check_draft",
+             "h1b_history")
 BODY = ("Hi Lee,\n\nI read your post on the queue rewrite at Acme and how the team moved billing off a nightly batch. "
         "I build backend systems in Go and Python, and last year I shipped a queue that handled thousands of "
         "requests a minute without a page. I would like to help your team keep that kind of work calm, and I am "
@@ -91,6 +93,13 @@ class SweepCase(McpCase):
         live = mock.patch.object(live_checkout, "is_live", return_value=True)
         live.start()
         self.addCleanup(live.stop)
+        h1b_dir = tempfile.mkdtemp(prefix="outreach-h1b-sweep-")  # h1b_history needs a built list to answer
+        Path(h1b_dir, "companies.md").write_text(
+            "Built 2026-11-14\n\n| Company | FY2025 | FY2026 | Trend | USCIS name |\n| --- | --- | --- | --- | --- |\n"
+            "| Acme | 1 | 2 | rising | ACME INC |\n", encoding="utf-8")
+        h1b = mock.patch.dict(os.environ, {"OUTREACH_H1B_DIR": h1b_dir})
+        h1b.start()
+        self.addCleanup(h1b.stop)
         self.acme = seed.company(self.db, "Acme", "working")
         self.pat = seed.person(self.db, self.acme, "Pat Lee", email="pat@acme.example")
         self.drafted = seed.message(self.db, seed.touch(self.db, self.pat), 0, subject="Pat and payments",
@@ -140,6 +149,7 @@ class SweepCase(McpCase):
         return {
             "ranked_companies": ({}, None),
             "company": ({"company_id": self.acme}, None),
+            "h1b_history": ({"company_id": self.acme}, None),
             "person": ({"person_id": self.pat}, None),
             "draft_brief": ({"person_id": self.pat}, None),
             "check_draft": ({"person_id": self.lee, "subject": "Your queue rewrite", "body": BODY}, None),
@@ -196,7 +206,7 @@ class ToolListTest(unittest.TestCase):
     def test_the_tool_list_is_exactly_the_pinned_tools(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(sorted(names), sorted(ALL_TOOLS))
-        self.assertEqual(len(names), 27)
+        self.assertEqual(len(names), 28)
 
 
 class SweepTest(SweepCase):

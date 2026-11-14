@@ -87,6 +87,14 @@ describe('the Jobs page', () => {
     expect(legend).not.toHaveTextContent(/done/i);
   });
 
+  it('shows the company\'s H-1B tag as a plain badge with the years as its hover text, and no tag without a list', async () => {
+    await open();
+    const tagged = within(row(9000)).getByText('H-1B 14, rising');
+    expect(tagged).toHaveAttribute('title', expect.stringContaining('FY2026 7'));
+    expect(within(row(9001)).getByText('No H-1B on record')).toBeInTheDocument(); // Pylon
+    expect(row(9002)).not.toHaveTextContent(/H-1B/); // Cerebrium: the sample has no list line for it
+  });
+
   it('lists newest first by when each job was posted, and has no score or ranking text', async () => {
     await open();
     expect(rows().map((r) => r.getAttribute('data-job')).slice(0, 5)).toEqual(['9000', '9001', '9002', '9004', '9005']);

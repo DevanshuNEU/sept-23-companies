@@ -2258,6 +2258,15 @@ export interface components {
             /** Listings */
             listings: number;
         };
+        /** H1bTagWire */
+        H1bTagWire: {
+            /** Detail */
+            detail: string;
+            /** Label */
+            label: string;
+            /** Trend */
+            trend: string;
+        };
         /** HealthBoards */
         HealthBoards: {
             /** Active */
@@ -2401,6 +2410,7 @@ export interface components {
             firstSeenAt: string;
             /** Forclient */
             forClient: boolean;
+            h1b: components["schemas"]["H1bTagWire"] | null;
             /** Leveltag */
             levelTag: string;
             /** Listat */
@@ -3043,6 +3053,7 @@ export interface components {
              * @enum {string}
              */
             group: "replied" | "review" | "approved" | "sending" | "checking" | "sent" | "paused" | "closed";
+            h1b: components["schemas"]["H1bTagWire"] | null;
             /** Messageid */
             messageId: number;
             nextDue: components["schemas"]["NextDue"] | null;

@@ -5,8 +5,12 @@ first, then a reply, then a paused company), plus one rule the fixture gets by c
 closed or removed company is in Closed. An approved row's schedule is the sender's own verdict
 (`outreach.sending.status.queue_schedule`), never a second reading of the rules.
 """
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from typing import get_args
+from unittest import mock
 
 from outreach.api.models.outbox import ScheduleReason
 from outreach.sending.queue import REASONS
@@ -504,3 +508,43 @@ class CompareTest(OutboxBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class H1bTagTest(OutboxBase):
+    """A row carries the company's H-1B tag from `companies.md` (#252): shown only, the queue order is the sender's."""
+
+    def setUp(self):
+        super().setUp()
+        from outreach.h1b import lookup
+        lookup.forget()
+        self.addCleanup(lookup.forget)
+        self.dir = Path(tempfile.mkdtemp(prefix="outreach-h1b-outbox-"))
+        patch = mock.patch.dict(os.environ, {"OUTREACH_H1B_DIR": str(self.dir)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def one_item(self, company_name: str) -> dict:
+        co = seed.company(self.conn, company_name, status="working")
+        t = self.thread(co, "Dee Drafted")
+        seed.message(self.conn, t, 0, "drafted")
+        return self.by_touch(self.outbox())[t]
+
+    def test_a_row_shows_the_tag_of_its_company(self):
+        (self.dir / "companies.md").write_text(
+            "| Company | FY2025 | FY2026 | Trend | USCIS name |\n| --- | --- | --- | --- | --- |\n"
+            "| Listed Co | 4 | 8 | rising | LISTED CO INC |\n", encoding="utf-8")
+        self.assertEqual(self.one_item("Listed Co")["h1b"]["label"], "H-1B 12, rising")
+        self.assertEqual(self.one_item("Other Co")["h1b"]["label"], "No H-1B on record")
+
+    def test_no_list_means_no_tag(self):
+        self.assertIsNone(self.one_item("Listed Co")["h1b"])
+
+    def test_a_new_build_shows_without_waiting_for_the_view_cache(self):
+        table = "| Company | FY2025 | FY2026 | Trend | USCIS name |\n| --- | --- | --- | --- | --- |\n"
+        (self.dir / "companies.md").write_text(table + "| Listed Co | 4 | 8 | rising | LISTED |\n", encoding="utf-8")
+        co = seed.company(self.conn, "Listed Co", status="working")
+        t = self.thread(co, "Dee Drafted")
+        seed.message(self.conn, t, 0, "drafted")
+        self.assertEqual(self.by_touch(self.outbox())[t]["h1b"]["label"], "H-1B 12, rising")
+        (self.dir / "companies.md").write_text(table + "| Listed Co | 4 | 20 | rising | LISTED |\n", encoding="utf-8")
+        self.assertEqual(self.by_touch(self.outbox())[t]["h1b"]["label"], "H-1B 24, rising")

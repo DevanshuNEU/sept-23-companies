@@ -26,6 +26,7 @@ from outreach.api.models.outbox import (
     OutboxDetail, OutboxFollowup, OutboxHook, OutboxItem, OutboxReply, OutboxView, Schedule,
 )
 from outreach.api.queries import people as people_queries
+from outreach.api.queries.h1b import h1b_wire
 from outreach.api.queries.company import CLOSE_WORDS, Holds, company_holds, person_ref, rank_postings, role_to_name
 from outreach.api.queries.outcomes import company_refs, people_by_ids
 from outreach.api.queries.sending import moment, sending_status
@@ -296,7 +297,7 @@ class _Outbox:
             summary=self._summary(group, touch, m, company, checks, schedule, next_due),
             worst=None if not checks else "block" if blocks else "warn" if warns else "pass", block_count=blocks,
             warn_count=warns, at=self._at(group, touch, m, schedule), schedule=schedule, next_due=next_due,
-            revision=m["revision"])
+            revision=m["revision"], h1b=h1b_wire(company.name))
         return item, m
 
     # ------------------------------------------------------------------------------------------ the list

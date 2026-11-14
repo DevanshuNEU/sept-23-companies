@@ -24,6 +24,7 @@ from outreach.api.queries import jobs_list as queries
 from outreach.api.routers import row_id
 from outreach.api.services import check_now as check_service
 from outreach.api.services import jobs as service
+from outreach.h1b import lookup as h1b_lookup
 from outreach.pipeline.joblist import LEVELS, JobFilters
 
 log = logging.getLogger("outreach.api")
@@ -54,7 +55,7 @@ async def jobs(request: Request, view: JobView = "your_level", window: JobWindow
             except ValueError as err:
                 raise ApiProblem("bad_request", "That page link is out of date. Reload the list.") from None
 
-    return await views.serve(request, JobsView, compute)
+    return await views.serve(request, JobsView, compute, h1b_lookup.stamp)
 
 
 @router.post("/jobs/{posting_id}/pass", response_model=PassJobResult)

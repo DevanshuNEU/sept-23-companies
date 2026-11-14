@@ -21,6 +21,7 @@ from outreach.api.queries import outbox as queries
 from outreach.api.routers import MAX_ID, row_id
 from outreach.api.services import outbox as service
 from outreach.drafts.checks import load_banned
+from outreach.h1b import lookup as h1b_lookup
 from outreach.sending.config import load_config
 from outreach.store import transaction
 
@@ -29,12 +30,14 @@ router = APIRouter(tags=["outbox"])
 
 @router.get("/outbox", response_model=OutboxView)
 async def outbox(request: Request) -> Response:
-    def compute(now: str, old_sender: bool) -> OutboxView:
+    def compute(now: str, inputs: tuple[bool, tuple[int, int] | None]) -> OutboxView:
+        old_sender, _ = inputs  # the H-1B list's stamp is only part of the cache key: a new build shows at once
         cfg = load_config()
         with read_conn(request) as conn:
             return queries.outbox_view(conn, now, cfg, old_sender_loaded=old_sender)
 
-    return await views.serve(request, OutboxView, compute, request.app.state.old_sender_loaded)
+    return await views.serve(request, OutboxView, compute,
+                             lambda: (request.app.state.old_sender_loaded(), h1b_lookup.stamp()))
 
 
 # Declared before /outbox/{touch_id}, which would otherwise take "compare" as an id.

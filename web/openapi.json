@@ -2727,6 +2727,29 @@
         "title": "GapCompany",
         "type": "object"
       },
+      "H1bTagWire": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "trend": {
+            "title": "Trend",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "detail",
+          "trend"
+        ],
+        "title": "H1bTagWire",
+        "type": "object"
+      },
       "HealthBoards": {
         "properties": {
           "active": {
@@ -3106,6 +3129,16 @@
             "title": "Forclient",
             "type": "boolean"
           },
+          "h1b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/H1bTagWire"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "levelTag": {
             "title": "Leveltag",
             "type": "string"
@@ -3215,7 +3248,8 @@
           "yc",
           "contactedOn",
           "maybeStaffing",
-          "forClient"
+          "forClient",
+          "h1b"
         ],
         "title": "JobRowWire",
         "type": "object"
@@ -4950,6 +4984,16 @@
             "title": "Group",
             "type": "string"
           },
+          "h1b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/H1bTagWire"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "messageId": {
             "title": "Messageid",
             "type": "integer"
@@ -5076,7 +5120,8 @@
           "at",
           "schedule",
           "nextDue",
-          "revision"
+          "revision",
+          "h1b"
         ],
         "title": "OutboxItem",
         "type": "object"

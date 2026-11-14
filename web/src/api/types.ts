@@ -149,11 +149,14 @@ export interface Schedule { // derived: the sender's verdict for an approved ema
   tz: string; reason: ScheduleReason;
   text: string; companySentToday: number; companySlotsLeft: number;
 }
+/** A company's H-1B tag from the H-1B list (#252): a plain fact, never a sort or a hide. `detail` is the hover text. */
+export interface H1bTag { label: string; detail: string; trend: string }
 export interface OutboxItem {
   touchId: Id; messageId: Id; seq: 0 | 1 | 2 | 3 | 4; state: MessageState; touchState: TouchState;
   group: OutboxGroup; sortKey: string; person: PersonRef; company: CompanyRef;
   subject: string; preview: string; summary: string; worst: CheckSeverity | null; blockCount: number; warnCount: number;
   at: IsoTime; schedule: Schedule | null; nextDue: { seq: 1 | 2 | 3 | 4; on: IsoDate } | null; revision: Revision;
+  h1b: H1bTag | null; /* the company's H-1B tag; null: no H-1B list built (#252) */
 }
 export interface OutboxCounts { replied: number; review: number; approved: number; sending: number; checking: number; sent: number; paused: number; closed: number }
 export interface OutboxView {
@@ -421,6 +424,7 @@ export interface JobRow {
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
   maybeStaffing: boolean /* work tier 3, staffing-flagged and not promoted (#257) */; forClient: boolean /* opens with client wording (#257) */;
+  h1b: H1bTag | null; /* the company's H-1B tag; null: no H-1B list built (#252) */
 }
 export interface JobCounts { yourLevel: number; higher: number; other: number }
 export interface JobsView { asOf: IsoTime; rows: JobRow[]; total: number; nextAfter: string | null; counts: JobCounts }

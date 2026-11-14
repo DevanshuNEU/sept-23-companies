@@ -14,6 +14,7 @@
  *   happen if it were approved now, so the UI never derives it.
  * - `ids` names the rows tests reach for; everything else is found by name in a view.
  */
+import { sampleH1b } from './h1b-sample';
 import type {
   AccountStatus, Actor, Check, CheckFix, CheckSeverity, CloseReason, CompanyEvent, CompanyPerson, CompanyRef, CompanyStatus, CompanyView, Confidence,
   DailyEntry, DoneView, DraftCompare, Fact, FactKind, Id, ImportSource, IsoDate, IsoTime, JobRunSummary, LevelTier, LinkedInGroup,
@@ -538,7 +539,7 @@ function buildItem(c: Ctx, s: ItemSpec, rank: number): { item: OutboxItem; detai
     sortKey: `${GROUP_INDEX[s.group]}.${String(rank).padStart(5, '0')}`, person: s.person, company: c.co(s.company),
     subject: s.subject, preview: s.preview ?? s.subject, summary: s.summary,
     worst: checks.length === 0 ? null : blockCount ? 'block' : warnCount ? 'warn' : 'pass', blockCount, warnCount,
-    at: s.at, schedule: s.schedule ?? null, nextDue: s.nextDue ?? null, revision: 1,
+    at: s.at, schedule: s.schedule ?? null, nextDue: s.nextDue ?? null, revision: 1, h1b: sampleH1b(s.company),
   };
   const first = s.person.name.split(' ')[0] ?? s.person.name;
   const detail: OutboxDetail = {

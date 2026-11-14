@@ -22,7 +22,7 @@ ScheduleReason = Literal[
     "ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
     "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
     "company_held",
-    "per_company_limit", "per_company_gap", "recruiter_waits", "no_address", "no_thread", "lane_waits",
+    "per_company_limit", "per_company_gap", "no_address", "no_thread", "lane_waits",
     "inbound_unread",
     "company_closed", "no_go", "reply_stop", "touch_done",
 ]

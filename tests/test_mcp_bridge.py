@@ -237,7 +237,7 @@ class IntakeTest(BridgeCase):
         self.assertEqual(len(out["people"]), 6)
         self.assertTrue(all(p["recorded"] for p in out["people"]))
         verdicts = [p["route"]["verdict"] for p in out["people"]]
-        self.assertEqual(verdicts, ["find_someone_else"] + ["linkedin_note"] * 5)
+        self.assertEqual(verdicts, ["linkedin_note"] * 6)
         self.assertEqual(out["people"][5]["route"]["key"], "linkedin.hard_total")
         self.assertIn("your call", out["people"][5]["route"]["reason"])
 

@@ -82,7 +82,7 @@ BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown
                "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
               "subject_reused", "link_count", "signature", "narrated_email", "reused_sentence", "same_opening",
-              "no_person_fact", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "no_person_fact", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -473,15 +473,6 @@ def _sameness(conn, d: DraftInput) -> list[Check]:
     return out
 
 
-def _recruiter(d: DraftInput) -> Check:
-    if d.role_kind != "recruiter":
-        return _check("recruiter", "pass", "Not a recruiter", f"Role kind is {d.role_kind}.")
-    return _check("recruiter", "warn", "Recruiter",
-                  "This person is a recruiter. Email a recruiter only when no engineer, manager or founder is "
-                  "found, and name the exact role up front. If the role kind is wrong, change it.",
-                  fix={"kind": "role_kind"})
-
-
 # Rules on current data
 
 def _family(companies: dict, survivor: int) -> list[int]:
@@ -622,7 +613,6 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _stale_hook(d, now),
         _subject_wording(d),
         _subject_length(d),
-        _recruiter(d),
         *voice_checks(d.body, d.role_kind, ground=ground),
         _followup_subject(conn, d),
         _near_identical(conn, d, family),

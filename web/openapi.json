@@ -7731,7 +7731,6 @@
               "company_held",
               "per_company_limit",
               "per_company_gap",
-              "recruiter_waits",
               "no_address",
               "no_thread",
               "lane_waits",

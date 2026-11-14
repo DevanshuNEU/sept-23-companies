@@ -385,13 +385,12 @@ class LimitsTest(Base):
 
 
 class RecruiterTest(Base):
-    def test_recruiter_waits_for_the_engineer_at_the_same_company(self):
+    def test_a_recruiter_does_not_wait_for_the_engineer_at_the_same_company(self):
         _, recruiter = self.approve(role="recruiter", approved_at="2026-11-02T10:00:00Z")
         _, engineer = self.approve(role="engineer", approved_at="2026-11-02T11:00:00Z")
         verdicts = self.verdicts_at()
-        self.assertEqual(verdicts[recruiter].reason, "recruiter_waits")
+        self.assertEqual(verdicts[recruiter].reason, "ready")
         self.assertEqual(verdicts[engineer].reason, "ready")
-        self.assertEqual(queue.pick(list(verdicts.values()), queue.load_queue(self.db), account=ONE).message_id, engineer)
 
     def test_recruiter_alone_is_ready(self):
         _, recruiter = self.approve(role="recruiter")
@@ -402,29 +401,20 @@ class RecruiterTest(Base):
         self.approve(role="engineer", company=seed_company(self.db, "Other"))
         self.assertEqual(self.reason(recruiter), "ready")
 
-    def test_a_stopped_engineer_message_does_not_hold_the_recruiter(self):
-        _, recruiter = self.approve(role="recruiter")
-        engineer, message = self.approve(role="engineer")
-        self.db.execute("INSERT INTO no_go(person_id, reason, source, created_at) VALUES (?, 'said_no', 'reply', "
-                        "'2026-11-01T12:00:00Z')", (engineer,))
-        verdicts = self.verdicts_at()
-        self.assertEqual(verdicts[message].reason, "no_go")
-        self.assertEqual(verdicts[recruiter].reason, "ready")
-
-    def test_a_waiting_engineer_still_holds_the_recruiter_back(self):
+    def test_a_waiting_engineer_does_not_hold_the_recruiter_back(self):
         _, recruiter = self.approve(role="recruiter")
         _, engineer = self.approve(role="engineer", tz="Asia/Tokyo")
         verdicts = self.verdicts_at()
         self.assertEqual(verdicts[engineer].reason, "window")
-        self.assertEqual(verdicts[recruiter].reason, "recruiter_waits")
+        self.assertEqual(verdicts[recruiter].reason, "ready")
 
-    def test_recruiter_waits_for_an_engineer_at_the_merged_duplicate(self):
+    def test_a_recruiter_does_not_wait_for_an_engineer_at_the_merged_duplicate(self):
         survivor = seed_company(self.db, "Survivor")
         duplicate = seed_company(self.db, "Duplicate")
         self.merge(duplicate, survivor)
         _, recruiter = self.approve(role="recruiter", company=survivor)
         self.approve(role="manager", company=duplicate)
-        self.assertEqual(self.reason(recruiter), "recruiter_waits")
+        self.assertEqual(self.reason(recruiter), "ready")
 
     def test_recruiter_counts_inside_the_company_limit(self):
         _, recruiter = self.approve(role="recruiter")
@@ -643,7 +633,7 @@ class NoAddressTest(Base):
         self.blank_email(person)
         self.assertEqual(self.reason(message, ny(2, 8, 0)), "no_address")
 
-    def test_a_message_with_no_address_does_not_hold_a_recruiter(self):
+    def test_a_message_with_no_address_is_its_own_verdict_and_the_recruiter_is_ready(self):
         _, recruiter = self.approve(role="recruiter")
         engineer, message = self.approve(role="engineer")
         self.blank_email(engineer)
@@ -653,15 +643,10 @@ class NoAddressTest(Base):
 
 
 class RecruiterRuleEdgeTest(Base):
-    def test_a_follow_up_that_is_not_due_does_not_hold_a_recruiter(self):
-        _, recruiter = self.approve(role="recruiter")
-        self.approve_followup("2026-11-20")
-        self.assertEqual(self.reason(recruiter), "ready")
-
-    def test_a_due_follow_up_still_holds_a_recruiter(self):
+    def test_a_due_follow_up_does_not_hold_a_recruiter(self):
         _, recruiter = self.approve(role="recruiter")
         self.approve_followup("2026-11-02")
-        self.assertEqual(self.reason(recruiter), "recruiter_waits")
+        self.assertEqual(self.reason(recruiter), "ready")
 
 
 class WindowEdgeTest(Base):
@@ -722,7 +707,7 @@ class ReasonsTest(Base):
                 else:
                     self.assertIsNone(verdict.earliest_at, verdict.reason)
         self.assertTrue({"company_held", "company_paused", "company_closed", "per_company_limit", "per_company_gap",
-                         "recruiter_waits", "bad_timezone", "window", "no_address", "followup_not_due", "spacing",
+                         "bad_timezone", "window", "no_address", "followup_not_due", "spacing",
                          "not_business_day", "ready"} <= seen, seen)
 
     def test_every_reason_is_one_plain_line(self):

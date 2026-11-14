@@ -37,7 +37,7 @@ CLEAN_CODES = [
     "no_mail_server", "placeholder", "markdown_link", "visa_line", "too_many_links", "link_shortener",
     "near_identical", "no_go_person", "said_no", "closed_no_sponsorship", "banned_phrase", "dash", "length",
     "stale_hook", "subject_wording", "subject_length", "subject_reused", "link_count", "signature", "narrated_email",
-    "reused_sentence", "same_opening", "no_person_fact", "recruiter", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
+    "reused_sentence", "same_opening", "no_person_fact", "voice_eager", "voice_house_word", "voice_system_word", "voice_recital",
     "voice_rhythm",
 ]
 NO_GO_REASONS = ("no_sponsorship", "citizenship", "over_300", "defence_contractor", "agency", "said_no",
@@ -207,10 +207,8 @@ class Blocks(ChecksCase):
             with self.subTest(line=line):
                 self.assert_passes(self.run_on(body=BODY.replace("I build", line + " I build")), "visa_line")
 
-    def test_recruiter_warn_no_longer_mentions_work_authorization(self):
-        check = self.one(self.run_on(role_kind="recruiter"), "recruiter")
-        self.assertEqual(check["severity"], "warn")
-        self.assertNotIn("authorization", check["detail"].lower())
+    def test_a_recruiter_draft_has_no_recruiter_check(self):
+        self.assertNotIn("recruiter", [c["code"] for c in self.run_on(role_kind="recruiter")])
 
     def test_bare_domain_counts_as_a_link(self):
         self.assert_blocks(self.run_on(body=BODY + "\nThe team page is acme.com/team."), "too_many_links")
@@ -675,13 +673,10 @@ class Warns(ChecksCase):
         self.run_on()
         self.assertLess(time.perf_counter() - start, 1.0)
 
-    def test_recruiter_warns_with_the_role_kind_fix(self):
+    def test_a_recruiter_draft_adds_no_warning_of_its_own(self):
         found = self.run_on(role_kind="recruiter", body=words(90))
-        check = self.one(found, "recruiter")
-        self.assertEqual(check["severity"], "warn")
-        self.assertEqual(check["fix"], {"kind": "role_kind"})
+        self.assertNotIn("recruiter", [c["code"] for c in found])
         self.assertEqual(self.codes(found, "block"), [])
-        self.assert_passes(self.run_on(), "recruiter")
 
     def test_mail_server_unknown_warns(self):
         found = self.run_on(mx="unknown")

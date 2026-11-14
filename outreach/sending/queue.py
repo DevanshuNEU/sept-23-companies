@@ -42,7 +42,7 @@ __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "Queued", "
 STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
            "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
-           "company_held", "per_company_limit", "per_company_gap", "recruiter_waits", "no_address",
+           "company_held", "per_company_limit", "per_company_gap", "no_address",
            "no_thread", "lane_waits", "inbound_unread") + STOP_REASONS
 # The waits that end by themselves: their verdict carries the time they end.
 TIME_REASONS = frozenset({"not_business_day", "daily_limit", "spacing", "window", "followup_not_due",
@@ -71,7 +71,6 @@ REASON_TEXT = {
     "per_company_limit": "The daily limit for this company is used up. This goes out on the next sending day.",
     "per_company_gap": "Another email went to this company a little while ago. Waiting out its gap (20 minutes to 2 "
                        "hours, by company size).",
-    "recruiter_waits": "A recruiter waits while an email to someone else at this company is still queued.",
     "no_address": "No email address for this person.",
     "no_thread": "This follow-up has no Gmail thread to reply in, so it is not sent. Skip it, or send it as a new "
                  "first email.",
@@ -497,13 +496,6 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
         sent_by_day = {a: {today: d.sent_today} for a, d in p.days.items()}
     if next_send is None:
         next_send = {a: d.next_send for a, d in p.days.items()}
-    # A message that blocks a recruiter is one that could go out: not a stop, with an address, a thread and an
-    # account, due.
-    live_others = {q.company_id for q in pending if q.role_kind != "recruiter" and q.message_id not in p.stops
-                   and q.message_id not in p.no_thread and q.message_id not in p.behind
-                   and p.routes[q.message_id].account is not None
-                   and q.to and not (q.due_on is not None
-                                     and now < _due_start(q.due_on, cal.recipient_zone(q.tz), cfg))}
     day_begins = _utc(cal.ny_day_bounds(today, cfg)[0])
     tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
     opens_at = _local(today, cfg.window_start, ZoneInfo(cfg.day_tz))
@@ -529,7 +521,7 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
         unread = unread or p.unread_companies.get(q.company_id)
         reason, at = _decide(
             q, p.stops, gate, p.companies[q.company_id], q.company_id in p.held, now, cfg, today, day_full,
-            sends.get(q.company_id, []), day_begins, day_opens, tomorrow, free_at, q.company_id in live_others,
+            sends.get(q.company_id, []), day_begins, day_opens, tomorrow, free_at,
             no_thread=q.message_id in p.no_thread, behind=q.message_id in p.behind,
             not_before=p.not_before.get(q.message_id),
             company_pace=p.paces.get(q.company_id) or pace.default_pace(cfg), block=block,
@@ -560,7 +552,7 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
     inbound unread; company paused; company held (a hold on any company merged into the survivor counts); no
     address; a follow-up with no Gmail thread; no account can take it; follow-up not due; an earlier follow-up in
     the thread not gone out; bad time zone; not a business day; the account's daily limit; per-company limit;
-    per-company gap; recipient's window; recruiter waits; the account's spacing."""
+    per-company gap; recipient's window; the account's spacing."""
     p = prepare(conn, now, cfg, accounts, day=day, unread=unread)
     if not p.queue:
         return []
@@ -569,7 +561,7 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
 
 def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held: bool, now: datetime, cfg: SendConfig,
             today: date, day_full: bool, sends: list[Send], day_begins: datetime,
-            day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, others_queued: bool, *,
+            day_opens: datetime | None, tomorrow: datetime, next_send: datetime | None, *,
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None, company_pace: CompanyPace | None = None, block: str | None = None,
             no_account: bool = False, account_id: int | None = None,
@@ -620,8 +612,6 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
         return "per_company_gap", last + human.company_gap(q.company_id, last, cfg, company_pace)
     if not cal.in_window(now, zone, cfg):
         return "window", cal.next_window_start(now, zone, cfg)
-    if q.role_kind == "recruiter" and others_queued:
-        return "recruiter_waits", None
     if next_send is not None and now < next_send:
         return "spacing", next_send
     if day_opens is not None and now < day_opens:
@@ -638,7 +628,7 @@ def first_only(verdicts: list[Verdict], account: str | None = None) -> list[Verd
     """The verdicts while one first email may go before Gmail is proven to keep the sender's marker (`proof`): the
     first `ready` message in queue order (else the time wait that ends first) keeps its verdict, and every other
     message that is `ready` or waits on time waits as `message_id_unproven` instead. Stops and the waits that need an
-    action from him (a paused or held company, no address, no thread, a bad time zone, a recruiter waiting) keep
+    action from him (a paused or held company, no address, no thread, a bad time zone) keep
     theirs. With `account` (an address) only that account's messages are looked at; the proof is per account."""
     def mine(v: Verdict) -> bool:
         return account is None or _same(v.account, account)

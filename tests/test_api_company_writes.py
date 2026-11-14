@@ -232,10 +232,10 @@ class RoleKindTest(CompanyWritesBase):
         tid = seed.touch(self.conn, pid)
         return pid, seed.message(self.conn, tid, 0, "drafted")
 
-    def recruiter_check(self, message_id: int) -> str:
+    def check_codes(self, message_id: int) -> list[str]:
         checks = json.loads(self.conn.execute("SELECT checks FROM message WHERE message_id = ?",
                                               (message_id,)).fetchone()[0])
-        return next(c["severity"] for c in checks if c["code"] == "recruiter")
+        return [c["code"] for c in checks]
 
     def test_role_kind_change_reruns_open_draft_checks(self):
         pid, mid = self.drafted()
@@ -243,7 +243,7 @@ class RoleKindTest(CompanyWritesBase):
         self.assertEqual(res.status_code, 200, res.text)
         person = res.json()
         self.assertEqual((person["id"], person["roleKind"], person["revision"]), (pid, "recruiter", 2))
-        self.assertEqual(self.recruiter_check(mid), "warn")
+        self.assertNotIn("recruiter", self.check_codes(mid))  # the checks were re-run, and a recruiter adds none
         msg = self.conn.execute("SELECT revision, state FROM message WHERE message_id = ?", (mid,)).fetchone()
         self.assertEqual((msg["revision"], msg["state"]), (1, "drafted"))  # checks are stored, nothing else moves
         [event] = self.events("role_kind_changed")
@@ -252,7 +252,7 @@ class RoleKindTest(CompanyWritesBase):
 
         res = self.post(f"/api/people/{pid}/role-kind", {"kind": "engineer", "revision": 2})
         self.assertEqual(res.status_code, 200, res.text)
-        self.assertEqual(self.recruiter_check(mid), "pass")
+        self.assertNotIn("recruiter", self.check_codes(mid))
 
     def test_role_kind_leaves_sent_messages_alone(self):
         pid = seed.person(self.conn, self.cid, "Sam Sent")

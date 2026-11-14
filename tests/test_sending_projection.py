@@ -84,12 +84,12 @@ class ProjectionTest(Base):
         _, mid = self.approve_followup("2026-11-11")
         self.assertGreaterEqual(self.project()[mid], ny(11, 8, 0))
 
-    def test_recruiter_goes_after_the_others_at_the_company(self):
+    def test_a_recruiter_approved_first_does_not_wait_for_the_others_at_the_company(self):
         _, recruiter = self.approve(role="recruiter", approved_at="2026-11-06T10:00:00Z")
         _, one = self.approve(approved_at="2026-11-06T11:00:00Z")
         _, two = self.approve(approved_at="2026-11-06T12:00:00Z")
         got = self.project()
-        self.assertGreater(got[recruiter], max(got[one], got[two]))
+        self.assertLessEqual(got[recruiter], min(got[one], got[two]))
 
     def test_unsendable_messages_are_not_projected(self):
         paused, closed = seed_company(self.db, "Paused"), seed_company(self.db, "Closed")

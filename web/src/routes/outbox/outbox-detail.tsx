@@ -185,15 +185,11 @@ function ContextRow({ detail }: { detail: OutboxDetail }) {
       <Cell k="Role to name" v={role ? role.title : 'No open role on file'} s={role ? `Posted ${formatAge(role.firstSeenAt, asOf)}, ${role.location}` : undefined} />
       <Cell k="Hook" v={hook.text} s={hookWhen} />
       {schedule ? (
-        schedule.reason === 'recruiter_waits' ? (
-          <Cell k="If approved now" v={schedule.text} s={`Waits for the others at ${item.company.name}`} />
-        ) : (
-          <Cell
-            k={`${item.company.name} today`}
-            v={`${plural(schedule.companySentToday, 'first email', 'first emails')} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
-            s={schedule.text}
-          />
-        )
+        <Cell
+          k={`${item.company.name} today`}
+          v={`${plural(schedule.companySentToday, 'first email', 'first emails')} sent, ${plural(schedule.companySlotsLeft, 'slot', 'slots')} left`}
+          s={schedule.text}
+        />
       ) : null}
     </div>
   );

@@ -9,7 +9,8 @@ from typing import Literal
 
 from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.sending.config import AccountConfig, SendConfig
-from outreach.store.writes import append_event
+from outreach.h1b.lookup import has_list, tag_for
+from outreach.store.writes import NAME_ALIAS_SOURCES, append_event
 
 
 @dataclass(frozen=True)
@@ -41,19 +42,56 @@ def sync(conn: sqlite3.Connection, cfg: SendConfig, now: str) -> dict[str, Accou
     return out
 
 
-# A company fact that puts a company in the sponsor lane.
-_SPONSOR_FACT = ("(fact = 'everify' AND value = 'enrolled') OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) "
-                 "OR fact = 'lca'")
+# A company fact that puts a company in the sponsor lane (he marked sponsorship yes). E-Verify and "OPT only" do not
+# decide it any more (#281); the H-1B list does.
+_SPONSOR_FACT = "fact = 'sponsorship' AND value = 'yes'"
+
+
+def _h1b_sponsor(names: list[str]) -> bool:
+    """True when the H-1B list shows approvals under any of these names. No list on disk: False."""
+    return any((tag := tag_for(n)) is not None and tag.total > 0 for n in dict.fromkeys(names))
 
 
 def lane_of(conn: sqlite3.Connection, company_id: int) -> Literal["sponsor", "general"]:
-    """Sponsor when the company is enrolled in E-Verify, sponsors (or takes OPT only), or has any LCA row. The whole
-    merge family counts: the survivor and every company merged into it, since a merge does not move evidence."""
-    row = conn.execute(
-        "WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN family f "
-        f"ON c.merged_into = f.id) SELECT 1 FROM company_fact WHERE company_id IN family AND ({_SPONSOR_FACT}) "
-        "LIMIT 1", (canonical_company(conn, company_id),)).fetchone()
-    return "sponsor" if row else "general"
+    """Sponsor when the H-1B list shows approvals for the company (its name, its merged companies' names and its name
+    aliases, as the MCP `h1b_history` reads them) or the company or anyone merged into it has sponsorship yes. With
+    no list on disk only the sponsorship fact counts."""
+    survivor = canonical_company(conn, company_id)
+    family = "WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN family f ON c.merged_into = f.id) "
+    if conn.execute(family + f"SELECT 1 FROM company_fact WHERE company_id IN family AND ({_SPONSOR_FACT}) LIMIT 1",
+                    (survivor,)).fetchone():
+        return "sponsor"
+    src = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
+    names = [r[0] for r in conn.execute(
+        family + "SELECT name FROM company WHERE company_id = ? OR company_id IN family ORDER BY company_id = ? DESC, "
+        "company_id", (survivor, survivor, survivor))]
+    names += [r[0] for r in conn.execute(
+        family + f"SELECT alias FROM company_alias WHERE company_id IN family AND source IN ({src}) ORDER BY alias_key",
+        (survivor, *NAME_ALIAS_SOURCES))]
+    return "sponsor" if _h1b_sponsor(names) else "general"
+
+
+def _family_names(conn: sqlite3.Connection, companies: dict, survivors: set[int]) -> dict[int, list[str]]:
+    """survivor -> the survivor's name, its merged companies' names, then their name aliases: two queries however many
+    survivors. The same names `lane_of` reads."""
+    if not survivors:
+        return {}
+    survivor_of = {cid: resolve_company(companies, cid)[-1] for cid in companies}
+    out: dict[int, list[str]] = {cid: [] for cid in survivors}
+    rows = conn.execute("SELECT company_id, name FROM company ORDER BY company_id").fetchall()
+    for cid in survivors:  # the survivor's own name first
+        out[cid] += [r["name"] for r in rows if r["company_id"] == cid]
+    for r in rows:
+        top = survivor_of.get(r["company_id"])
+        if top in out and top != r["company_id"]:
+            out[top].append(r["name"])
+    src = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
+    for r in conn.execute(f"SELECT company_id, alias FROM company_alias WHERE source IN ({src}) ORDER BY alias_key",
+                          NAME_ALIAS_SOURCES):
+        top = survivor_of.get(r["company_id"])
+        if top in out:
+            out[top].append(r["alias"])
+    return out
 
 
 def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
@@ -80,9 +118,13 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
     companies = company_map(conn)
     pins = {row["company_id"]: row["account_id"] for row in conn.execute(
         "SELECT company_id, account_id FROM company_sender")}
-    # Each sponsor fact counts for its company's survivor: a merge does not move evidence.
+    # Each sponsorship-yes fact counts for its company's survivor: a merge does not move evidence.
     sponsors = {resolve_company(companies, row[0])[-1] if row[0] in companies else row[0] for row in conn.execute(
         f"SELECT DISTINCT company_id FROM company_fact WHERE {_SPONSOR_FACT}")}
+    survivors = {resolve_company(companies, t["company_id"])[-1] if t["company_id"] in companies else t["company_id"]
+                 for t in touches}
+    h1b_names = _family_names(conn, companies, survivors - sponsors) if has_list() else {}
+    sponsors |= {cid for cid, names in h1b_names.items() if _h1b_sponsor(names)}
     by_id = {a.account_id: a for a in accounts.values()}
     out: dict[int, tuple[AccountRow | None, str]] = {}
     for touch in touches:

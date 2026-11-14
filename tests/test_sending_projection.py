@@ -190,7 +190,7 @@ class PerAccountProjectionTest(Base):
         cfg = lanes_cfg()
         rows = _accounts.sync(self.db, cfg, "2026-11-06T12:00:00Z")
         sponsor_co = seed_company(self.db, "Sponsor Co")
-        add_fact(self.db, sponsor_co, "everify", "enrolled")
+        add_fact(self.db, sponsor_co, "sponsorship", "yes")
         general = [self.approve(company=seed_company(self.db, f"G{i}"))[1] for i in range(3)]
         sponsor = [self.approve(company=sponsor_co)[1]]
         got = projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)

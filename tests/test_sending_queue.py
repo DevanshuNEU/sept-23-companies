@@ -828,7 +828,7 @@ class AccountsQueueTest(Base):
         self.rows = _accounts.sync(self.db, self.cfg, "2026-11-02T12:00:00Z")
         self.ids = {a: r.account_id for a, r in self.rows.items()}
         self.sponsor_co = seed_company(self.db, "Sponsor Co")
-        add_fact(self.db, self.sponsor_co, "everify", "enrolled")
+        add_fact(self.db, self.sponsor_co, "sponsorship", "yes")
 
     def found(self, now=MON, cfg=None, rows=None):
         cfg = cfg or self.cfg
@@ -882,7 +882,7 @@ class AccountsQueueTest(Base):
         _, sponsor = self.approve(company=self.sponsor_co)
         _, general = self.approve()
         closed = seed_company(self.db, "Closed Sponsor")
-        add_fact(self.db, closed, "everify", "enrolled")
+        add_fact(self.db, closed, "sponsorship", "yes")
         _, stopped = self.approve(company=closed)
         self.db.execute("UPDATE company SET status = 'closed', close_reason = 'other' WHERE company_id = ?",
                         (closed,))

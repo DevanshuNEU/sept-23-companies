@@ -1,7 +1,12 @@
 import json
+import os
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from unittest import mock
 
+from outreach.h1b import lookup
 from outreach.sending import accounts
 from outreach.sending.config import AccountConfig, SendConfig, load_config
 from outreach.store.timefmt import utcnow
@@ -23,6 +28,18 @@ def config(*accts):
     return replace(load_config(), accounts=tuple(accts))
 
 
+H1B_FILE = """# H-1B approvals by company
+
+Built 2026-11-14 from USCIS's H-1B Employer Data Hub.
+
+| Company | FY2022 | FY2023 | FY2024 | FY2025 | FY2026 | Trend | USCIS name |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Acme | 10 | 12 | 15 | 15 | 15 | steady | ACME INC |
+| Loser | 0 | 0 | 0 | 1 | 0 | one year | LOSER INC |
+| Alias Co | 5 | 5 | 5 | 5 | 5 | steady | ALIAS CO INC |
+"""
+
+
 def add_fact(conn, company_id, fact, value):
     conn.execute("INSERT INTO evidence(company_id, fact, value, confidence, source_kind, observed_on, recorded_at) "
                  "VALUES (?, ?, ?, 'estimate', 'linkedin', '2026-11-01', ?)", (company_id, fact, value, utcnow()))
@@ -34,6 +51,16 @@ class AccountsTest(unittest.TestCase):
         self.addCleanup(self.conn.close)
         self.cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"),
                           acct(SPONSOR, "sponsor", sends=False, kind="mailapp"))
+        self.h1b_dir = Path(tempfile.mkdtemp(prefix="outreach-h1b-test-"))
+        patch = mock.patch.dict(os.environ, {"OUTREACH_H1B_DIR": str(self.h1b_dir)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(lookup.forget)
+        lookup.forget()
+
+    def h1b(self, text=H1B_FILE):
+        (self.h1b_dir / "companies.md").write_text(text, encoding="utf-8")
+        lookup.forget()
 
     def synced(self, cfg=None):
         return accounts.sync(self.conn, cfg or self.cfg, NOW)
@@ -59,24 +86,62 @@ class AccountsTest(unittest.TestCase):
         self.assertEqual(got[GMAIL.upper()].account_id, 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sender_account").fetchone()[0], 1)
 
-    def test_everify_enrolled_is_sponsor(self):
-        cid, _ = self.company_touch()
+    def test_h1b_approvals_make_a_sponsor(self):
+        cid, _ = self.company_touch("Acme")
+        self.h1b()
+        self.assertEqual(accounts.lane_of(self.conn, cid), "sponsor")
+
+    def test_everify_enrolled_alone_is_general(self):
+        cid, _ = self.company_touch("Other")
+        self.h1b()
         add_fact(self.conn, cid, "everify", "enrolled")
-        self.assertEqual(accounts.lane_of(self.conn, cid), "sponsor")
+        self.assertEqual(accounts.lane_of(self.conn, cid), "general")
 
-    def test_opt_only_is_sponsor(self):
-        cid, _ = self.company_touch()
+    def test_opt_only_alone_is_general(self):
+        cid, _ = self.company_touch("Other")
+        self.h1b()
         add_fact(self.conn, cid, "sponsorship", "opt_only")
+        self.assertEqual(accounts.lane_of(self.conn, cid), "general")
+
+    def test_sponsorship_yes_is_sponsor_even_without_a_list(self):
+        cid, _ = self.company_touch("Nolist")
+        add_fact(self.conn, cid, "sponsorship", "yes")
         self.assertEqual(accounts.lane_of(self.conn, cid), "sponsor")
 
-    def test_lca_row_is_sponsor_and_other_values_are_not(self):
-        a, _ = self.company_touch("Alpha")
-        b, _ = self.company_touch("Beta")
-        add_fact(self.conn, a, "lca", LCA)
-        add_fact(self.conn, b, "sponsorship", "no")
-        add_fact(self.conn, b, "everify", "not_enrolled")
-        self.assertEqual(accounts.lane_of(self.conn, a), "sponsor")
-        self.assertEqual(accounts.lane_of(self.conn, b), "general")
+    def test_an_lca_row_alone_is_general(self):
+        cid, _ = self.company_touch("Alpha")
+        add_fact(self.conn, cid, "lca", LCA)
+        self.assertEqual(accounts.lane_of(self.conn, cid), "general")
+
+    def test_a_company_not_on_the_list_is_general(self):
+        cid, _ = self.company_touch("Beta")
+        self.h1b()
+        add_fact(self.conn, cid, "sponsorship", "no")
+        self.assertEqual(accounts.lane_of(self.conn, cid), "general")
+
+    def test_a_name_alias_finds_the_list_line(self):
+        cid, _ = self.company_touch("Aliasless")
+        self.h1b()
+        self.conn.execute("INSERT INTO company_alias(alias_key, company_id, alias, source, created_at) "
+                          "VALUES ('aliasco', ?, 'Alias Co', 'dba', ?)", (cid, NOW))
+        self.assertEqual(accounts.lane_of(self.conn, cid), "sponsor")
+        _, tid = cid, self.conn.execute("SELECT touch_id FROM touch").fetchone()[0]
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        self.assertEqual(accounts.route(self.conn, cfg, tid, self.synced(cfg))[0].cfg.address, SPONSOR)
+
+    def test_route_uses_the_h1b_lane_and_threads_still_win(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()
+        _, sponsor_tid = self.company_touch("Acme")
+        _, plain_tid = self.company_touch("Plain")
+        _, thread_tid = self.company_touch("Alias Co")
+        self.conn.execute("UPDATE touch SET account_id = ? WHERE touch_id = ?",
+                          (accts[GENERAL].account_id, thread_tid))
+        got = accounts.routes(self.conn, cfg, [sponsor_tid, plain_tid, thread_tid], accts)
+        self.assertEqual((got[sponsor_tid][0].cfg.address, got[sponsor_tid][1]), (SPONSOR, "lane"))
+        self.assertEqual((got[plain_tid][0].cfg.address, got[plain_tid][1]), (GENERAL, "lane"))
+        self.assertEqual((got[thread_tid][0].cfg.address, got[thread_tid][1]), (GENERAL, "thread"))
 
     def test_no_facts_is_general(self):
         cid, _ = self.company_touch()
@@ -91,7 +156,7 @@ class AccountsTest(unittest.TestCase):
         cid, tid = self.company_touch()
         accts = self.synced()
         self.conn.execute("UPDATE touch SET account_id = ? WHERE touch_id = ?", (accts[GENERAL].account_id, tid))
-        add_fact(self.conn, cid, "everify", "enrolled")
+        add_fact(self.conn, cid, "sponsorship", "yes")
         row, reason = accounts.route(self.conn, self.cfg, tid, accts)
         self.assertEqual((row.cfg.address, reason), (GENERAL, "thread"))
 
@@ -115,7 +180,7 @@ class AccountsTest(unittest.TestCase):
 
     def test_sponsor_lane_without_sending_account_waits(self):
         cid, tid = self.company_touch()
-        add_fact(self.conn, cid, "everify", "enrolled")
+        add_fact(self.conn, cid, "sponsorship", "yes")
         row, reason = accounts.route(self.conn, self.cfg, tid, self.synced())
         self.assertEqual((row, reason), (None, "lane_waits"))
 
@@ -136,18 +201,18 @@ class AccountsTest(unittest.TestCase):
 
     def test_merged_company_routes_by_survivor_facts(self):
         _, survivor, tid = self.merged()
-        add_fact(self.conn, survivor, "everify", "enrolled")
+        add_fact(self.conn, survivor, "sponsorship", "yes")
         cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
         row, reason = accounts.route(self.conn, cfg, tid, self.synced(cfg))
         self.assertEqual((row.cfg.address, reason), (SPONSOR, "lane"))
 
     def test_a_sponsor_fact_on_the_merged_away_company_counts_for_the_survivor(self):
-        # A merge does not move evidence: the loser's E-Verify fact still makes the survivor a sponsor company.
+        # A merge does not move evidence: the loser's H-1B line still makes the survivor a sponsor company.
         loser = seed_company(self.conn, "Loser")
         survivor, tid = self.company_touch("Survivor")
         self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
                           "WHERE company_id = ?", (survivor, loser))
-        add_fact(self.conn, loser, "everify", "enrolled")
+        self.h1b()  # the merged-away company's own H-1B line
         self.assertEqual(accounts.lane_of(self.conn, survivor), "sponsor")
         self.assertEqual(accounts.lane_of(self.conn, loser), "sponsor")
         self.assertEqual(accounts.route(self.conn, self.cfg, tid, self.synced()), (None, "lane_waits"))

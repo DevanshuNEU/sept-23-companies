@@ -654,7 +654,7 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const dana = c.person('Dana Whitcomb', 'Technical Recruiter', 'recruiter', 'Mintlify');
   const mintlifyRole = c.role('Mintlify', 'Software Engineer, New Grad', 'new_grad', SF, 6);
   add({
-    touch: T.dana, person: dana, company: 'Mintlify', group: 'review', state: 'drafted', subject: 'Software Engineer, New Grad on OPT', summary: 'Recruiter: sends after the window opens', at: et(TODAY, '09:47'),
+    touch: T.dana, person: dana, company: 'Mintlify', group: 'review', state: 'drafted', subject: 'Software Engineer, New Grad on OPT', summary: 'Recruiter: check the role kind', at: et(TODAY, '09:47'),
     schedule: sched(et('2026-11-11', '08:30'), 'spacing', 'Sends Wed Nov 11', 2, 1), body: BODY_DANA,
     checks: [
       ck('recruiter', 'warn', 'Recruiter', 'An older draft still carries this check. If the role kind is wrong, change it.', { kind: 'role_kind' }),

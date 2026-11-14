@@ -114,19 +114,30 @@ class IcimsTests(unittest.TestCase):
                   for n in range(1, MAX_PAGES + 1)}
         r, client = read(routes)
         self.assertEqual(len(client.requests), MAX_PAGES)
-        self.assertEqual(r.result, "error")  # 500 short of the total is far short
+        # 500 short of the total: our own cap stopped the read, so what was read is kept and nothing is closed
+        self.assertEqual((r.result, r.partial, len(r.jobs)), ("ok", True, 10 * MAX_PAGES))
 
     def test_a_job_seen_twice_while_paging_is_kept_once(self):
         r, _ = read({U1: json_response(page(11, [job(n) for n in range(10)])),
                      U2: json_response(page(11, [job(9), job(10)]))})
         self.assertEqual((r.result, len(r.jobs), r.partial), ("ok", 11, False))
 
-    def test_a_list_a_little_short_is_partial_and_far_short_is_an_error(self):
+    def test_a_list_a_little_short_or_far_short_is_partial(self):
         r, _ = read({U1: json_response(page(12, [job(n) for n in range(10)])), U2: json_response(page(12, []))})
         self.assertEqual((r.result, r.partial, len(r.jobs), r.validators), ("ok", True, 10, Validators()))
         self.assertIn("10 of 12", r.partial_note)
         r, _ = read({U1: json_response(page(300, [job(n) for n in range(10)])), U2: json_response(page(300, []))})
-        self.assertEqual((r.result, r.jobs), ("error", ()))
+        self.assertEqual((r.result, r.partial, len(r.jobs), r.validators), ("ok", True, 10, Validators()))
+        self.assertIn("10 of 300", r.partial_note)
+
+    def test_a_site_that_stops_listing_early_keeps_the_jobs_it_listed(self):
+        # careers.rivian.com (2026-11-14): 360 jobs listed, totalCount 953, so every full read was an error and the
+        # board never held a posting. A partial ok closes nothing, so keeping the 360 is safe.
+        pages = {list_url(HOST, n): json_response(page(953, [job(10 * n + k) for k in range(10)])) for n in range(1, 37)}
+        pages[list_url(HOST, 37)] = json_response(page(953, [job(10 * n + k) for n in (1, 2) for k in range(10)][:10]))
+        r, _ = read(pages)
+        self.assertEqual((r.result, r.partial, len(r.jobs)), ("ok", True, 360))
+        self.assertIn("360 of 953", r.partial_note)
 
     def test_a_later_page_that_fails_keeps_what_was_read_and_stops(self):
         for name, resp in {"500": status_response(500), "429": status_response(429),

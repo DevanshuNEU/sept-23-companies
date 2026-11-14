@@ -59,8 +59,9 @@ def h1b_key(name: str | None) -> str:
 class H1bRow:
     year: int
     employer: str
-    approvals: int  # initial plus continuing approvals
+    approvals: int  # initial plus continuing approvals (every approval column)
     keys: tuple[str, ...]
+    hub: bool = False  # from the hub's Crosstab export, which replaces the archive file of the same year
 
 
 @dataclass(frozen=True)
@@ -90,13 +91,25 @@ def _column(header: list[str], *words: str) -> str | None:
     return None
 
 
+def _encoding(path: Path) -> str:
+    """The hub's Crosstab export is UTF-16 with a byte order mark (2026-11-13); the archive files are UTF-8."""
+    with open(path, "rb") as fh:
+        start = fh.read(2)
+    return "utf-16" if start in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+
+
 def read_uscis(path: Path):
-    """The rows of one USCIS file, archive or Crosstab export: the year, the employer, its approvals and name keys."""
-    with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
-        reader = csv.DictReader(fh)
-        header = reader.fieldnames or []
+    """The rows of one USCIS file, archive or Crosstab export: the year, the employer, its approvals and name keys.
+    The archive file is UTF-8 with commas; the Crosstab export is UTF-16 with tabs and six approval columns."""
+    with open(path, newline="", encoding=_encoding(path), errors="replace") as fh:
+        first = fh.readline()
+        fh.seek(0)
+        reader = csv.DictReader(fh, delimiter="\t" if "\t" in first else ",")
+        header = [h.strip() for h in (reader.fieldnames or [])]
+        reader.fieldnames = header
         year_col, name_col = _column(header, "fiscal", "year"), _column(header, "employer")
         approval_cols = [h for h in header if "approval" in h.lower()]
+        hub = any("new employment" in h.lower() for h in header)
         if not (year_col and name_col and approval_cols):
             raise ValueError(f"{Path(path).name}: not a USCIS H-1B data hub file (columns: {', '.join(header)})")
         for r in reader:
@@ -105,7 +118,7 @@ def read_uscis(path: Path):
             keys = _keys(employer)
             if not employer or not year or not keys:
                 continue
-            yield H1bRow(year, employer, sum(_int(r.get(c)) for c in approval_cols), keys)
+            yield H1bRow(year, employer, sum(_int(r.get(c)) for c in approval_cols), keys, hub)
 
 
 def trend(counts: dict[int, int], years: list[int]) -> str:
@@ -189,11 +202,14 @@ def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: l
     source_dir, out_dir = Path(source_dir), Path(out_dir)
     per_key: dict[str, Counter] = defaultdict(Counter)  # key -> year -> approvals
     names: dict[str, Counter] = defaultdict(Counter)  # key -> the USCIS names under it
-    for path in sorted(source_dir.glob("*.csv")):
-        for row in read_uscis(path):
-            for key in row.keys:
-                per_key[key][row.year] += row.approvals
-                names[key][row.employer] += 1
+    rows = [row for path in sorted(source_dir.glob("*.csv")) for row in read_uscis(path)]
+    hub_years = {row.year for row in rows if row.hub}
+    for row in rows:
+        if row.year in hub_years and not row.hub:  # the hub's whole year replaces the archive's (FY2023 is partial)
+            continue
+        for key in row.keys:
+            per_key[key][row.year] += row.approvals
+            names[key][row.employer] += 1
     shown = sorted(years) if years else sorted({y for c in per_key.values() for y in c})
     out_dir.mkdir(parents=True, exist_ok=True)
     confirmed_path = out_dir / "confirmed.md"

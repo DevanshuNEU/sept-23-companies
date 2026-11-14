@@ -78,13 +78,14 @@ def _family_names(conn: sqlite3.Connection, companies: dict, survivors: set[int]
         return {}
     survivor_of = {cid: resolve_company(companies, cid)[-1] for cid in companies}
     out: dict[int, list[str]] = {cid: [] for cid in survivors}
-    rows = conn.execute("SELECT company_id, name FROM company ORDER BY company_id").fetchall()
+    names = {r["company_id"]: r["name"] for r in conn.execute("SELECT company_id, name FROM company")}
     for cid in survivors:  # the survivor's own name first
-        out[cid] += [r["name"] for r in rows if r["company_id"] == cid]
-    for r in rows:
-        top = survivor_of.get(r["company_id"])
-        if top in out and top != r["company_id"]:
-            out[top].append(r["name"])
+        if cid in names:
+            out[cid].append(names[cid])
+    for cid in sorted(names):
+        top = survivor_of.get(cid)
+        if top in out and top != cid:
+            out[top].append(names[cid])
     src = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
     for r in conn.execute(f"SELECT company_id, alias FROM company_alias WHERE source IN ({src}) ORDER BY alias_key",
                           NAME_ALIAS_SOURCES):
@@ -101,7 +102,9 @@ def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
     thread_missing: the touch's account is not in `accounts`. A touch with a Gmail thread but no account was sent
     before touches carried one, so its thread is account 1's (as everywhere else a NULL account is). A pin to an
     account that does not send (or is not in config) counts as no pin. The company is followed through
-    `merged_into`; a pin on the raw id still counts, and the lane reads the sponsor facts of the whole merge family."""
+    `merged_into`; a pin on the raw id still counts. The lane is the sponsor lane when the H-1B list shows approvals
+    under the company's merge family names or the family has sponsorship yes. With no usable H-1B list, a company with
+    no thread, no pin and no sponsorship yes is (None, lane_waits): its lane is not decided."""
     return routes(conn, cfg, [touch_id], accounts)[touch_id]
 
 
@@ -123,7 +126,8 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
         f"SELECT DISTINCT company_id FROM company_fact WHERE {_SPONSOR_FACT}")}
     survivors = {resolve_company(companies, t["company_id"])[-1] if t["company_id"] in companies else t["company_id"]
                  for t in touches}
-    h1b_names = _family_names(conn, companies, survivors - sponsors) if has_list() else {}
+    listed = has_list()
+    h1b_names = _family_names(conn, companies, survivors - sponsors) if listed else {}
     sponsors |= {cid for cid, names in h1b_names.items() if _h1b_sponsor(names)}
     by_id = {a.account_id: a for a in accounts.values()}
     out: dict[int, tuple[AccountRow | None, str]] = {}
@@ -141,6 +145,9 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
         pinned = by_id.get(pin) if pin is not None else None
         if pinned is not None and pinned.cfg.sends:
             out[touch["touch_id"]] = (pinned, "pinned")
+            continue
+        if cid not in sponsors and not listed:  # the H-1B list cannot be read: the lane is not decided
+            out[touch["touch_id"]] = (None, "lane_waits")
             continue
         lane_cfg = cfg.lane_account("sponsor" if cid in sponsors else "general")
         if lane_cfg is not None and lane_cfg.address in accounts:

@@ -28,6 +28,7 @@ def config(*accts):
     return replace(load_config(), accounts=tuple(accts))
 
 
+EMPTY_LIST = "# H-1B\n\n| Company | FY2025 | Trend | USCIS name |\n| --- | --- | --- | --- |\n"
 H1B_FILE = """# H-1B approvals by company
 
 Built 2026-11-14 from USCIS's H-1B Employer Data Hub.
@@ -56,6 +57,10 @@ class AccountsTest(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
         self.addCleanup(lookup.forget)
+        self.h1b(EMPTY_LIST)  # a usable list with no companies; a test of a missing list calls no_list()
+
+    def no_list(self):
+        (self.h1b_dir / "companies.md").unlink(missing_ok=True)
         lookup.forget()
 
     def h1b(self, text=H1B_FILE):
@@ -105,6 +110,7 @@ class AccountsTest(unittest.TestCase):
 
     def test_sponsorship_yes_is_sponsor_even_without_a_list(self):
         cid, _ = self.company_touch("Nolist")
+        self.no_list()
         add_fact(self.conn, cid, "sponsorship", "yes")
         self.assertEqual(accounts.lane_of(self.conn, cid), "sponsor")
 
@@ -128,6 +134,29 @@ class AccountsTest(unittest.TestCase):
         _, tid = cid, self.conn.execute("SELECT touch_id FROM touch").fetchone()[0]
         cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
         self.assertEqual(accounts.route(self.conn, cfg, tid, self.synced(cfg))[0].cfg.address, SPONSOR)
+
+    def test_no_list_sponsorship_yes_goes_sponsor_plain_waits_pinned_keeps_pin(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.no_list()
+        yes, yes_tid = self.company_touch("Yes")
+        add_fact(self.conn, yes, "sponsorship", "yes")
+        _, plain_tid = self.company_touch("Plain")
+        pinned, pinned_tid = self.company_touch("Pinned")
+        accounts.pin(self.conn, pinned, accts[SPONSOR].account_id, "you", NOW)
+        got = accounts.routes(self.conn, cfg, [yes_tid, plain_tid, pinned_tid], accts)
+        self.assertEqual((got[yes_tid][0].cfg.address, got[yes_tid][1]), (SPONSOR, "lane"))
+        self.assertEqual(got[plain_tid], (None, "lane_waits"))
+        self.assertEqual((got[pinned_tid][0].cfg.address, got[pinned_tid][1]), (SPONSOR, "pinned"))
+
+    def test_a_pin_beats_h1b_approvals(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()
+        cid, tid = self.company_touch("Acme")
+        accounts.pin(self.conn, cid, accts[GENERAL].account_id, "you", NOW)
+        row, reason = accounts.route(self.conn, cfg, tid, accts)
+        self.assertEqual((row.cfg.address, reason), (GENERAL, "pinned"))
 
     def test_route_uses_the_h1b_lane_and_threads_still_win(self):
         cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))

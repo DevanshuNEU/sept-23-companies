@@ -849,6 +849,21 @@ class AccountsQueueTest(Base):
         self.assertEqual({m: found[m].account for m in (general, sponsor, followup)},
                          {general: GENERAL, sponsor: SPONSOR, followup: GENERAL})
 
+    def test_without_an_h1b_list_a_plain_company_waits_and_sponsorship_yes_goes(self):
+        import os, tempfile
+        from unittest import mock
+        from outreach.h1b import lookup
+        _, plain = self.approve()
+        _, sponsor = self.approve(company=self.sponsor_co)  # sponsorship yes
+        empty = tempfile.mkdtemp(prefix="outreach-h1b-test-")
+        with mock.patch.dict(os.environ, {"OUTREACH_H1B_DIR": empty}):
+            lookup.forget()
+            self.addCleanup(lookup.forget)
+            found = self.found()
+        self.assertEqual((found[plain].reason, found[plain].account), ("lane_waits", None))
+        self.assertEqual(found[plain].text, "Waits: the H-1B list cannot be read, so its sending account is not decided.")
+        self.assertEqual((found[sponsor].reason, found[sponsor].account), ("ready", SPONSOR))
+
     def test_daily_limit_per_account(self):
         # The general account has sent its 15 today; the sponsor account has sent none.
         for i in range(15):

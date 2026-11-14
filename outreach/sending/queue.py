@@ -28,6 +28,7 @@ from outreach.drafts.followups import (canonical_company, company_map, held_surv
 from outreach.sending import calendar as cal
 from outreach.sending import accounts as _accounts
 from outreach.sending import human, pace, ramp, signals
+from outreach.h1b.lookup import has_list
 from outreach.sending.accounts import AccountRow
 from outreach.sending.config import SendConfig, load_config
 from outreach.sending.pace import CompanyPace
@@ -126,6 +127,9 @@ class AccountDay:
     def block(self) -> str | None:
         """The account's own reason to send nothing: its pause first, then its sign-in."""
         return "sender_paused" if self.paused else "signed_out" if self.signed_out else None
+
+
+NO_LIST_TEXT = "Waits: the H-1B list cannot be read, so its sending account is not decided."
 
 
 @dataclass(frozen=True)
@@ -399,6 +403,8 @@ def route_line(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int, company
         return Route(None, f"Waits: its thread is on {address}, which is not set up to send now.")
     if account is None:
         lane = _accounts.lane_of(conn, company_id)
+        if lane == "general" and not has_list():
+            return Route(None, NO_LIST_TEXT)
         named = next((a for a in cfg.accounts if a.lane == lane), None)
         if named is None:
             return Route(None, "Waits: no account is set up to send to this company yet.")

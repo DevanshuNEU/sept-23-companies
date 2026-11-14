@@ -17,6 +17,23 @@ def csv_file(folder: Path, year: int, rows: list[tuple[str, int, int]]) -> Path:
     return p
 
 
+HUB_HEADER = ("Line by line\tFiscal Year   \tEmployer (Petitioner) Name\tTax ID\tIndustry (NAICS) Code\tPetitioner City\t"
+              "Petitioner State\tPetitioner Zip Code\tNew Employment Approval\tNew Employment Denial\t"
+              "Continuation Approval\tContinuation Denial\tChange with Same Employer Approval\t"
+              "Change with Same Employer Denial\tNew Concurrent Approval\tNew Concurrent Denial\t"
+              "Change of Employer Approval\tChange of Employer Denial\tAmended Approval\tAmended Denial\n")
+
+
+def hub_file(folder: Path, name: str, year: int, rows: list[tuple[str, int]]) -> Path:
+    """One export of the hub's Crosstab view, as USCIS sends it (2026-11-13): UTF-16, tab separated, six approval
+    columns. `rows`: (employer, approvals), spread over three of the approval columns."""
+    p = folder / name
+    body = "".join(f"{n}\t{year}\t{emp}\t1234\t54 - Professional\tSAN JOSE\tCA\t95110\t"
+                   f"{a - 2}\t0\t1\t0\t0\t0\t0\t0\t1\t0\t0\t0\n" for n, (emp, a) in enumerate(rows, 1))
+    p.write_text(HUB_HEADER + body, encoding="utf-16")
+    return p
+
+
 class TrendTest(unittest.TestCase):
     YEARS = [2022, 2023, 2024]
 
@@ -49,6 +66,14 @@ class KeyTest(unittest.TestCase):
             with self.subTest(a=a):
                 self.assertEqual(h1b_key(a), h1b_key(b))
         self.assertNotEqual(h1b_key("ABRIDGE INFO SYSTEMS INC"), h1b_key("Abridge"))
+
+
+class HubFormatTest(unittest.TestCase):
+    def test_reads_the_hub_export_and_sums_every_approval_column(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = hub_file(Path(d), "Employer Information.csv", 2026, [("MICROSOFT CORPORATION", 10)])
+            (row,) = list(read_uscis(p))
+        self.assertEqual((row.year, row.employer, row.approvals), (2026, "MICROSOFT CORPORATION", 10))
 
 
 class BuildTest(unittest.TestCase):
@@ -130,6 +155,14 @@ class BuildTest(unittest.TestCase):
         csv_file(self.src, 2023, [("ALPHA TECHNOLOGIES INC", 5, 4)])
         build(self.conn, self.src, self.out, years=[2023])
         self.assertNotIn("Alpha Nexus", (self.out / "unsure.md").read_text())
+
+    def test_a_hub_file_replaces_the_archive_file_of_its_year(self):
+        # The archive's FY2023 file is partial and the hub's is whole: one year never counts twice.
+        seed_company(self.conn, "Acme Robotics")
+        csv_file(self.src, 2023, [("ACME ROBOTICS INC", 2, 3)])
+        hub_file(self.src, "fy2023.csv", 2023, [("ACME ROBOTICS INC", 12)])
+        build(self.conn, self.src, self.out, years=[2023])
+        self.assertIn("| Acme Robotics | 12 |", (self.out / "companies.md").read_text())
 
     def test_parse_confirmed(self):
         self.assertEqual(parse_confirmed("# notes\n- Acme = ACME INC\n- Beta Co = none\n\nnot a line\n"),

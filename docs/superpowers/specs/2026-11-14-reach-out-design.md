@@ -88,3 +88,46 @@ An Apollo API key (Settings, Integrations, API in Apollo). If his plan has no AP
 2. Store, API route, Reach out button, proposals view.
 3. The reach job: search and propose.
 4. Reveal and draft after his tick.
+
+## People per company: the two-arm test (2026-11-14, agreed with Devanshu)
+
+Research (`docs/research/2026-11-14-who-replies.md`, and the job search, contacts, risk and model notes under
+`.context/research/2026-11-14-*`) found no job search data on how many people per company to contact. The only
+per-employer method with numbers (Dalton, The 2-Hour Job Search) goes one or two at a time, and one referral per role is
+what counts at big companies. Devanshu wants far more people. So Knock runs both, measures, and keeps the winner.
+
+**Arms.** Each company is put in arm A or arm B by a coin flip, stratified by size band, the first time it gets a
+request. It keeps its arm.
+
+| Size | Arm A (his numbers) | Arm B (evidence) |
+|---|---|---|
+| Under 50 | up to 10 per company | up to 3 per company |
+| 50 to 200 | up to 30 per company | up to 6 per role, 10 per company a month |
+| 200 to 1,000 | up to 40 per company, 15 per role | up to 6 per role, 15 per company a month |
+| Over 1,000 | up to 50 per company a month, 15 per role or team | up to 5 per role or team, 50 per company a month |
+
+**Same in both arms.** Waves of at most 2 first emails a day per company; the order of roles by size from the research
+(founder first under 50; manager and recruiter first at 50 to 200; recruiter first above 200; never executives at big
+companies, agencies, interns or people outside the US); the next wave only while the company is silent; any human reply
+stops new people at that company; a bounce or stop reply stops the company; verified emails only; the never-send list;
+his pick and his Outbox approval; the sender's ramp, window, one account per company and pauses.
+
+**Company status.** warm (a human reply that is not a no), no (drop 90 days), silent closed (arm cap reached and 10
+business days passed; closed for that role, reopens on a new role, new people in January; never avoided for silence
+alone), applied and rejected (from Applied).
+
+**Logged on every first email.** arm, size band, wave, role kind, sender account, the recipient's mail provider (Google,
+Microsoft or other, from MX), posting, reply class (none, auto, human positive, human no, stop), referral and interview
+when he marks them.
+
+**Review.** Every Monday a table by arm and size band: emails, companies reached, companies with a human reply, positive
+replies, referrals, interviews, bounces, stop replies, hard pauses, placement test result. Decision at two weeks or 30
+companies per arm, whichever is later: arm A wins if its companies-with-a-positive-reply rate is at least 1.5 times arm
+B's with no more spam signals; else arm B wins. **Early stop for arm A:** any account hard pause, a policy rejection from a
+company's domain, or a spam complaint signal pauses arm A until he reviews.
+
+**Calendar.** No sends on Nov 26 and 27; from Dec 16, first waves only.
+
+**Build order.** (1) Monday 2026-11-16: Applied Materials runs by hand in a Claude session with Apollo, as the first
+case. (2) This week: the reach tables, arms, logging and the Monday review. (3) Then the scheduled job with an Apollo API
+key, if his plan has API access.

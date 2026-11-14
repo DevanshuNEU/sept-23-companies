@@ -409,7 +409,7 @@ function buildToday(c: Ctx): TodayView {
     proposed, backlog,
     stillEmailing: [
       still('Browserbase', 3, 6, 7, 'answer_reply', 'Answer Priya Natarajan in Gmail', 'held'),
-      still('Mintlify', 2, 5, 8, 'review_drafts', '1 draft and 1 follow-up to review. Recruiter goes tomorrow', 'emailing'),
+      still('Mintlify', 2, 5, 8, 'review_drafts', '1 draft and 1 follow-up to review', 'emailing'),
       still('Graphite', 2, 4, 7, 'fix_review', '1 blocked draft: fix the email domain', 'emailing'),
       still('Supabase', 3, 7, 7, 'nothing', 'Nothing. Follow-ups are scheduled', 'waiting'),
       still('Cartesia', 1, 2, 6, 'paused', "Paused by you: waiting on a friend's intro", 'paused'),
@@ -654,10 +654,10 @@ function buildOutbox(c: Ctx, sentTotal: number): { view: OutboxView; details: Re
   const dana = c.person('Dana Whitcomb', 'Technical Recruiter', 'recruiter', 'Mintlify');
   const mintlifyRole = c.role('Mintlify', 'Software Engineer, New Grad', 'new_grad', SF, 6);
   add({
-    touch: T.dana, person: dana, company: 'Mintlify', group: 'review', state: 'drafted', subject: 'Software Engineer, New Grad on OPT', summary: 'Recruiter: sends on day 2', at: et(TODAY, '09:47'),
+    touch: T.dana, person: dana, company: 'Mintlify', group: 'review', state: 'drafted', subject: 'Software Engineer, New Grad on OPT', summary: 'Recruiter: sends after the window opens', at: et(TODAY, '09:47'),
     schedule: sched(et('2026-11-11', '08:30'), 'spacing', 'Sends Wed Nov 11', 2, 1), body: BODY_DANA,
     checks: [
-      ck('recruiter_title', 'warn', 'Recruiter title', "Recruiters go out on day 2, after engineers and managers. They do not count toward Mintlify's 3 a day, but they do count toward today's 30.", { kind: 'role_kind' }),
+      ck('recruiter', 'warn', 'Recruiter', 'An older draft still carries this check. If the role kind is wrong, change it.', { kind: 'role_kind' }),
       ...passes(['87 words (about 90 for recruiters)', 'Work authorization line up front', 'Mail server found for mintlify.example', '2 links, portfolio first, no shortener, no attachment',
         'Not on the no-go or said-no list', 'Company not closed for no sponsorship', 'No banned phrases', 'No em or en dashes', 'Role and req named first', 'Subject unique to her, no "Re:"']),
     ],

@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
+// Role kinds stay selectable. Stored drafts may still carry a `recruiter` check; new drafts no longer get one.
 const KIND_LABELS: [RoleKind, string][] = [
   ['recruiter', 'Recruiter'],
   ['engineer', 'Engineer'],

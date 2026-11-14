@@ -24,7 +24,7 @@ queue, not a gate on people he found himself (#9 ruling 2026-10-28): it adds a h
 7 and changes no verdict.
 
 `route.prefer_ic_in_role` (his call, not measured yet) only orders people inside one company (`order_people`); it
-never hides a person or a company. Recruiters go last whatever it says.
+never hides a person or a company.
 """
 from __future__ import annotations
 

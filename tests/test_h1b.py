@@ -17,6 +17,23 @@ def csv_file(folder: Path, year: int, rows: list[tuple[str, int, int]]) -> Path:
     return p
 
 
+HUB_HEADER = ("Line by line\tFiscal Year   \tEmployer (Petitioner) Name\tTax ID\tIndustry (NAICS) Code\tPetitioner City\t"
+              "Petitioner State\tPetitioner Zip Code\tNew Employment Approval\tNew Employment Denial\t"
+              "Continuation Approval\tContinuation Denial\tChange with Same Employer Approval\t"
+              "Change with Same Employer Denial\tNew Concurrent Approval\tNew Concurrent Denial\t"
+              "Change of Employer Approval\tChange of Employer Denial\tAmended Approval\tAmended Denial\n")
+
+
+def hub_file(folder: Path, name: str, year: int, rows: list[tuple[str, int]]) -> Path:
+    """One export of the hub's Crosstab view, as USCIS sends it (2026-11-13): UTF-16, tab separated, six approval
+    columns. `rows`: (employer, approvals), spread over three of the approval columns."""
+    p = folder / name
+    body = "".join(f"{n}\t{year}\t{emp}\t1234\t54 - Professional\tSAN JOSE\tCA\t95110\t"
+                   f"{a - 2}\t0\t1\t0\t0\t0\t0\t0\t1\t0\t0\t0\n" for n, (emp, a) in enumerate(rows, 1))
+    p.write_text(HUB_HEADER + body, encoding="utf-16")
+    return p
+
+
 class TrendTest(unittest.TestCase):
     YEARS = [2022, 2023, 2024]
 
@@ -45,10 +62,20 @@ class KeyTest(unittest.TestCase):
         from outreach.h1b import h1b_key
         for a, b in (("MICROSOFT CORPORATION", "Microsoft"), ("ACCENTURE LLP", "Accenture"), ("NVIDIA CORPORATION", "NVIDIA"),
                      ("ABBOTT LABORATORIES", "Abbott"), ("ACE HARDWARE CORPORATION", "Ace Hardware"),
-                     ("Retell AI, Inc.", "Retell AI"), ("STRIPE INC", "Stripe"), ("SALESFORCE.COM INC", "Salesforce")):
+                     ("Retell AI, Inc.", "Retell AI"), ("STRIPE INC", "Stripe"), ("SALESFORCE.COM INC", "Salesforce"),
+                     ("JPMORGAN CHASE AND CO", "JPMORGAN CHASE CO"), ("JPMORGAN CHASE & CO", "JP Morgan Chase"),
+                     ("ALLIANCEBERNSTEIN L P", "AllianceBernstein"), ("ADYEN N V", "Adyen"), ("CITIBANK N A", "Citibank")):
             with self.subTest(a=a):
                 self.assertEqual(h1b_key(a), h1b_key(b))
         self.assertNotEqual(h1b_key("ABRIDGE INFO SYSTEMS INC"), h1b_key("Abridge"))
+
+
+class HubFormatTest(unittest.TestCase):
+    def test_reads_the_hub_export_and_sums_every_approval_column(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = hub_file(Path(d), "Employer Information.csv", 2026, [("MICROSOFT CORPORATION", 10)])
+            (row,) = list(read_uscis(p))
+        self.assertEqual((row.year, row.employer, row.approvals), (2026, "MICROSOFT CORPORATION", 10))
 
 
 class BuildTest(unittest.TestCase):
@@ -131,9 +158,43 @@ class BuildTest(unittest.TestCase):
         build(self.conn, self.src, self.out, years=[2023])
         self.assertNotIn("Alpha Nexus", (self.out / "unsure.md").read_text())
 
+    def test_a_hub_file_replaces_the_archive_file_of_its_year(self):
+        # The archive's FY2023 file is partial and the hub's is whole: one year never counts twice.
+        seed_company(self.conn, "Acme Robotics")
+        csv_file(self.src, 2023, [("ACME ROBOTICS INC", 2, 3)])
+        hub_file(self.src, "fy2023.csv", 2023, [("ACME ROBOTICS INC", 12)])
+        build(self.conn, self.src, self.out, years=[2023])
+        self.assertIn("| Acme Robotics | 12 |", (self.out / "companies.md").read_text())
+
+    def test_two_hub_files_with_one_year_stop_the_build(self):
+        # 2026-11-13: a FY2026 export and a FY2022 to FY2026 export sat side by side; FY2026 would count twice.
+        seed_company(self.conn, "Acme Robotics")
+        hub_file(self.src, "fy2026.csv", 2026, [("ACME ROBOTICS INC", 5)])
+        hub_file(self.src, "all.csv", 2026, [("ACME ROBOTICS INC", 5)])
+        with self.assertRaisesRegex(ValueError, r"2026.*all\.csv.*fy2026\.csv"):
+            build(self.conn, self.src, self.out)
+
+    def test_one_company_can_sum_several_uscis_names(self):
+        # Amazon files under several legal companies (AMAZON.COM SERVICES LLC until 2024, others after).
+        seed_company(self.conn, "Amazon")
+        csv_file(self.src, 2023, [("AMAZON.COM SERVICES LLC", 10, 20), ("AMAZON WEB SERVICES INC", 3, 7)])
+        self.out.mkdir()
+        (self.out / "confirmed.md").write_text("- Amazon = AMAZON.COM SERVICES LLC | AMAZON WEB SERVICES INC\n")
+        build(self.conn, self.src, self.out, years=[2023])
+        self.assertIn("| Amazon | 40 |", (self.out / "companies.md").read_text())
+
+    def test_a_small_match_with_bigger_near_names_is_asked_about(self):
+        self.software_job(seed_company(self.conn, "Amazon"))
+        csv_file(self.src, 2023, [("AMAZON INC", 1, 2), ("AMAZON.COM SERVICES LLC", 100, 200)])
+        build(self.conn, self.src, self.out, years=[2023])
+        self.assertIn("| Amazon | 3 |", (self.out / "companies.md").read_text())  # the exact match stays listed
+        unsure = (self.out / "unsure.md").read_text()
+        self.assertIn("Amazon", unsure)
+        self.assertIn("AMAZON.COM SERVICES LLC (300 approvals)", unsure)
+
     def test_parse_confirmed(self):
-        self.assertEqual(parse_confirmed("# notes\n- Acme = ACME INC\n- Beta Co = none\n\nnot a line\n"),
-                         {"Acme": "ACME INC", "Beta Co": None})
+        self.assertEqual(parse_confirmed("# notes\n- Acme = ACME INC\n- Beta Co = none\n- Amazon = A LLC | B INC\n\nnot a line\n"),
+                         {"Acme": ("ACME INC",), "Beta Co": None, "Amazon": ("A LLC", "B INC")})
 
 
 if __name__ == "__main__":

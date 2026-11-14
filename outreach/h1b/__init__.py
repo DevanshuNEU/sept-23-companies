@@ -41,7 +41,7 @@ MIN_ASK = 3  # a near USCIS name with fewer approvals than this in the years sho
 RISE, FALL = 1.25, 0.75  # the last year against the mean of the two before it
 _DBA = re.compile(r"\s+d/?b/?a\s+", re.I)
 _LEGAL = {"inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "corp", "corporation", "co", "company", "plc",
-          "pllc", "pc", "pbc", "na", "sa", "ag", "gmbh", "bv"}
+          "pllc", "pc", "pbc", "na", "sa", "ag", "gmbh", "bv", "nv"}
 _GENERIC = {"laboratories", "labs", "technologies", "technology", "holdings", "group", "usa", "us", "america",
             "international", "com"}
 
@@ -50,7 +50,9 @@ def h1b_key(name: str | None) -> str:
     """The H-1B list's name key: trailing legal and generic words dropped, then letters and digits only. A name made
     only of such words keeps its last one."""
     words = re.findall(r"[a-z0-9]+", (name or "").lower().replace("&", " and "))
-    while len(words) > 1 and words[-1] in _LEGAL | _GENERIC:
+    while len(words) > 2 and len(words[-1]) == 1 and len(words[-2]) == 1:  # "L P", "N V", "N A" are one legal word
+        words[-2:] = [words[-2] + words[-1]]
+    while len(words) > 1 and words[-1] in _LEGAL | _GENERIC | {"and"}:  # "JPMORGAN CHASE AND CO" is "JPMORGAN CHASE"
         words.pop()
     return "".join(words)
 
@@ -140,16 +142,18 @@ def trend(counts: dict[int, int], years: list[int]) -> str:
     return "rising" if ratio >= RISE else "falling" if ratio <= FALL else "steady"
 
 
-def parse_confirmed(text: str) -> dict[str, str | None]:
-    """His answers: `- Knock name = USCIS NAME` (a match) or `- Knock name = none` (no match). Other lines are notes."""
-    out: dict[str, str | None] = {}
+def parse_confirmed(text: str) -> dict[str, tuple[str, ...] | None]:
+    """His answers: `- Knock name = USCIS NAME` (a match), several names joined by ` | ` (summed: a company that files
+    under more than one legal name), or `- Knock name = none` (no match). Other lines are notes."""
+    out: dict[str, tuple[str, ...] | None] = {}
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith("- ") or " = " not in line:
             continue
         knock, uscis = (part.strip() for part in line[2:].split(" = ", 1))
         if knock:
-            out[knock] = None if uscis.lower() == "none" else uscis
+            parts = tuple(p.strip() for p in uscis.split(" | ") if p.strip())
+            out[knock] = None if uscis.lower() == "none" or not parts else parts
     return out
 
 
@@ -202,8 +206,17 @@ def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: l
     source_dir, out_dir = Path(source_dir), Path(out_dir)
     per_key: dict[str, Counter] = defaultdict(Counter)  # key -> year -> approvals
     names: dict[str, Counter] = defaultdict(Counter)  # key -> the USCIS names under it
-    rows = [row for path in sorted(source_dir.glob("*.csv")) for row in read_uscis(path)]
-    hub_years = {row.year for row in rows if row.hub}
+    rows, hub_files = [], defaultdict(set)  # year -> the hub files that hold it
+    for path in sorted(source_dir.glob("*.csv")):
+        for row in read_uscis(path):
+            rows.append(row)
+            if row.hub:
+                hub_files[row.year].add(path.name)
+    twice = {y: sorted(f) for y, f in hub_files.items() if len(f) > 1}
+    if twice:  # the same year in two hub exports would count twice
+        raise ValueError("; ".join(f"FY{y} is in {', '.join(f)}" for y, f in sorted(twice.items()))
+                         + ": keep one export per year in the folder")
+    hub_years = set(hub_files)
     for row in rows:
         if row.year in hub_years and not row.hub:  # the hub's whole year replaces the archive's (FY2023 is partial)
             continue
@@ -226,27 +239,36 @@ def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: l
             continue
         if name in confirmed:
             chosen = confirmed[name]
-            match = None if chosen is None else next(iter(_keys(chosen)), None)
-            if match is None or match not in known:
+            matches = [] if chosen is None else [k for k in (next(iter(_keys(c)), None) for c in chosen) if k in known]
+            if not matches:
                 continue
         else:
             hits = [k for k in keys if k in known and total(k)]
-            match = max(hits, key=total) if hits else None
-        if match is not None:
-            counts = per_key[match]
-            usc = names[match].most_common(1)[0][0]
+            matches = [max(hits, key=total)] if hits else []
+
+        def label(key: str) -> str:
+            return f"{names[key].most_common(1)[0][0]} ({total(key)} approvals)"
+
+        near = set()
+        if has_open and name not in confirmed and keys:
+            near = set().union(*(_near(k, sorted_keys, known) for k in keys)) - set(matches)
+            near = sorted((k for k in near if total(k) >= MIN_ASK), key=total, reverse=True)[:MAX_CANDIDATES]
+        if matches:
+            counts = Counter()
+            for key in dict.fromkeys(matches):
+                counts.update(per_key[key])
+            usc = "; ".join(names[k].most_common(1)[0][0] for k in dict.fromkeys(matches))
             cells = " | ".join(str(counts.get(y, 0)) for y in shown)
             lines.append(f"| {name} | {cells} | {trend(dict(counts), shown)} | {usc} |")
             seen.add(name)
+            # A small match beside bigger near names: likely the same company under other legal names (Amazon).
+            if near and sum(total(k) for k in near) > total(matches[0]):
+                unsure.append(f"- [ ] {name}: listed as {label(matches[0])}; maybe also "
+                              + "; ".join(label(k) for k in near))
             continue
-        if not has_open:
-            continue
-        near = set().union(*(_near(k, sorted_keys, known) for k in keys)) if keys else set()
-        near = sorted((k for k in near if total(k) >= MIN_ASK), key=total, reverse=True)[:MAX_CANDIDATES]
         if near:
             seen.add(name)
-            options = "; ".join(f"{names[k].most_common(1)[0][0]} ({total(k)} approvals)" for k in near)
-            unsure.append(f"- [ ] {name}: {options}")
+            unsure.append(f"- [ ] {name}: " + "; ".join(label(k) for k in near))
 
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
     head = " | ".join(f"FY{y}" for y in shown)
@@ -259,7 +281,8 @@ def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: l
         f"| Company | {head} | Trend | USCIS name |\n| --- | {rule} | --- | --- |\n" + "\n".join(lines) + "\n",
         encoding="utf-8")
     (out_dir / "unsure.md").write_text(
-        f"# Names to check\n\nBuilt {stamp}. Each company below has open postings and a USCIS employer with a nearly "
-        f"matching name, and an open software posting. Add `- Knock name = USCIS NAME` (same company) or `- Knock name = none` to confirmed.md.\n\n"
+        f"# Names to check\n\nBuilt {stamp}. Each company below has an open software job at his level and a USCIS "
+        f"employer with a nearly matching name. Add `- Knock name = USCIS NAME` to confirmed.md for the same company "
+        f"(several names joined by ` | ` add up), or `- Knock name = none`.\n\n"
         + "\n".join(unsure) + ("\n" if unsure else ""), encoding="utf-8")
     return BuildReport(years=tuple(shown), employers=len(per_key), matched=len(lines), unsure=len(unsure))

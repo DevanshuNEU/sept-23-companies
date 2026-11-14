@@ -71,6 +71,18 @@ class LookupTest(unittest.TestCase):
         self.write(FILE.replace("| 1X | 0 | 2 | 1 | 9 | 30 |", "| 1X | 0 | 2 | 1 | 9 | 40 |"))
         self.assertEqual(tag_for("1X").total, 52)
 
+    def test_the_tag_names_the_uscis_employer_and_the_list_its_build_day(self):
+        self.write()
+        self.assertEqual(tag_for("1X").uscis_name, "1X TECHNOLOGIES INC")
+        self.assertEqual(tag_for("Nobody Inc").uscis_name, "")
+        self.assertEqual(lookup.built_on(), "2026-11-14")
+
+    def test_there_is_no_build_day_without_a_list(self):
+        self.assertIsNone(lookup.built_on())
+        self.assertFalse(lookup.has_list())
+        self.write()
+        self.assertTrue(lookup.has_list())
+
     def test_the_stamp_changes_with_the_file_and_is_none_without_one(self):
         self.assertIsNone(lookup.stamp())
         self.write()

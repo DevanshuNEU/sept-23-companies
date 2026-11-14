@@ -18,7 +18,8 @@ description already holds the other two), `city`, `state`, `country_code`, `full
 
 A head read is page 1: a partial `ok`, or `unchanged` when it lists nothing. A full read pages until `totalCount` jobs
 are seen, at most `MAX_PAGES` pages. As for Apple and Eightfold (#268), a broken row is skipped, a list a little short
-of the total (`short_allowed`) is a partial `ok` that closes nothing, a later page that fails ends the read as a
+of the total (`short_allowed`), or a site that stops listing far short of it (Rivian, 2026-11-14: 360 of 953), is a
+partial `ok` that closes nothing, a later page that fails ends the read as a
 partial `ok` of the pages read (no further page, no retry), and a first page that fails is an error. There is no ETag,
 so `unchanged` is the id fingerprint.
 """
@@ -170,9 +171,14 @@ class IcimsAdapter:
         if stopped:
             return finish_list(jobs.values(), resp, validators,
                                partial_note=f"{len(jobs)} of {total} jobs read, {stopped}")
-        if len(jobs) > total or total - len(jobs) > short_allowed(total):
+        if len(jobs) > total:
             return read_error(f"{len(jobs)} jobs listed but totalCount is {total}", status=resp.status)
         missing = total - len(jobs)
+        if missing > short_allowed(total):
+            # The site stopped listing before totalCount (careers.rivian.com listed 360 of 953, 2026-11-14), or our own
+            # page cap did. A partial ok keeps the jobs read and closes nothing; an error kept none of them.
+            return finish_list(jobs.values(), resp, validators,
+                               partial_note=f"{len(jobs)} of {total} jobs read, the site stopped listing")
         note = (f"{len(jobs)} of {total} jobs read ({broken} broken, {max(missing - broken, 0)} missing)"
                 if missing or broken else "")
         return finish_list(jobs.values(), resp, validators, partial_note=note)

@@ -8,6 +8,7 @@
  * so each tab, window and size has something to show. Three more are not software roles (#250): they are only on
  * the Other roles tab.
  */
+import { sampleH1b } from './h1b-sample';
 import type { IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsView } from '../types';
 
 /** The API's `name_key` in the small: lower case, letters and digits only. A search with none of either finds nothing. */
@@ -56,7 +57,7 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
   const company = (c: Company) => ({
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
-    maybeStaffing: c.maybeStaffing === true, forClient: false,
+    maybeStaffing: c.maybeStaffing === true, forClient: false, h1b: sampleH1b(c.name),
   });
   const rows = Array.from({ length: 80 }, (_, i): JobRow => {
     const c = COMPANIES[i % COMPANIES.length] as Company;
@@ -149,7 +150,7 @@ export function foundJobs(asOf: IsoTime): JobRow[] {
     listAt: minus(30 * (i + 1)), postedAt: minus(30 * (i + 1)), firstSeenAt: asOf, seenGapS: 1800, firstRead: false, repostedFrom: null,
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
-    maybeStaffing: c.maybeStaffing === true, forClient: false,
+    maybeStaffing: c.maybeStaffing === true, forClient: false, h1b: sampleH1b(c.name),
   }));
 }
 

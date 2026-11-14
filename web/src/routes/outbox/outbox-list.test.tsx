@@ -51,6 +51,16 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe('the H-1B tag on a row', () => {
+  it('shows the company\'s tag on the row, and nothing for a company without one', async () => {
+    await outbox();
+    expect(within(row('Omar Haddad')).getByText('H-1B 12, new')).toBeInTheDocument();
+    const rows = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(rows.some((r) => r.textContent?.includes('H-1B'))).toBe(true);
+    expect(rows.some((r) => !r.textContent?.includes('H-1B'))).toBe(true);
+  });
+});
+
 describe('SendingStrip', () => {
   /** The strip is one line; the rest lives in a popover behind Details. */
   const openDetails = async () => {

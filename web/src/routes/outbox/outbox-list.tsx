@@ -4,6 +4,7 @@ import { ArrowRight, ChevronDown, Inbox, OctagonAlert, Reply, Search } from 'luc
 import type { Id, IsoTime, OutboxCounts, OutboxGroup, OutboxItem, OutboxView } from '@/api';
 import { EmptyState } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -165,11 +166,16 @@ function Row({
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <StatusBadge status={rowStatus(item)} dot />
         <span className="truncate">{item.summary}</span>
-        {fix ? (
-          // The row opens the email, and its Blocking card there carries the button that fixes it.
-          <span aria-hidden className="ml-auto flex flex-none items-center gap-1 font-medium text-foreground">
-            Fix
-            <ArrowRight className="size-3" />
+        {item.h1b || fix ? (
+          <span className="ml-auto flex flex-none items-center gap-2">
+            {item.h1b ? <Badge variant="idle" title={item.h1b.detail}>{item.h1b.label}</Badge> : null}
+            {fix ? (
+              // The row opens the email, and its Blocking card there carries the button that fixes it.
+              <span aria-hidden className="flex items-center gap-1 font-medium text-foreground">
+                Fix
+                <ArrowRight className="size-3" />
+              </span>
+            ) : null}
           </span>
         ) : null}
       </div>

@@ -192,6 +192,16 @@ class BuildTest(unittest.TestCase):
         self.assertIn("Amazon", unsure)
         self.assertIn("AMAZON.COM SERVICES LLC (300 approvals)", unsure)
 
+    def test_a_name_in_brackets_matches_either_part(self):
+        # 2026-11-14 check: "Amazon Web Services (AWS)" and "Notability (Ginger Labs)" missed their USCIS names.
+        seed_company(self.conn, "Amazon Web Services (AWS)")
+        seed_company(self.conn, "Notability (Ginger Labs)")
+        csv_file(self.src, 2023, [("AMAZON WEB SERVICES INC", 3, 7), ("GINGER LABS INC", 1, 1)])
+        build(self.conn, self.src, self.out, years=[2023])
+        text = (self.out / "companies.md").read_text()
+        self.assertIn("| Amazon Web Services (AWS) | 10 |", text)
+        self.assertIn("| Notability (Ginger Labs) | 2 |", text)
+
     def test_parse_confirmed(self):
         self.assertEqual(parse_confirmed("# notes\n- Acme = ACME INC\n- Beta Co = none\n- Amazon = A LLC | B INC\n\nnot a line\n"),
                          {"Acme": ("ACME INC",), "Beta Co": None, "Amazon": ("A LLC", "B INC")})

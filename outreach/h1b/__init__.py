@@ -40,6 +40,7 @@ MAX_CANDIDATES = 3
 MIN_ASK = 3  # a near USCIS name with fewer approvals than this in the years shown is not worth asking about
 RISE, FALL = 1.25, 0.75  # the last year against the mean of the two before it
 _DBA = re.compile(r"\s+d/?b/?a\s+", re.I)
+_BRACKETS = re.compile(r"\(([^()]*)\)")
 _LEGAL = {"inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "corp", "corporation", "co", "company", "plc",
           "pllc", "pc", "pbc", "na", "sa", "ag", "gmbh", "bv", "nv"}
 _GENERIC = {"laboratories", "labs", "technologies", "technology", "holdings", "group", "usa", "us", "america",
@@ -178,7 +179,9 @@ def _companies(conn: sqlite3.Connection) -> list[tuple[int, str, set[str], bool]
     out = []
     for cid, name in conn.execute("SELECT company_id, name FROM company WHERE merged_into IS NULL "
                                   "AND status <> 'removed' ORDER BY name COLLATE NOCASE, company_id"):
-        own = {h1b_key(name)} | keys.get(cid, set())
+        # "Amazon Web Services (AWS)", "Notability (Ginger Labs)": the name outside the brackets and the one inside.
+        parts = [_BRACKETS.sub(" ", name)] + _BRACKETS.findall(name)
+        own = {h1b_key(name)} | {h1b_key(p) for p in parts} | keys.get(cid, set())
         out.append((cid, name, {k for k in own if k}, cid in open_ids))
     return out
 

@@ -71,6 +71,14 @@ class LookupTest(unittest.TestCase):
         self.write(FILE.replace("| 1X | 0 | 2 | 1 | 9 | 30 |", "| 1X | 0 | 2 | 1 | 9 | 40 |"))
         self.assertEqual(tag_for("1X").total, 52)
 
+    def test_the_stamp_changes_with_the_file_and_is_none_without_one(self):
+        self.assertIsNone(lookup.stamp())
+        self.write()
+        first = lookup.stamp()
+        self.assertIsNotNone(first)
+        self.write(FILE + "| New | 1 | 1 | 1 | 1 | 1 | steady | NEW |\n")
+        self.assertNotEqual(lookup.stamp(), first)
+
     def test_two_lines_of_one_key_keep_the_larger_total(self):
         self.write(FILE + "| 1X Inc | 1 | 1 | 1 | 1 | 1 | steady | OTHER |\n")
         self.assertEqual(tag_for("1X").total, 42)

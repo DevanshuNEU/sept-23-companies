@@ -18,7 +18,7 @@ from pathlib import Path
 from outreach.h1b import h1b_key
 from outreach.store.db import db_path
 
-__all__ = ["NO_RECORD", "H1bTag", "h1b_dir", "tag_for", "forget"]
+__all__ = ["NO_RECORD", "H1bTag", "h1b_dir", "tag_for", "forget", "stamp"]
 
 NO_RECORD = "No H-1B on record"
 _YEAR = re.compile(r"FY(\d{4})")
@@ -57,6 +57,16 @@ def forget() -> None:
         _cache.update(stamp=None, path=None, rows=None)
 
 
+def stamp() -> tuple[int, int] | None:
+    """The list file's (mtime, size), None without one: a cache key for a view that shows a tag, so a new build shows
+    at once."""
+    try:
+        st = (h1b_dir() / "companies.md").stat()
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
 def _cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
@@ -92,20 +102,18 @@ def _parse(text: str) -> dict[str, H1bTag] | None:
 
 def _load() -> dict[str, H1bTag] | None:
     path = h1b_dir() / "companies.md"
-    try:
-        st = path.stat()
-        stamp = (st.st_mtime_ns, st.st_size)
-    except OSError:
+    seen = stamp()
+    if seen is None:
         return None
     with _lock:
-        if _cache["path"] == path and _cache["stamp"] == stamp:
+        if _cache["path"] == path and _cache["stamp"] == seen:
             return _cache["rows"]
     try:
         rows = _parse(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError):
         return None
     with _lock:
-        _cache.update(stamp=stamp, path=path, rows=rows)
+        _cache.update(stamp=seen, path=path, rows=rows)
     return rows
 
 

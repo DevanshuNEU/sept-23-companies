@@ -1,7 +1,11 @@
 """The job list on `GET /api/jobs` (#156): the Task 1 query behind a heavy view, camelCase on the wire, a plain 400 for a
 bad parameter. Scratch store, reads only, no network."""
 import itertools
+import os
+import tempfile
 from datetime import date
+from pathlib import Path
+from unittest import mock
 
 from tests.apitest import ApiCase
 from tests.ranking_store import decision, evidence, posting
@@ -53,7 +57,7 @@ class ListTest(JobsCase):
         self.assertEqual(
             sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
                                  "companyId", "companyName", "size", "big", "saysNoSponsorship", "everify", "yc",
-                                 "contactedOn", "maybeStaffing", "forClient"]))
+                                 "contactedOn", "maybeStaffing", "forClient", "h1b"]))
         self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["firstSeenAt"]),
                          ("Acme", 40, False, "new grad", "2026-11-09T12:00:00Z"))
 
@@ -198,3 +202,64 @@ class HourWindowAndLevelTest(JobsCase):
                        {"levels": "swe1;drop"}):
             res = self.get("/api/jobs", params=params)
             self.assertEqual((res.status_code, res.json()["code"]), (400, "bad_request"), params)
+
+
+H1B_FILE = """# H-1B approvals by company
+
+| Company | FY2022 | FY2023 | FY2024 | FY2025 | FY2026 | Trend | USCIS name |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Acme | 0 | 1 | 2 | 4 | 7 | rising | ACME INC |
+"""
+
+
+class H1bTagTest(JobsCase):
+    """The H-1B tag on a row is a plain fact from `companies.md` (#252): it changes no order and hides nothing."""
+
+    def folder(self, text=H1B_FILE):
+        d = Path(tempfile.mkdtemp(prefix="outreach-h1b-api-"))
+        if text is not None:
+            (d / "companies.md").write_text(text, encoding="utf-8")
+        patch = mock.patch.dict(os.environ, {"OUTREACH_H1B_DIR": str(d)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def setUp(self):
+        super().setUp()
+        from outreach.h1b import lookup
+        lookup.forget()
+        self.addCleanup(lookup.forget)
+
+    def test_a_listed_company_shows_its_total_and_trend(self):
+        self.folder()
+        self.job(self.company("Acme", size=40))
+        h1b = self.jobs()["rows"][0]["h1b"]
+        self.assertEqual((h1b["label"], h1b["trend"]), ("H-1B 14, rising", "rising"))
+        self.assertIn("FY2026 7", h1b["detail"])
+
+    def test_an_unlisted_company_says_no_h1b_on_record(self):
+        self.folder()
+        self.job(self.company("Nobody", size=40))
+        self.assertEqual(self.jobs()["rows"][0]["h1b"]["label"], "No H-1B on record")
+
+    def test_no_list_means_no_tag_and_the_rows_still_show(self):
+        self.folder(None)
+        pid = self.job(self.company("Acme", size=40))
+        rows = self.jobs()["rows"]
+        self.assertEqual([r["postingId"] for r in rows], [pid])
+        self.assertIsNone(rows[0]["h1b"])
+
+    def test_the_tag_does_not_change_the_order(self):
+        co_a, co_b = self.company("Acme", size=40), self.company("Nobody", size=40)
+        a, b = self.job(co_a, posted="2026-11-08"), self.job(co_b, posted="2026-11-09")
+        before = self.ids()
+        self.folder()
+        self.assertEqual(self.ids(), before)
+        self.assertEqual(before, [b, a])
+
+    def test_a_new_build_shows_without_waiting_for_the_view_cache(self):
+        self.folder()
+        self.job(self.company("Acme", size=40))
+        self.assertEqual(self.jobs()["rows"][0]["h1b"]["label"], "H-1B 14, rising")
+        (Path(os.environ["OUTREACH_H1B_DIR"]) / "companies.md").write_text(
+            H1B_FILE.replace("| 0 | 1 | 2 | 4 | 7 |", "| 0 | 1 | 2 | 4 | 17 |"), encoding="utf-8")
+        self.assertEqual(self.jobs()["rows"][0]["h1b"]["label"], "H-1B 24, rising")

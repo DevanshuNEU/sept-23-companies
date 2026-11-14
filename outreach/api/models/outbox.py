@@ -10,6 +10,7 @@ from pydantic import Field
 from outreach.api.models.base import Wire, WireRequest
 from outreach.api.models.checks import Check, CheckSeverity
 from outreach.api.models.company import CompanyRef, PersonRef, RoleToName, ThreadMessage, TouchState
+from outreach.api.models.h1b import H1bTagWire
 from outreach.api.models.health import SenderState
 
 OutboxGroup = Literal["replied", "review", "approved", "sending", "checking", "sent", "paused", "closed"]
@@ -142,6 +143,7 @@ class OutboxItem(Wire):
     schedule: Schedule | None
     next_due: NextDue | None
     revision: int
+    h1b: H1bTagWire | None = Field(None, alias="h1b")  # the H-1B list's tag (#252), null with no list; the alias, since camelCase spells it h1B
 
 
 class OutboxCounts(Wire):

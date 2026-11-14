@@ -31,6 +31,7 @@ import { openExternal, safeHref } from '@/lib/safe-href';
 import { formatDateMonthDay, formatMonthDay } from '@/lib/short-dates';
 import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
+import { dropPosting, markCompanyReached as markReachedInList } from './cache';
 import { CheckLineView, CheckNowButton, useCheckNow } from './check-now';
 import { heldRows, isNew, markOpened, readLastOpened } from './new-rows';
 
@@ -194,7 +195,8 @@ function JobItem({
           Marking reached
         </p>
       ) : (
-        <div role="group" aria-label="Your answer" className="flex gap-1.5">
+        // A press on a button is not a press on the row: the row's click would put him back on a row that just left.
+        <div role="group" aria-label="Your answer" className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs max-sm:h-11" aria-keyshortcuts={current ? 'x' : undefined} onClick={onPass}>
             Pass
           </Button>
@@ -385,8 +387,13 @@ export default function BrowsePage() {
       label: 'Passed.',
       afterCommit: 'Passed.',
       patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, hidden: [...m.hidden, id] }) }],
-      // The list is read again before the row's mark is dropped, so the row does not flash back.
-      commit: (o) => client.passJob(id, o).then(() => queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll })),
+      // The list on the page drops the row before the mark goes, so the row never comes back while the list is read
+      // again (seconds on the live store, or a 503 when Knock is busy).
+      commit: (o) =>
+        client.passJob(id, o).then(() => {
+          dropPosting(queryClient, id);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+        }),
     });
   };
 
@@ -405,18 +412,19 @@ export default function BrowsePage() {
       afterCommit: 'Saved to Applied.',
       patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, hidden: [...m.hidden, id] }) }],
       commit: (o) =>
-        client.markApplied(id, o).then(async () => {
+        client.markApplied(id, o).then(() => {
+          dropPosting(queryClient, id);
           void queryClient.invalidateQueries({ queryKey: queryKeys.applied });
           void queryClient.invalidateQueries({ queryKey: queryKeys.shell });
-          await queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
         }),
     });
   };
 
   /**
    * Reached: every row of the company says reached at once and the toast offers Undo; nothing is sent until the window
-   * closes. The API's own sentence then replaces the row's buttons, and the list is read again before the mark is dropped,
-   * so the tag does not flash off. Nothing else stops it: Reached on a company already reached just says when.
+   * closes. The API's own sentence then replaces the row's buttons, and every row of the company on the page takes the
+   * reached day before the mark is dropped, so the tag does not flash off while the list is read again. Nothing else stops it: Reached on a company already reached just says when.
    */
   const markCompanyReached = (job: JobRow) => {
     const id = job.postingId;
@@ -429,11 +437,12 @@ export default function BrowsePage() {
       afterCommit: label,
       patches: [{ key: queryKeys.jobsMarks, apply: (m: Marks) => ({ ...m, done: [...m.done, id], reached: [...m.reached, company] }) }],
       commit: (o) =>
-        client.markReached(id, o).then(async (res) => {
+        client.markReached(id, o).then((res) => {
           setAnswers((a) => new Map(a).set(id, res.text));
           announce(res.text);
+          markReachedInList(queryClient, res.companyId, res.reachedOn);
           void queryClient.invalidateQueries({ queryKey: queryKeys.company(res.companyId) });
-          await queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
         }),
     });
   };

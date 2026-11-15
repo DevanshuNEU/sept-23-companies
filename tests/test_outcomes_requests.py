@@ -33,6 +33,14 @@ class RecordRequestTest(unittest.TestCase):
         (event,) = self.db.execute("SELECT * FROM event WHERE entity = 'outreach_touch'").fetchall()
         self.assertEqual((event["kind"], event["actor"]), ("sent", "claude"))
 
+    def test_the_touch_is_created_when_the_request_was_recorded_not_by_the_wall_clock(self):
+        # The MCP guard compares the touch's created_at with its sent_at; a caller's clock (a test's fixed one)
+        # must decide both, or the row is refused once the wall clock is 5 days past that clock.
+        touch_id, _ = self.record()
+        created_at = self.db.execute("SELECT created_at FROM outreach_touch WHERE touch_id = ?",
+                                     (touch_id,)).fetchone()[0]
+        self.assertEqual(created_at, NOW)
+
     def test_a_used_key_returns_the_touch_and_writes_nothing(self):
         first, _ = self.record()
         again, created = self.record()

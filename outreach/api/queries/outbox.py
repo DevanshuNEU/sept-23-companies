@@ -53,6 +53,7 @@ GMAIL_THREAD_ANY = "https://mail.google.com/mail/u/0/#all/{}"
 PREVIEW_CHARS = 140
 COMPARE_MIN_MATCH = 12  # shorter shared stretches are words in common, not copied text
 NOT_SHOWN = "planned"
+SENDS_NEXT_RUN = "Sends on the next run"  # a Send now email the sender takes on its next tick
 
 
 def derive_group(state: str, touch_state: str, company: CompanyRef, *, no_go: bool = False) -> str:
@@ -157,7 +158,7 @@ class _Outbox:
         self.messages: dict[int, list[sqlite3.Row]] = defaultdict(list)
         for m in conn.execute(
                 "SELECT message_id, touch_id, seq, state, subject, due_on, checks, approved_at, claimed_at, sent_at, "
-                "updated_at, revision, error FROM message ORDER BY touch_id, seq"):
+                "updated_at, revision, error, priority FROM message ORDER BY touch_id, seq"):
             self.messages[m["touch_id"]].append(m)
         self.replies: dict[int, sqlite3.Row] = {}  # the newest human reply of each thread
         self.bounces: dict[int, sqlite3.Row] = {}
@@ -209,9 +210,16 @@ class _Outbox:
             verdict.earliest_at.strftime(ISO_FMT) if verdict.earliest_at is not None else None)
         sent = self.sends_today.get(survivor, 0)
         projected = self.projection.get(m["message_id"])
-        clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
-                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg,
-                                                    self.stages.get(verdict.account, proof.PROVEN), verdict.text)))
+        stage = self.stages.get(verdict.account, proof.PROVEN)
+        if m["priority"] == "now":
+            # Send now never shows an estimate: it goes on the sender's next run, or the row says what stops it.
+            projected = None
+            clock, text = None, (SENDS_NEXT_RUN if verdict.reason == "ready" else
+                                 reason_text(verdict.reason, stage, verdict.text) if verdict.text
+                                 else schedule_text(verdict.reason, when, self.now, self.cfg, stage))
+        else:
+            clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
+                           else (None, schedule_text(verdict.reason, when, self.now, self.cfg, stage, verdict.text)))
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
                         projected_at=projected.strftime(ISO_FMT) if projected is not None else None,
                         projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,
@@ -307,7 +315,8 @@ class _Outbox:
             summary=self._summary(group, touch, m, company, checks, schedule, next_due),
             worst=None if not checks else "block" if blocks else "warn" if warns else "pass", block_count=blocks,
             warn_count=warns, at=self._at(group, touch, m, schedule), schedule=schedule, next_due=next_due,
-            revision=m["revision"], h1b=h1b_wire(company.name))
+            revision=m["revision"], priority=m["priority"] if m["state"] == "approved" else "normal",
+            h1b=h1b_wire(company.name))
         return item, m
 
     # ------------------------------------------------------------------------------------------ the list

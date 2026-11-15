@@ -8,9 +8,22 @@ from outreach.api.models.base import WireRequest
 SUBJECT_MAX = 200
 BODY_MAX = 5000
 SetReplyKind = Literal["interested", "not_now", "said_no", "asked_to_stop", "auto_reply"]
+# His Send next and Send now (#9 outreach fixes ruling, 2026-11-14): normal, the front of its account's queue, or the
+# sender's next tick.
+SendPriority = Literal["normal", "next", "now"]
 
 
 class MessageRevisionBody(WireRequest):
+    revision: int = Field(ge=1)
+
+
+class ApproveBody(WireRequest):
+    revision: int = Field(ge=1)
+    priority: SendPriority = "normal"
+
+
+class PriorityBody(WireRequest):
+    priority: SendPriority
     revision: int = Field(ge=1)
 
 

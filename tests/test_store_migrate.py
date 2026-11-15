@@ -290,12 +290,16 @@ class FourFollowupsMigrationTest(unittest.TestCase):
         seed_sent(conn, person, at="2026-10-19T14:00:00Z")
         seed_message(conn, person, state="planned", seq=1, due_on="2026-10-22")
         at = "2026-10-19T12:00:00Z"
-        objects = "SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'message' AND type <> 'table' ORDER BY name"
-        before_rows = [tuple(r) for r in conn.execute("SELECT * FROM message ORDER BY message_id")]
+        # 0019 adds the priority columns and their own triggers; everything 0005 rebuilt comes through as it was.
+        objects = ("SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'message' AND type <> 'table' "
+                   "AND name NOT LIKE '%priority%' ORDER BY name")
+        old_columns = ", ".join(r[1] for r in conn.execute("PRAGMA table_info(message)"))
+        rows = f"SELECT {old_columns} FROM message ORDER BY message_id"
+        before_rows = [tuple(r) for r in conn.execute(rows)]
         before_objects = [tuple(r) for r in conn.execute(objects)]
         self.assertEqual(len([o for o in before_objects if o[0] == "trigger"]), 8)
         self.assertEqual(migrate(conn), latest_version())
-        self.assertEqual([tuple(r) for r in conn.execute("SELECT * FROM message ORDER BY message_id")], before_rows)
+        self.assertEqual([tuple(r) for r in conn.execute(rows)], before_rows)
         self.assertEqual([tuple(r) for r in conn.execute(objects)], before_objects)
         conn.execute("INSERT INTO message(touch_id, seq, state, due_on, saved_by, created_at, updated_at) "
                      "VALUES (1, 4, 'planned', '2026-11-20', 'sender', ?, ?)", (at, at))

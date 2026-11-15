@@ -1,4 +1,4 @@
-import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus } from './types';
+import type { Id, Revision, CloseReason, RemoveReason, RoleKind, ReplyKind, LinkedInStep, PersonRef, ShellSummary, Pulse, SearchIndex, PostingHit, DailyEntry, TodayView, SendingStatus, Check, OutboxView, OutboxDetail, DraftCompare, LinkedInPerson, LinkedInView, NeedsYouView, ReviewFix, NoGoView, CompanyView, DoneView, HealthView, PlanView, OutcomePromptView, WinsView, ProgressView, FindingsView, WatchView, ScoreView, PlanRow, NoteDraft, OutcomeKind, LogPeopleResult, BenchView, BrowseParams, BrowseView, SwapResult, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus, SendPriority } from './types';
 
 export interface WriteOptions { requestId: string; keepalive?: boolean } // keepalive: phase 2 uses fetch keepalive for flushes on pagehide
 export type ApiErrorCode = 'blocked' | 'conflict' | 'capacity' | 'not_allowed' | 'not_found' | 'network';
@@ -22,7 +22,8 @@ export interface OutreachClient {
   outbox(): Promise<OutboxView>;
   outboxDetail(touchId: Id): Promise<OutboxDetail>;
   saveMessage(messageId: Id, edit: { subject: string; body: string; revision: Revision }, o: WriteOptions): Promise<OutboxDetail>;
-  approve(messageId: Id, revision: Revision, o: WriteOptions): Promise<OutboxDetail>;   // 'blocked' with checks
+  approve(messageId: Id, revision: Revision, o: WriteOptions, priority?: SendPriority): Promise<OutboxDetail>; // 'blocked' with checks; priority: his Send next or Send now
+  setPriority(messageId: Id, priority: SendPriority, revision: Revision, o: WriteOptions): Promise<OutboxDetail>; // an approved email only; 'not_allowed' once claimed
   unapprove(messageId: Id, revision: Revision, o: WriteOptions): Promise<OutboxDetail>; // 'not_allowed' once claimed
   skip(messageId: Id, revision: Revision, o: WriteOptions): Promise<OutboxDetail>;      // 'not_allowed' in sending, send_unknown
   setReplyKind(touchId: Id, kind: Exclude<ReplyKind, 'unsorted'>, revision: Revision, o: WriteOptions): Promise<OutboxDetail>;

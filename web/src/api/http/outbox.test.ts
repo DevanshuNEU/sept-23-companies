@@ -39,6 +39,17 @@ describe('outboxMethods writes', () => {
     expect(send).toHaveBeenLastCalledWith('POST', '/api/messages/12/skip', { revision: 6 }, o);
   });
 
+  it('approve carries Send next or Send now, and the priority route changes it later', async () => {
+    const { t, send } = sender();
+    const m = outboxMethods(t);
+    await m.approve!(12, 4, o, 'normal');
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/messages/12/approve', { revision: 4 }, o);
+    await m.approve!(12, 4, o, 'now');
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/messages/12/approve', { revision: 4, priority: 'now' }, o);
+    await m.setPriority!(12, 'next', 5, o);
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/messages/12/priority', { priority: 'next', revision: 5 }, o);
+  });
+
   it('the reply kind posts to the thread with the touch revision', async () => {
     const { t, send } = sender();
     await outboxMethods(t).setReplyKind!(41, 'auto_reply', 2, o);

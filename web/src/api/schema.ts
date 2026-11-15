@@ -518,6 +518,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/messages/{message_id}/priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Priority
+         * @description His Send next or Send now on an approved email, or back to normal.
+         */
+        post: operations["set_priority"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/messages/{message_id}/save": {
         parameters: {
             query?: never;
@@ -1416,6 +1436,17 @@ export interface components {
             asOf: string;
             /** Rows */
             rows: components["schemas"]["AppliedRow"][];
+        };
+        /** ApproveBody */
+        ApproveBody: {
+            /**
+             * Priority
+             * @default normal
+             * @enum {string}
+             */
+            priority: "normal" | "next" | "now";
+            /** Revision */
+            revision: number;
         };
         /** BaseRates */
         BaseRates: {
@@ -3060,6 +3091,11 @@ export interface components {
             person: components["schemas"]["PersonRef"];
             /** Preview */
             preview: string;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "normal" | "next" | "now";
             /** Revision */
             revision: number;
             schedule: components["schemas"]["Schedule"] | null;
@@ -3437,6 +3473,16 @@ export interface components {
             rankerVersion: string;
             /** Score */
             score: number;
+        };
+        /** PriorityBody */
+        PriorityBody: {
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "normal" | "next" | "now";
+            /** Revision */
+            revision: number;
         };
         /** ProfileHistory */
         ProfileHistory: {
@@ -6799,7 +6845,96 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MessageRevisionBody"];
+                "application/json": components["schemas"]["ApproveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxDetail"];
+                };
+            };
+            /** @description bad_request: the request was not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description forbidden: not one of this app's own pages */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description not_found: no such record */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description conflict, capacity or not_allowed: the write changed nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description blocked or idempotency_mismatch: the write changed nothing */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description server_error: nothing was saved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description busy: the store is in use, nothing was saved, try again */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    set_priority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriorityBody"];
             };
         };
         responses: {

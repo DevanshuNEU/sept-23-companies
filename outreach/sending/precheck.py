@@ -53,8 +53,8 @@ def precheck(conn: sqlite3.Connection, q: Queued, *, now: str,
     """Run the approve checks on `q` as stored now. Returns the blocks found, or None when it may be claimed.
 
     One transaction (a savepoint inside the caller's), so the checks and the move read the same data. On a block
-    the message moves `approved -> drafted` with `checks` set to the fresh list, `updated_at` `now`, revision on by
-    one, and event `send_blocked` naming the codes. When the only block is `banned_list_missing` (the list that
+    the message moves `approved -> drafted` with `checks` set to the fresh list, its priority back to `normal`,
+    `updated_at` `now`, revision on by one, and event `send_blocked` naming the codes. When the only block is `banned_list_missing` (the list that
     `load_banned` returned is empty) nothing is written and the blocks are returned: no claim, approval kept. A
     message that is no longer `approved` returns None and is left to the claim, which then changes nothing."""
     stamp = iso_utc(now)
@@ -71,9 +71,11 @@ def precheck(conn: sqlite3.Connection, q: Queued, *, now: str,
             return None
         if all(b["code"] == LIST_MISSING for b in blocks):
             return blocks
+        # Back to review drops Send next and Send now: approving it again is a new click with its own choice.
         cur = conn.execute(
-            "UPDATE message SET state = 'drafted', checks = ?, updated_at = ?, revision = revision + 1 "
-            "WHERE message_id = ? AND state = 'approved' RETURNING revision", (json.dumps(found), stamp, q.message_id))
+            "UPDATE message SET state = 'drafted', checks = ?, priority = 'normal', urgent_at = NULL, updated_at = ?, "
+            "revision = revision + 1 WHERE message_id = ? AND state = 'approved' RETURNING revision",
+            (json.dumps(found), stamp, q.message_id))
         revision = cur.fetchone()[0]
         append_event(conn, entity="message", entity_id=q.message_id, company_id=q.company_id, kind="send_blocked",
                      actor="sender", at=stamp, idempotency_key=f"send_blocked:{q.message_id}:{revision}",

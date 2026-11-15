@@ -539,7 +539,7 @@ function buildItem(c: Ctx, s: ItemSpec, rank: number): { item: OutboxItem; detai
     sortKey: `${GROUP_INDEX[s.group]}.${String(rank).padStart(5, '0')}`, person: s.person, company: c.co(s.company),
     subject: s.subject, preview: s.preview ?? s.subject, summary: s.summary,
     worst: checks.length === 0 ? null : blockCount ? 'block' : warnCount ? 'warn' : 'pass', blockCount, warnCount,
-    at: s.at, schedule: s.schedule ?? null, nextDue: s.nextDue ?? null, revision: 1, h1b: sampleH1b(s.company),
+    at: s.at, schedule: s.schedule ?? null, nextDue: s.nextDue ?? null, revision: 1, priority: 'normal', h1b: sampleH1b(s.company),
   };
   const first = s.person.name.split(' ')[0] ?? s.person.name;
   const detail: OutboxDetail = {

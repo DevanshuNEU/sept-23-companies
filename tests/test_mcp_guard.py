@@ -597,3 +597,47 @@ class MoveGuardTest(GuardCase):
             self.addCleanup(conn.close)
             conn.execute(sql, (target, self.person))
 
+
+
+class SendPriorityGuardTest(GuardCase):
+    """Send next and Send now are only his clicks in the Outbox (#9 outreach fixes ruling, 2026-11-14): Claude never
+    writes `message.priority` or `urgent_at`, on any message, by any layer."""
+
+    SET_NOW = "UPDATE message SET priority = 'now', urgent_at = '2026-11-10T15:00:00Z' WHERE message_id = ?"
+
+    def test_priority_and_urgent_at_are_never_columns(self):
+        self.assertIn("priority", NEVER_COLUMNS["message"])
+        self.assertIn("urgent_at", NEVER_COLUMNS["message"])
+        for column in ("priority", "urgent_at"):
+            with self.assertRaises(GrantError):
+                guard.open_guarded({"message": Grant(update=frozenset({column}))}, path=self.path)
+
+    def test_a_priority_update_is_refused_by_the_trigger_alone(self):
+        conn = self.triggers_only()
+        self.assert_trigger_refuses(conn, self.SET_NOW, (self.approved,))
+        # Its own draft too.
+        self.assert_trigger_refuses(conn, "UPDATE message SET urgent_at = ? WHERE message_id = ?", (T, self.drafted))
+        self.assertEqual(self.db.execute("SELECT priority FROM message WHERE message_id = ?",
+                                         (self.approved,)).fetchone()[0], "normal")
+
+    def test_a_priority_update_is_refused_by_the_authorizer_alone(self):
+        conn = self.authorizer_only({"message": Grant(update=frozenset({"subject", "body"}))})
+        self.assert_not_authorized(conn, self.SET_NOW, (self.approved,))
+
+    def test_a_message_born_with_a_priority_is_refused(self):
+        fresh = seed.person(self.db, self.company, "New Person")
+        touch = self.db.execute("INSERT INTO touch(person_id, created_at, updated_at) VALUES (?, ?, ?)",
+                                (fresh, T, T)).lastrowid
+        conn = self.guarded({"message": Grant(insert=True)})
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO message(touch_id, seq, state, subject, body, priority, created_at, updated_at) "
+                         "VALUES (?, 0, 'drafted', 'Hi', 'Hello', 'next', ?, ?)", (touch, T, T))
+        trig = self.triggers_only()
+        self.drop_store_insert_trigger()
+        self.assert_trigger_refuses(trig, "INSERT INTO message(touch_id, seq, state, subject, body, priority, "
+                                          "created_at, updated_at) VALUES (?, 0, 'drafted', 'Hi', 'Hello', 'next', ?, ?)",
+                                    (touch, T, T))
+
+    def drop_store_insert_trigger(self):
+        """The store's own insert check off on this scratch store, so the guard's trigger is what refuses."""
+        self.db.execute("DROP TRIGGER message_insert_priority")

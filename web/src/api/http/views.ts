@@ -39,6 +39,7 @@ export const VIEW_OF_METHOD: Record<Exclude<keyof OutreachClient, 'source'>, Vie
   outboxDetail: 'outbox',
   saveMessage: 'outbox',
   approve: 'outbox',
+  setPriority: 'outbox',
   unapprove: 'outbox',
   skip: 'outbox',
   setReplyKind: 'outbox',

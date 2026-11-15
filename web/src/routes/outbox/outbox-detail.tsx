@@ -17,6 +17,7 @@ import {
   type OutboxView,
   type Revision,
   type RoleKind,
+  type SendPriority,
   type ShellSummary,
 } from '@/api';
 import { CheckList } from '@/components/check-list';
@@ -24,6 +25,16 @@ import { DraftEditor } from '@/components/draft-editor';
 import { FollowupTrack } from '@/components/followup-track';
 import { QueryState, StateBanner } from '@/components/state-views';
 import { StatusBadge } from '@/components/status-badge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -44,6 +55,41 @@ import { fewerDrafts, patchDetailItem, patchRow } from './outbox-patches';
 import { ReplyDetail, Thread, type ReplyChoice } from './reply-detail';
 
 const SAVE_FIRST = 'Save your edits first (Cmd S)';
+
+/** Send next and Send now (#9 outreach fixes ruling, 2026-11-14): what the toast and the line say once he chose. */
+const PRIORITY_DONE: Record<SendPriority, string> = { normal: 'Back in the normal order', next: 'Sends next', now: 'Sends on the next run' };
+const SEND_NOW_TITLE = 'Send this now, outside the normal hours?';
+const SEND_NOW_TEXT = 'It goes on the next run, even at night or on a weekend. Stops, holds and the daily cap still apply.';
+
+/** His choice on an approved email, with the sender's own line for it ("Sends on the next run", or what stops it). */
+function PriorityLine({ item }: { item: OutboxItem }) {
+  if (item.state !== 'approved' || item.priority === 'normal') return null;
+  const ready = item.priority === 'next' || item.schedule?.reason === 'ready';
+  return (
+    <p role="status" aria-label="Send priority" className={ready ? 'text-sm' : 'text-sm text-warn'}>
+      <span className="font-medium">{item.priority === 'now' ? 'Send now. ' : 'Send next. '}</span>
+      {item.schedule?.text ?? PRIORITY_DONE[item.priority]}
+    </p>
+  );
+}
+
+/** One line of confirm before an email may go outside the normal hours. */
+function SendNowConfirm({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (o: boolean) => void; onConfirm: () => void }) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{SEND_NOW_TITLE}</AlertDialogTitle>
+          <AlertDialogDescription>{SEND_NOW_TEXT}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep it in line</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>Send now</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 const ROLE_WORD: Record<RoleKind, string> = {
   recruiter: 'recruiter',
@@ -356,20 +402,22 @@ function DetailBody({
 
   /* ------------------------------------------------------------ approve, skip, withdraw */
 
-  function approveFrom(d: OutboxDetail) {
+  function approveFrom(d: OutboxDetail, priority: SendPriority = 'normal') {
     const it = d.item;
     if (it.state !== 'drafted' || it.touchState !== 'open') return;
-    const list: Patch<OutboxView> = { key: queryKeys.outbox, apply: (v) => patchRow(v, it.touchId, (i) => ({ ...i, state: 'approved', group: 'approved' })) };
-    const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, { state: 'approved', group: 'approved' }) };
+    const approved = { state: 'approved', group: 'approved', priority } as const;
+    const list: Patch<OutboxView> = { key: queryKeys.outbox, apply: (v) => patchRow(v, it.touchId, (i) => ({ ...i, ...approved })) };
+    const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, approved) };
     const shell: Patch<ShellSummary> = { key: queryKeys.shell, apply: (s) => fewerDrafts(s) };
+    const when = priority !== 'normal' ? PRIORITY_DONE[priority] : it.schedule?.text;
     write({
       id: `approve:${it.messageId}`,
-      label: it.schedule ? `Approved ${it.person.name}. ${it.schedule.text}.` : `Approved ${it.person.name}.`,
+      label: when ? `Approved ${it.person.name}. ${when}.` : `Approved ${it.person.name}.`,
       afterCommit: 'Approved. Press U to withdraw.',
       patches: [list, det, shell],
       // The revision he read: if Claude saved a newer version since, the API refuses and says so.
       commit: async (o) => {
-        const done = noted(await client.approve(it.messageId, it.revision, o));
+        const done = noted(await client.approve(it.messageId, it.revision, o, priority));
         edits.delete(it.messageId); // what was approved is the saved text; nothing typed after it can go out
         return done;
       },
@@ -377,14 +425,52 @@ function DetailBody({
     onAdvance(it.touchId);
   }
 
-  /** The one way to approve from the screen: a click on Approve, the A key, or mod+enter. */
-  const tryApprove = () => {
+  /** The one way to approve from the screen: a click on Approve, Send next or Send now, the A key, or mod+enter. */
+  const tryApprove = (priority: SendPriority = 'normal') => {
     if (item.state !== 'drafted' || item.touchState !== 'open') return;
     if (gateText) {
       toast(gateText, { id: 'approve-refused' });
       return;
     }
-    approveFrom(detail);
+    approveFrom(detail, priority);
+  };
+
+  /** Send next, Send now or back to the normal order, on an email already approved. */
+  const changePriority = async (priority: SendPriority) => {
+    if (kind !== 'approved' || item.priority === priority) return;
+    // An approval still inside its undo window never reached the API: approve again, with this choice.
+    if (cancel(`approve:${messageId}`)) {
+      approveFrom({ ...detail, item: { ...item, state: 'drafted', group: 'review' } }, priority);
+      return;
+    }
+    // An approval whose commit already started: let it land, then change it.
+    if (queryClient.getQueryData<OutboxDetail>(detailKey)?.item.state === 'drafted') await flushPending();
+    const revision = queryClient.getQueryData<OutboxDetail>(detailKey)?.item.revision ?? item.revision;
+    const list: Patch<OutboxView> = { key: queryKeys.outbox, apply: (v) => patchRow(v, touchId, (i) => ({ ...i, priority })) };
+    const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, { priority }) };
+    write({
+      id: `priority:${messageId}`,
+      label: `${person.name}: ${PRIORITY_DONE[priority].toLowerCase()}.`,
+      afterCommit: `${person.name}: ${PRIORITY_DONE[priority].toLowerCase()}.`,
+      immediate: true,
+      patches: [list, det],
+      commit: async (o) => noted(await client.setPriority(messageId, priority, revision, o)),
+    });
+  };
+
+  // Send now asks once before it may go outside the normal hours: on a draft it approves, on an approved email it moves it.
+  const [confirmNow, setConfirmNow] = useState(false);
+  const sendNow = () => {
+    if (kind === 'draft' && gateText) {
+      toast(gateText, { id: 'approve-refused' });
+      return;
+    }
+    if (kind === 'draft' || kind === 'approved') setConfirmNow(true);
+  };
+  const confirmSendNow = () => {
+    setConfirmNow(false);
+    if (kind === 'draft') tryApprove('now');
+    else void changePriority('now');
   };
 
   const saveThenApprove = async () => {
@@ -530,7 +616,7 @@ function DetailBody({
   // Every key but escape acts on this email, so one that follows j, k or a click waits for that move to render.
   useHotkeys(
     [
-      { keys: 'a', label: 'Approve the selected draft', group: 'Outbox', enabled: kind === 'draft', run: tryApprove },
+      { keys: 'a', label: 'Approve the selected draft', group: 'Outbox', enabled: kind === 'draft', run: () => tryApprove() },
       { keys: 'e', label: 'Edit the body', group: 'Outbox', enabled: kind === 'draft', run: focusEditor },
       // Always taken, so the browser's own save dialog never opens on this view.
       { keys: 'mod+s', label: 'Save edits', group: 'Outbox', run: () => void save() },
@@ -650,6 +736,7 @@ function DetailBody({
             </div>
           ) : kind === 'approved' ? (
             <>
+              <PriorityLine item={item} />
               <ReadOnlyDraft subject={item.subject} body={detail.body} />
               <p className="text-xs text-muted-foreground">Withdraw the approval to edit this email.</p>
             </>
@@ -667,7 +754,7 @@ function DetailBody({
                 <Button
                   type="button"
                   aria-disabled={gateText ? true : undefined}
-                  onClick={tryApprove}
+                  onClick={() => tryApprove()}
                   className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-primary"
                 >
                   <CheckIcon aria-hidden />
@@ -677,6 +764,26 @@ function DetailBody({
               </TooltipTrigger>
               {gateText ? <TooltipContent>{gateText}</TooltipContent> : null}
             </Tooltip>
+            <Button
+              type="button"
+              variant="outline"
+              aria-disabled={gateText ? true : undefined}
+              title={gateText || 'Approve, and send it first in its account, in the normal hours'}
+              onClick={() => tryApprove('next')}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            >
+              Send next
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-disabled={gateText ? true : undefined}
+              title={gateText || 'Approve, and send it on the next run, even outside the normal hours'}
+              onClick={sendNow}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            >
+              Send now
+            </Button>
             <Button type="button" variant="outline" disabled={!dirty} onClick={() => void save()}>
               Save
               <Kbd aria-hidden>⌘S</Kbd>
@@ -699,6 +806,21 @@ function DetailBody({
               Skip
               <Kbd aria-hidden>S</Kbd>
             </Button>
+            {item.priority !== 'next' ? (
+              <Button type="button" variant="outline" onClick={() => void changePriority('next')}>
+                Send next
+              </Button>
+            ) : null}
+            {item.priority !== 'now' ? (
+              <Button type="button" variant="outline" onClick={sendNow}>
+                Send now
+              </Button>
+            ) : null}
+            {item.priority !== 'normal' ? (
+              <Button type="button" variant="ghost" onClick={() => void changePriority('normal')}>
+                Send in the normal order
+              </Button>
+            ) : null}
             <span className="ml-auto flex gap-1">{companyButtons}</span>
           </footer>
         ) : null}
@@ -716,6 +838,7 @@ function DetailBody({
       <DetailHeader detail={detail} />
       {main}
       {companyActions.dialogs}
+      <SendNowConfirm open={confirmNow} onOpenChange={setConfirmNow} onConfirm={confirmSendNow} />
       {comparing !== null ? (
         <CompareDialog messageId={messageId} otherMessageId={comparing} open onOpenChange={(o) => (o ? undefined : setComparing(null))} />
       ) : null}

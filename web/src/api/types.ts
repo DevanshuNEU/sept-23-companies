@@ -149,6 +149,9 @@ export interface Schedule { // derived: the sender's verdict for an approved ema
   tz: string; reason: ScheduleReason;
   text: string; companySentToday: number; companySlotsLeft: number;
 }
+/** His Send next (first in its account's queue, every rule kept) or Send now (the sender's next run, outside the
+ * normal hours too, every stop kept). Only an approved email has one other than normal (#281). */
+export type SendPriority = 'normal' | 'next' | 'now';
 /** A company's H-1B tag from the H-1B list (#252): a plain fact, never a sort or a hide. `detail` is the hover text. */
 export interface H1bTag { label: string; detail: string; trend: string }
 export interface OutboxItem {
@@ -156,6 +159,7 @@ export interface OutboxItem {
   group: OutboxGroup; sortKey: string; person: PersonRef; company: CompanyRef;
   subject: string; preview: string; summary: string; worst: CheckSeverity | null; blockCount: number; warnCount: number;
   at: IsoTime; schedule: Schedule | null; nextDue: { seq: 1 | 2 | 3 | 4; on: IsoDate } | null; revision: Revision;
+  priority: SendPriority;
   h1b: H1bTag | null; /* the company's H-1B tag; null: no H-1B list built (#252) */
 }
 export interface OutboxCounts { replied: number; review: number; approved: number; sending: number; checking: number; sent: number; paused: number; closed: number }

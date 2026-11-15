@@ -2,6 +2,10 @@
 `run_write` transaction, checks the revision the page loaded, and appends one event by Devanshu keyed
 `ctx.event_key(0)`.
 
+Send next and Send now (#9 outreach fixes ruling, 2026-11-14) are only his clicks: approve takes one with the
+approval, and `set_priority` changes it on an email already approved. Nothing else in the API writes `priority`, and
+unapprove sets it back to `normal`. `urgent_at` is when he asked for Send now.
+
 `approve_message` is the only code in the API that moves a message to `approved` (a test pins it). It decides on
 the store as it is now: `run_checks` inside the write transaction, after the caller has looked the mail server up
 outside it. Any block raises `Blocked` with the fresh checks; the route stores those checks in a second short
@@ -81,9 +85,10 @@ def mail_domain_of(conn: sqlite3.Connection, message_id: int) -> str | None:
     return email_domain(row["email"])
 
 
-def approve_message(ctx: WriteCtx, message_id: int, revision: int, banned: list) -> int:
-    """Approves a clean draft and returns its touch id. Only a `drafted` message at its loaded revision, to an
-    address that never bounced (`bounced_address`); any block raises `Blocked` (nothing written here)."""
+def approve_message(ctx: WriteCtx, message_id: int, revision: int, banned: list, *, priority: str = "normal") -> int:
+    """Approves a clean draft with his Send next or Send now (`priority`) and returns its touch id. Only a `drafted`
+    message at its loaded revision, to an address that never bounced (`bounced_address`); any block raises
+    `Blocked` (nothing written here)."""
     row = _message(ctx.conn, message_id)
     _fresh(row, revision)
     if row["state"] != "drafted":
@@ -95,13 +100,37 @@ def approve_message(ctx: WriteCtx, message_id: int, revision: int, banned: list)
     if any(c["severity"] == "block" for c in found):
         raise Blocked(message_id, revision, found)
     cur = ctx.conn.execute(
-        "UPDATE message SET state = 'approved', approved_at = ?, checks = ?, updated_at = ?, revision = revision + 1 "
-        "WHERE message_id = ? AND revision = ? AND state = 'drafted'",
-        (ctx.now, json.dumps(found), ctx.now, message_id, revision))
+        "UPDATE message SET state = 'approved', approved_at = ?, checks = ?, priority = ?, urgent_at = ?, "
+        "updated_at = ?, revision = revision + 1 WHERE message_id = ? AND revision = ? AND state = 'drafted'",
+        (ctx.now, json.dumps(found), priority, ctx.now if priority == "now" else None, ctx.now, message_id, revision))
     if cur.rowcount != 1:  # cannot happen inside BEGIN IMMEDIATE after the reads above; never approve on a doubt
         raise ApiProblem("conflict", f"The draft changed since you loaded it. {NOT_SAVED}")
-    _event(ctx, row, "approved", {"revision": revision + 1,
+    _event(ctx, row, "approved", {"revision": revision + 1, "priority": priority,
                                   "warns": [c["code"] for c in found if c["severity"] == "warn"]})
+    return row["touch_id"]
+
+
+PRIORITY_WORDS = {"normal": "the normal queue", "next": "Send next", "now": "Send now"}
+
+
+def set_priority(ctx: WriteCtx, message_id: int, priority: str, revision: int) -> int:
+    """His Send next, Send now or back to normal on an approved email (before the sender claims it). Returns the
+    touch id. Event `priority_set` with the old and the new choice."""
+    row = _message(ctx.conn, message_id)
+    _fresh(row, revision)
+    if row["state"] in CLAIMED:
+        raise ApiProblem("not_allowed", ALREADY_OUT)
+    if row["state"] != "approved":
+        raise ApiProblem("not_allowed", f"Only an approved email can be sent next or now. Approve it first. {NOT_SAVED}")
+    if row["priority"] == priority:
+        raise ApiProblem("not_allowed", f"It is already on {PRIORITY_WORDS[priority]}. {NOT_SAVED}")
+    cur = ctx.conn.execute(
+        "UPDATE message SET priority = ?, urgent_at = ?, updated_at = ?, revision = revision + 1 "
+        "WHERE message_id = ? AND revision = ? AND state = 'approved'",
+        (priority, ctx.now if priority == "now" else None, ctx.now, message_id, revision))
+    if cur.rowcount != 1:
+        raise ApiProblem("conflict", f"The email changed since you loaded it. {NOT_SAVED}")
+    _event(ctx, row, "priority_set", {"revision": revision + 1, "from": row["priority"], "to": priority})
     return row["touch_id"]
 
 
@@ -136,8 +165,8 @@ def unapprove_message(ctx: WriteCtx, message_id: int, revision: int) -> int:
         raise ApiProblem("not_allowed", ALREADY_OUT)
     if row["state"] != "approved":
         raise ApiProblem("not_allowed", f"Only an approved email can be unapproved. {NOT_SAVED}")
-    bump(ctx.conn, "message", "message_id", message_id, revision, {"state": "drafted", "approved_at": None},
-         at=ctx.now)
+    bump(ctx.conn, "message", "message_id", message_id, revision,
+         {"state": "drafted", "approved_at": None, "priority": "normal", "urgent_at": None}, at=ctx.now)
     _event(ctx, row, "unapproved", {"revision": revision + 1})
     return row["touch_id"]
 

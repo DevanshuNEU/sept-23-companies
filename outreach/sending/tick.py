@@ -20,7 +20,8 @@ The steps, in order. Gmail is called only in steps 2, 4 and 7, and never inside 
 6. The clock is read again. Then each account that may send this tick (`sends = true`, signed in this tick, not
    paused, the old sender not loaded, its marker proof open, its mail read in full), in random order: the verdicts,
    decided again before each account so a send by one is seen by the next (two accounts never send to one company
-   in one tick), with each account's own waits in front (`queue.gate_accounts`), and that account's pick.
+   in one tick, Send now included: it waits for a send to its company since the tick started), with each account's
+   own waits in front (`queue.gate_accounts`), and that account's pick (a ready Send now first, then Send next).
 7. At most one message per account: the approve checks again (`precheck`), then `send_one` with that account's
    client. A Gmail error from the send is applied in one short transaction after the call.
 8. The `job_run` finishes with integer counts and `noop`.
@@ -226,6 +227,7 @@ class _Tick:
         self.pending: list[tuple[str, str]] = []
         self.notify = _quiet if dry_run else self._queue_notice
         self.now = deps.clock()
+        self.started = self.now  # a send to a company at or after this is in this tick (Send now waits for it)
         self.stamp = _stamp(self.now)
         self.today = cal.ny_date(self.now, cfg)
         self.lines: list[str] = []
@@ -672,7 +674,7 @@ class _Tick:
         tick (`signed_out`), the old sender (`old_sender_running`, every message), its marker not proven
         (`message_id_unproven`, or its first email alone)."""
         found = queue.verdicts(self.conn, self.now, self.cfg, self.rows, day=self.days, gate=None,
-                               unread=frozenset(self.unread))
+                               unread=frozenset(self.unread), fresh_after=self.started)
         gates: dict[str | None, str | None] = {None: "old_sender_running" if old_loaded else None}
         first: list[str] = []
         for address in self.rows:

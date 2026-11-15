@@ -4,8 +4,8 @@
 live store outside the live checkout are refused exactly as everywhere else), then adds two layers:
 
 1. Temp triggers (`mcp_*`, on this connection only). They refuse the values Claude may never write, whatever the
-   grants: approving, skipping, unapproving or reviving a message; a message born in any state but a drafted first
-   email by claude; editing a message he saved or one already approved; any touch but a fresh open one; any
+   grants: approving, skipping, unapproving or reviving a message; Send next or Send now (`priority`, `urgent_at`);
+   a message born in any state but a drafted first email by claude with normal priority; editing a message he saved or one already approved; any touch but a fresh open one; any
    evidence that is locked, by hand, confirmed, or a size, headcount, domain or hq that is not a guess; a LinkedIn
    note not saved by claude as proposed; any LinkedIn log row or outreach touch but a new request he says he sent
    (a `request_sent` row and its `linkedin_request` touch under a `bridge:` key, no outcome, no undo, paired with
@@ -61,8 +61,10 @@ BRIDGE_TABLES = frozenset({"linkedin_log", "outreach_touch"})
 INSERT_ONLY_TABLES = BRIDGE_TABLES | {"bounced_address"}
 
 # Columns no grant may name. `touch` maps to None: no column of a touch is ever updated through MCP.
+# `priority` and `urgent_at` are his Send next and Send now (#9 outreach fixes ruling, 2026-11-14): only his click.
 _MESSAGE_SEND_COLUMNS = frozenset({"touch_id", "seq", "due_on", "approved_at", "pending_rfc_id", "claimed_at",
-                                   "rfc_message_id", "gmail_message_id", "sent_at", "reconciled_at", "error"})
+                                   "rfc_message_id", "gmail_message_id", "sent_at", "reconciled_at", "error",
+                                   "priority", "urgent_at"})
 NEVER_COLUMNS: dict[str, frozenset[str] | None] = {
     "message": _MESSAGE_SEND_COLUMNS,
     "touch": None,
@@ -116,7 +118,8 @@ def _refuse(why: str) -> str:
 
 _SEND_COLUMNS_SET = ("NEW.approved_at IS NOT NULL OR NEW.pending_rfc_id IS NOT NULL OR NEW.claimed_at IS NOT NULL "
                      "OR NEW.rfc_message_id IS NOT NULL OR NEW.gmail_message_id IS NOT NULL OR NEW.sent_at IS NOT NULL "
-                     "OR NEW.reconciled_at IS NOT NULL OR NEW.error IS NOT ''")
+                     "OR NEW.reconciled_at IS NOT NULL OR NEW.error IS NOT '' OR NEW.priority IS NOT 'normal' "
+                     "OR NEW.urgent_at IS NOT NULL")
 _SEND_COLUMNS_CHANGED = " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in sorted(_MESSAGE_SEND_COLUMNS))
 
 # A reader version that is not a side session's (#32 `side_version`: `side-` and the files' version).

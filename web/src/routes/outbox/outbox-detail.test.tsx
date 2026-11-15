@@ -365,6 +365,81 @@ describe('approve', () => {
   });
 });
 
+describe('send next and send now', () => {
+  const sendNowButton = () => screen.getByRole('button', { name: 'Send now' });
+
+  it('Send next approves with its choice after the undo window, and the list keeps it approved', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const approve = vi.spyOn(client, 'approve');
+    startClock();
+    fireEvent.click(screen.getByRole('button', { name: 'Send next' }));
+    await settle();
+    expect(toastText()).toContain('Approved Omar Haddad. Sends next.');
+    await settle(8000);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);
+    expect(approve.mock.calls[0]?.[3]).toBe('next');
+  });
+
+  it('Send now on a draft asks one line first, and only the confirm approves it', async () => {
+    const { client } = await open(T.omar, 'Omar Haddad');
+    const approve = vi.spyOn(client, 'approve');
+    fireEvent.click(sendNowButton());
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('Send this now, outside the normal hours?')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep it in line' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(approve).not.toHaveBeenCalled();
+    expect(within(row('Omar Haddad')).queryByText('Approved')).toBeNull();
+
+    fireEvent.click(sendNowButton());
+    const confirm = within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Send now' });
+    startClock();
+    fireEvent.click(confirm);
+    await settle();
+    expect(toastText()).toContain('Approved Omar Haddad. Sends on the next run.');
+    await settle(8000);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(approve.mock.calls[0]?.[3]).toBe('now');
+  });
+
+  it('a blocked draft refuses Send next and Send now with the block, and opens no confirm', async () => {
+    const { client } = await open(T.kenji, 'Kenji Watanabe');
+    const approve = vi.spyOn(client, 'approve');
+    fireEvent.click(sendNowButton());
+    await waitFor(() => expect(toastText()).toContain(BLOCKED));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send next' }));
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('Send now on an approved email asks first, then the line says it sends on the next run', async () => {
+    const { client } = await open(T.jordan, 'Jordan Price');
+    const setPriority = vi.spyOn(client, 'setPriority');
+    expect(screen.queryByRole('status', { name: 'Send priority' })).toBeNull();
+    fireEvent.click(sendNowButton());
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(setPriority).toHaveBeenCalledTimes(1));
+    expect(setPriority.mock.calls[0]?.slice(0, 3)).toEqual([messageOf(T.jordan), 'now', 1]);
+    const line = await screen.findByRole('status', { name: 'Send priority' });
+    expect(line).toHaveTextContent('Send now. Sends on the next run');
+    expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send in the normal order' }));
+    await waitFor(() => expect(setPriority).toHaveBeenCalledTimes(2));
+    expect(setPriority.mock.calls[1]?.[1]).toBe('normal');
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Send priority' })).toBeNull());
+  });
+
+  it('Send next on an approved email moves it without a confirm', async () => {
+    const { client } = await open(T.jordan, 'Jordan Price');
+    const setPriority = vi.spyOn(client, 'setPriority');
+    fireEvent.click(screen.getByRole('button', { name: 'Send next' }));
+    await waitFor(() => expect(setPriority).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(await screen.findByRole('status', { name: 'Send priority' })).toHaveTextContent('Send next.');
+  });
+});
+
 describe('save and conflict', () => {
   it('mod+s saves and the check list updates', async () => {
     const { client } = await open(T.kenji, 'Kenji Watanabe');

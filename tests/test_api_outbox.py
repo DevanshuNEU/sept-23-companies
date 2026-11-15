@@ -167,7 +167,7 @@ class ViewTest(OutboxBase):
                    '"detail":"","fix":null,"spans":[]}]')
         self.conn.execute("UPDATE message SET checks = ? WHERE message_id = ?", (unknown, m))
         [item] = self.outbox()["items"]
-        self.assertEqual((item["worst"], item["warnCount"]), ("warn", 1))  # no cache row: still unknown
+        self.assertEqual((item["worst"], item["warnCount"]), ("warn", 1))  # no cache row: stored entry kept
         self.conn.execute("INSERT INTO mx_check(domain, status, checked_at) VALUES ('acme.example', 'ok', ?)", (NOW,))
         [item] = self.outbox()["items"]
         self.assertEqual((item["worst"], item["warnCount"]), ("pass", 0))
@@ -175,6 +175,20 @@ class ViewTest(OutboxBase):
         self.assertEqual(codes, [("no_mail_server", "pass")])
         self.conn.execute("UPDATE mx_check SET status = 'none'")
         self.assertEqual(self.detail(t)["checks"][0]["severity"], "block")
+
+    def test_a_stored_pass_with_an_empty_cache_stays_pass(self):
+        cid = seed.company(self.conn, "Acme", status="working")
+        t = self.thread(cid, "Kim Verified")
+        self.conn.execute("UPDATE person SET email = 'kim@acme.example' WHERE person_id = "
+                          "(SELECT person_id FROM touch WHERE touch_id = ?)", (t,))
+        m = seed.message(self.conn, t, 0, "drafted")
+        ok = ('[{"code":"no_mail_server","severity":"pass","title":"Mail server found","detail":"","fix":null,'
+              '"spans":[]}]')
+        self.conn.execute("UPDATE message SET checks = ? WHERE message_id = ?", (ok, m))
+        [item] = self.outbox()["items"]
+        self.assertEqual((item["worst"], item["warnCount"]), ("pass", 0))
+        self.assertEqual([(c["code"], c["severity"]) for c in self.detail(t)["checks"]],
+                         [("no_mail_server", "pass")])
 
     def test_items_sort_replies_first_then_drafts_newest_first_then_the_approved_queue_by_send_time(self):
         self.prove()

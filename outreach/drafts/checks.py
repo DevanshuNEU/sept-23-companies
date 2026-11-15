@@ -245,12 +245,15 @@ MAIL_SERVER_CODES = ("no_mail_server", "mail_server_unknown")
 
 
 def refresh_mail_server(found: list[Check], email: str | None, conn: sqlite3.Connection, now: str) -> list[Check]:
-    """The stored checks with the mail server entry read again from the `mx_check` cache (#281). A draft saved before
+    """The stored checks with the mail server entry read again from a fresh `mx_check` answer (#281); no fresh answer keeps the stored entry. A draft saved before
     the lookup answered keeps showing `mail_server_unknown` otherwise. A list with no mail server entry is untouched."""
     if not any(c["code"] in MAIL_SERVER_CODES for c in found):
         return found
     domain = email_domain(email)
-    live = mail_server_checks(email, cached_mx(conn, domain, now) if domain else "none")
+    mx = cached_mx(conn, domain, now) if domain else "none"
+    if mx == "unknown":  # no fresh answer: keep what the save stored (the MCP may have verified it live)
+        return found
+    live = mail_server_checks(email, mx)
     out, placed = [], False
     for c in found:
         if c["code"] not in MAIL_SERVER_CODES:

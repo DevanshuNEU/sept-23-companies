@@ -58,8 +58,8 @@ STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 PRIORITIES = ("normal", "next", "now")
 _RANK = {"now": 0, "next": 1, "normal": 2}
 URGENT_CAP = 3
-URGENT_LIMIT_TEXT = (f"Send now waits: this account reached today's limit plus {URGENT_CAP}. It goes tomorrow at "
-                     "8:00 in the recipient's time.")
+URGENT_LIMIT_TEXT = (f"Send now waits: this account reached today's limit plus {URGENT_CAP}. It goes at the "
+                     "start of the recipient's next sending hours.")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
            "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
            "company_held", "per_company_limit", "per_company_gap", "no_address",

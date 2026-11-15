@@ -15,7 +15,7 @@ CREATE TRIGGER message_priority_only_approved BEFORE UPDATE OF priority ON messa
   WHEN NEW.priority IS NOT OLD.priority AND NEW.priority <> 'normal' AND NEW.state <> 'approved'
   BEGIN SELECT RAISE(ABORT, 'only an approved message is sent next or now'); END;
 
--- A claimed or sent email keeps the priority it went out with: the urgent cap counts the ones sent with `now`.
+-- A claimed or sent email keeps the priority it went out with: the urgent cap (the day's limit plus 3) counts on it.
 CREATE TRIGGER message_priority_frozen_once_claimed BEFORE UPDATE OF priority, urgent_at ON message
   WHEN OLD.state IN ('sending','send_unknown','sent')
     AND (NEW.priority IS NOT OLD.priority OR NEW.urgent_at IS NOT OLD.urgent_at)

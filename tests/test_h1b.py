@@ -158,6 +158,29 @@ class BuildTest(unittest.TestCase):
         build(self.conn, self.src, self.out, years=[2023])
         self.assertNotIn("Alpha Nexus", (self.out / "unsure.md").read_text())
 
+    def test_a_failed_write_leaves_the_old_files_whole_and_no_temp_files(self):
+        # The API reads companies.md while a build may be rewriting it: a half written file would show a company
+        # as "No H-1B on record". The build writes a temp file in the same folder and renames it over the old one.
+        from unittest import mock
+        seed_company(self.conn, "Acme Robotics")
+        csv_file(self.src, 2023, [("ACME ROBOTICS INC", 10, 15)])
+        build(self.conn, self.src, self.out, years=[2023])
+        before = {n: (self.out / n).read_text() for n in ("companies.md", "unsure.md")}
+        csv_file(self.src, 2023, [("ACME ROBOTICS INC", 99, 99)])
+        with mock.patch("outreach.h1b.os.replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            build(self.conn, self.src, self.out, years=[2023])
+        self.assertEqual({n: (self.out / n).read_text() for n in before}, before)
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()), ["companies.md", "unsure.md"])
+
+    def test_a_good_build_replaces_the_files_through_a_rename(self):
+        from unittest import mock
+        seed_company(self.conn, "Acme Robotics")
+        csv_file(self.src, 2023, [("ACME ROBOTICS INC", 10, 15)])
+        with mock.patch("outreach.h1b.os.replace", wraps=__import__("os").replace) as swap:
+            build(self.conn, self.src, self.out, years=[2023])
+        self.assertEqual(sorted(Path(c.args[1]).name for c in swap.call_args_list), ["companies.md", "unsure.md"])
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()), ["companies.md", "unsure.md"])
+
     def test_a_hub_file_replaces_the_archive_file_of_its_year(self):
         # The archive's FY2023 file is partial and the hub's is whole: one year never counts twice.
         seed_company(self.conn, "Acme Robotics")
@@ -209,6 +232,23 @@ class BuildTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobTest(unittest.TestCase):
+    def test_the_template_renders_to_a_nightly_build_after_the_sources_job(self):
+        import plistlib
+
+        from outreach.deploy.jobs import NEW_JOBS, render
+        root = Path(__file__).resolve().parent.parent
+        job = next(j for j in NEW_JOBS if j.label == "com.devanshu.outreach-h1b")
+        self.assertEqual((job.owner, job.required), ("#252", False))
+        text = (root / job.template).read_text(encoding="utf-8")
+        self.assertFalse(any(d in text for d in (chr(0x2013), chr(0x2014))))
+        plist = plistlib.loads(render(text, live_root="/live", log_path="/logs/h.log", label=job.label).encode())
+        self.assertEqual(["/live/.venv/bin/python", "-m", "outreach.h1b", "build"], plist["ProgramArguments"])
+        self.assertEqual({"Hour": 6, "Minute": 50}, plist["StartCalendarInterval"])  # sources run at 06:30
+        self.assertEqual(("/logs/h.log",) * 2, (plist["StandardOutPath"], plist["StandardErrorPath"]))
+        self.assertEqual("/live", plist["WorkingDirectory"])
 
 
 class CliTest(unittest.TestCase):

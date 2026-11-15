@@ -47,6 +47,7 @@ NEW_JOBS: tuple[Job, ...] = (
     _new("com.devanshu.outreach-plan", "#15", False),
     _new("com.devanshu.outreach-judge", "#6", False),  # the profile judge; off in its config until he turns it on
     _new("com.devanshu.outreach-followup-drafter", "#142", False),  # drafts due follow-ups nightly for his click
+    _new("com.devanshu.outreach-h1b", "#252", False),  # rebuilds the H-1B list nightly so new companies get a line
 )
 
 OLD_JOBS: tuple[Job, ...] = (

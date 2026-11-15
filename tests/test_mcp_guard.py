@@ -641,3 +641,12 @@ class SendPriorityGuardTest(GuardCase):
     def drop_store_insert_trigger(self):
         """The store's own insert check off on this scratch store, so the guard's trigger is what refuses."""
         self.db.execute("DROP TRIGGER message_insert_priority")
+
+
+class EvidenceGrantDocTest(unittest.TestCase):
+    def test_the_guard_says_which_people_tools_insert_evidence_and_why(self):
+        # #281: an added email fills the company's domain as a guess, so these tools hold an evidence insert grant.
+        text = " ".join(guard.__doc__.split())
+        for tool in ("`add_people`", "`intake`", "`update_person`"):
+            self.assertIn(tool, text)
+        self.assertIn("company domain guess from an email", text)

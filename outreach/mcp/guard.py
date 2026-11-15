@@ -22,6 +22,8 @@ live store outside the live checkout are refused exactly as everywhere else), th
    not know.
 
 A grant may never name a `NEVER_TABLES` table or a `NEVER_COLUMNS` column (`GrantError`), so no tool can even ask.
+`add_people`, `intake` and `update_person` hold an `evidence` insert grant, used only to record a company domain guess
+from an email he gave (#281); the evidence trigger above keeps such a domain a guess.
 Each layer refuses an approve, a no-go write and a delete on its own; the tests run each one alone.
 """
 from __future__ import annotations

@@ -24,15 +24,16 @@ unread replies, a paused or held company, the follow-up schedule and the per-com
 toward the account's day; once the day is full it may still go while the account is fewer than `URGENT_CAP` past its
 limit (#9: "may go past the day's limit by at most 3"), else it waits as `daily_limit` with its own sentence
 (`URGENT_LIMIT_TEXT`). Send now means today: one that did not go on the New York day he clicked it (`urgent_at`)
-keeps its first place and still skips weekends, holidays, spacing and the gap, but waits for the recipient's hours
-(`window`, from `window_start` local, any day); a wait for the day to turn ends at that morning, not at midnight.
+becomes Send next (`priority_on`). It keeps its first place in its account's queue and every rule applies (window,
+weekdays, holidays, spacing, the company's gap), so a backlog of Send now clicks never goes out together. A Send now
+wait for the day to turn ends where Send next's would: the next sending day.
 """
 import dataclasses
 import random
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 from outreach.drafts.followups import (canonical_company, company_map, held_survivors, no_go_sets,
@@ -48,6 +49,7 @@ from outreach.sending.ramp import DayState
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["REASONS", "STOP_REASONS", "TIME_REASONS", "REASON_TEXT", "PRIORITIES", "URGENT_CAP", "URGENT_LIMIT_TEXT",
+           "priority_on",
            "Queued", "Verdict", "AccountDay", "Route",
            "canonical_company", "load_queue", "window_close", "minutes_left", "minutes_left_for", "day_minutes_for",
            "window_minutes", "Prepared", "prepare",
@@ -58,8 +60,8 @@ STOP_REASONS = ("company_closed", "no_go", "reply_stop", "touch_done")
 PRIORITIES = ("normal", "next", "now")
 _RANK = {"now": 0, "next": 1, "normal": 2}
 URGENT_CAP = 3
-URGENT_LIMIT_TEXT = (f"Send now waits: this account reached today's limit plus {URGENT_CAP}. It goes at the "
-                     "start of the recipient's next sending hours.")
+URGENT_LIMIT_TEXT = (f"Send now waits: this account reached today's limit plus {URGENT_CAP}. On the next sending "
+                     "day it goes first in line, as Send next.")
 REASONS = ("ready", "sender_paused", "signed_out", "old_sender_running", "message_id_unproven", "not_business_day",
            "daily_limit", "spacing", "window", "bad_timezone", "followup_not_due", "earlier_followup", "company_paused",
            "company_held", "per_company_limit", "per_company_gap", "no_address",
@@ -121,9 +123,13 @@ class Queued:
     priority: str = "normal"  # his click: normal, next (front of its account's queue) or now (the next tick)
     urgent_at: str | None = None  # when he clicked Send now: Send now means that New York day
 
-    @property
-    def urgent(self) -> bool:
-        return self.priority == "now"
+
+def priority_on(priority: str, urgent_at: str | None, now: datetime, cfg: SendConfig) -> str:
+    """The priority a message has at `now`: a Send now clicked on an earlier New York day is Send next (#9 outreach
+    fixes ruling, final review). Every other priority is itself."""
+    if priority != "now" or urgent_at is None:
+        return priority
+    return "now" if cal.ny_date(_utc(urgent_at), cfg) >= cal.ny_date(now, cfg) else "next"
 
 
 @dataclass(frozen=True)
@@ -155,6 +161,8 @@ class AccountDay:
 
 
 NO_LIST_TEXT = "Waits: the H-1B list cannot be read, so its sending account is not decided."
+AFTER_LIST_TEXT = ("Waits: this company was added after the H-1B list was built. Rebuild the list to decide its sending "
+                   "account.")
 
 
 @dataclass(frozen=True)
@@ -419,7 +427,8 @@ def _route(conn: sqlite3.Connection, cfg: SendConfig, q: Queued, routed: tuple[A
 def route_line(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int, company_id: int,
                routed: tuple[AccountRow | None, str]) -> Route:
     """`accounts.route`'s answer for one touch (`routed`; `company_id` is its surviving company), with the sentence
-    for an email no sending account can take: it names the account it waits for. Read only. The queue and the
+    for an email no sending account can take: it names the account it waits for, or why its lane is not decided (no
+    H-1B list, or a company added after the list was built). Read only. The queue and the
     Outbox's "from" line share it."""
     account, why = routed
     if account is not None and not account.cfg.sends:  # a thread on an account that rests
@@ -434,6 +443,8 @@ def route_line(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int, company
         lane = _accounts.lane_of(conn, company_id)
         if lane == "general" and not has_list():
             return Route(None, NO_LIST_TEXT)
+        if lane == "general" and _accounts.added_after_list(conn, company_id):
+            return Route(None, AFTER_LIST_TEXT)
         named = next((a for a in cfg.accounts if a.lane == lane), None)
         if named is None:
             return Route(None, "Waits: no account is set up to send to this company yet.")
@@ -536,7 +547,6 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
         next_send = {a: d.next_send for a, d in p.days.items()}
     day_begins = _utc(cal.ny_day_bounds(today, cfg)[0])
     tomorrow = _local(cal.add_business_days(today, 1, cfg), cfg.window_start, ZoneInfo(cfg.day_tz))
-    midnight = _utc(cal.ny_day_bounds(today + timedelta(days=1), cfg)[0])  # when Send now's day turns
     opens_at = _local(today, cfg.window_start, ZoneInfo(cfg.day_tz))
     own: dict[str, tuple[bool, bool, datetime | None, datetime | None, str | None]] = {}
     for address, d in p.days.items():
@@ -567,9 +577,9 @@ def decide_all(p: Prepared, now: datetime, cfg: SendConfig, *, gate: str | None,
             not_before=p.not_before.get(q.message_id),
             company_pace=p.paces.get(q.company_id) or pace.default_pace(cfg), block=block,
             no_account=route.account is None, account_id=account_id, unread=unread is not None,
-            urgent_room=room, midnight=midnight, fresh_after=fresh_after)
+            urgent_room=room, fresh_after=fresh_after)
         text = route.text if reason == "lane_waits" else None
-        if reason == "daily_limit" and q.urgent:
+        if reason == "daily_limit" and priority_on(q.priority, q.urgent_at, now, cfg) == "now":
             text = URGENT_LIMIT_TEXT
         if reason == "inbound_unread":
             text = f"Waits: replies on {unread} could not be read yet."
@@ -599,8 +609,8 @@ def verdicts(conn: sqlite3.Connection, now: datetime, cfg: SendConfig,
     the thread not gone out; bad time zone; not a business day; the account's daily limit; per-company limit;
     per-company gap; recipient's window; the account's spacing. A Send now message skips the bad time zone, the
     business day, the gap (but for a send to its company at or after `fresh_after`, the tick's start), the window and
-    the spacing, and passes a full day while it has room; one carried over from an earlier New York day waits for the
-    recipient's hours (module text)."""
+    the spacing, and passes a full day while it has room; one clicked on an earlier New York day is Send next and
+    every rule applies (module text)."""
     p = prepare(conn, now, cfg, accounts, day=day, unread=unread)
     if not p.queue:
         return []
@@ -613,12 +623,10 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
             no_thread: bool = False, behind: bool = False,
             not_before: date | None = None, company_pace: CompanyPace | None = None, block: str | None = None,
             no_account: bool = False, account_id: int | None = None,
-            unread: bool = False, urgent_room: bool = False, midnight: datetime | None = None,
+            unread: bool = False, urgent_room: bool = False,
             fresh_after: datetime | None = None) -> tuple[str, datetime | None]:
     company_pace = company_pace or pace.default_pace(cfg)
-    urgent = q.urgent
-    if urgent:
-        tomorrow = midnight or tomorrow  # Send now does not wait for a sending day, only for the New York day to turn
+    urgent = priority_on(q.priority, q.urgent_at, now, cfg) == "now"  # Send now from an earlier day is Send next
     if q.message_id in stops:
         return stops[q.message_id], None
     if gate is not None:
@@ -646,8 +654,8 @@ def _decide(q: Queued, stops: dict, gate: str | None, company: sqlite3.Row, held
     if behind:
         return "earlier_followup", None
     if urgent:
-        return _decide_urgent(q, now, zone or ZoneInfo(cfg.day_tz), company_pace, sends, day_begins, tomorrow,
-                              day_full, urgent_room, account_id, fresh_after, cfg)
+        return _decide_urgent(q, company_pace, sends, day_begins, tomorrow, day_full, urgent_room, account_id,
+                              fresh_after, cfg)
     if zone is None:
         return "bad_timezone", None
     if not cal.is_business_day(today, cfg):
@@ -681,21 +689,18 @@ def _first_email_waits(q: Queued, company_pace: CompanyPace, sends: list[Send], 
     return len(firsts) >= company_pace.daily or (account_id is not None and any(a != account_id for a in firsts))
 
 
-def _decide_urgent(q: Queued, now: datetime, zone: ZoneInfo, company_pace: CompanyPace, sends: list[Send],
-                   day_begins: datetime, midnight: datetime, day_full: bool, room: bool, account_id: int | None,
+def _decide_urgent(q: Queued, company_pace: CompanyPace, sends: list[Send], day_begins: datetime,
+                   tomorrow: datetime, day_full: bool, room: bool, account_id: int | None,
                    fresh_after: datetime | None, cfg: SendConfig) -> tuple[str, datetime | None]:
-    """The rest of a Send now message's verdict, once every stop and hold before it has passed: no sending day,
-    window, time zone, spacing or company gap to wait for. A full day lets it through only with room (at most
-    URGENT_CAP past the limit); the per-company first email limit still holds; and a send to its company in this tick
-    (at or after `fresh_after`) holds it to the next one. Send now means today: one clicked on an earlier New York day
-    waits for the recipient's hours (`zone`, New York when unknown), and so does every wait for the day to turn."""
-    morning = cal.next_hours_start(midnight, zone, cfg)
+    """The rest of a verdict for a Send now clicked today (New York), once every stop and hold before it has passed:
+    no sending day, window, time zone, spacing or company gap to wait for. A full day lets it through only with room
+    (at most URGENT_CAP past the limit); the per-company first email limit still holds; and a send to its company in
+    this tick (at or after `fresh_after`) holds it to the next one. A wait for the day to turn ends at `tomorrow` (the
+    next sending day's window start): by then it is Send next and every rule applies."""
     if day_full and not room:
-        return "daily_limit", morning
+        return "daily_limit", tomorrow
     if _first_email_waits(q, company_pace, sends, day_begins, account_id):
-        return "per_company_limit", morning
-    if q.urgent_at is not None and _utc(q.urgent_at) < day_begins and not cal.in_hours(now, zone, cfg):
-        return "window", cal.next_hours_start(now, zone, cfg)
+        return "per_company_limit", tomorrow
     if fresh_after is not None:
         fresh = [at for at, _, _ in sends if at >= fresh_after]
         if fresh:

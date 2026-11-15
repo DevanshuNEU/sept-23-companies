@@ -131,6 +131,31 @@ class PriorityRouteTest(WritesBase):
         self.assertEqual(schedule["text"], "Sends on the next run")
         self.assertEqual(res.json()["item"]["summary"], "Sends on the next run")
 
+    def yesterday_now(self) -> int:
+        """An approved email he marked Send now on an earlier New York day (NOW is 2026-11-10, a Tuesday)."""
+        mid = self.approved()
+        self.conn.execute("UPDATE message SET priority = 'now', urgent_at = '2026-11-09T18:00:00Z' "
+                          "WHERE message_id = ?", (mid,))
+        return mid
+
+    def test_a_send_now_from_an_earlier_day_reads_as_send_next(self):
+        mid = self.yesterday_now()
+        res = self.get(f"/api/outbox/{self.touch}")
+        self.assertEqual(res.status_code, 200, res.text)
+        item = res.json()["item"]
+        self.assertEqual(item["priority"], "next")
+        self.assertNotEqual(item["schedule"]["text"], "Sends on the next run")
+        self.assertEqual(self.message(mid)["priority"], "now")  # nothing is written by a read
+
+    def test_send_now_again_on_a_send_now_from_an_earlier_day_restamps_it(self):
+        mid = self.yesterday_now()
+        res = self.set(mid, "now")
+        self.assertEqual(res.status_code, 200, res.text)
+        row = self.message(mid)
+        self.assertEqual((row["priority"], row["revision"]), ("now", 2))
+        self.assertGreater(row["urgent_at"], "2026-11-10")
+        self.assertEqual(res.json()["item"]["priority"], "now")
+
     def test_a_send_now_that_cannot_go_says_why(self):
         mid = self.approved()
         self.conn.execute("UPDATE company SET paused_at = ? WHERE company_id = ?", ("2026-11-09T12:00:00Z", self.acme))

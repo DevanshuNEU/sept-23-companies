@@ -4,7 +4,8 @@
 
 Send next and Send now (#9 outreach fixes ruling, 2026-11-14) are only his clicks: approve takes one with the
 approval, and `set_priority` changes it on an email already approved. Nothing else in the API writes `priority`, and
-unapprove sets it back to `normal`. `urgent_at` is when he asked for Send now.
+unapprove sets it back to `normal`. `urgent_at` is when he asked for Send now; from the next New York day it is
+Send next (`queue.priority_on`), and Send now again stamps a new `urgent_at`.
 
 `approve_message` is the only code in the API that moves a message to `approved` (a test pins it). It decides on
 the store as it is now: `run_checks` inside the write transaction, after the caller has looked the mail server up
@@ -23,12 +24,15 @@ import sqlite3
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx
 from outreach.api.queries.outcomes import apply_reply_effects
+from outreach.api.queries.sending import moment
 from outreach.api.revisions import bump
 from outreach.drafts.checks import draft_input, email_domain, run_checks
 from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.outcomes.correct import correct_outcome
 from outreach.sending.claim import bounced_before
 from outreach.sending.followups import stop_planned
+from outreach.sending.config import load_config
+from outreach.sending.queue import priority_on
 from outreach.store.writes import append_event
 
 NOT_SAVED = "Nothing was saved."
@@ -122,7 +126,9 @@ def set_priority(ctx: WriteCtx, message_id: int, priority: str, revision: int) -
         raise ApiProblem("not_allowed", ALREADY_OUT)
     if row["state"] != "approved":
         raise ApiProblem("not_allowed", f"Only an approved email can be sent next or now. Approve it first. {NOT_SAVED}")
-    if row["priority"] == priority:
+    # A Send now from an earlier New York day is Send next now, so Send now again stamps today on it.
+    stands = priority_on(row["priority"], row["urgent_at"], moment(ctx.now), load_config())
+    if row["priority"] == priority and stands == priority:
         raise ApiProblem("not_allowed", f"It is already on {PRIORITY_WORDS[priority]}. {NOT_SAVED}")
     cur = ctx.conn.execute(
         "UPDATE message SET priority = ?, urgent_at = ?, updated_at = ?, revision = revision + 1 "

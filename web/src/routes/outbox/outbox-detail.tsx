@@ -60,7 +60,7 @@ const SAVE_FIRST = 'Save your edits first (Cmd S)';
  * choice, never a time: the line under the header shows what the sender will really do. */
 const PRIORITY_DONE: Record<SendPriority, string> = { normal: 'Back in the normal order', next: 'Marked Send next', now: 'Marked Send now' };
 const SEND_NOW_TITLE = 'Send this now, outside the normal hours?';
-const SEND_NOW_TEXT = 'It goes on the next run, even at night or on a weekend. Stops and holds still apply, and at most 3 can go past today’s limit.';
+const SEND_NOW_TEXT = 'It goes on the next run, even at night or on a weekend. Stops and holds still apply, and at most 3 can go past today’s limit. If it cannot go today, it becomes Send next.';
 
 /** His choice on an approved email, with the sender's own line for it ("Sends on the next run", or what stops it). */
 function PriorityLine({ item }: { item: OutboxItem }) {

@@ -36,7 +36,7 @@ from outreach.sending.pace import company_paces, default_pace
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
 from outreach.sending import accounts, proof
-from outreach.sending.queue import TIME_REASONS, load_queue, route_line
+from outreach.sending.queue import TIME_REASONS, load_queue, priority_on, route_line
 from outreach.sending.status import queue_projection, queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
 
@@ -158,7 +158,7 @@ class _Outbox:
         self.messages: dict[int, list[sqlite3.Row]] = defaultdict(list)
         for m in conn.execute(
                 "SELECT message_id, touch_id, seq, state, subject, due_on, checks, approved_at, claimed_at, sent_at, "
-                "updated_at, revision, error, priority FROM message ORDER BY touch_id, seq"):
+                "updated_at, revision, error, priority, urgent_at FROM message ORDER BY touch_id, seq"):
             self.messages[m["touch_id"]].append(m)
         self.replies: dict[int, sqlite3.Row] = {}  # the newest human reply of each thread
         self.bounces: dict[int, sqlite3.Row] = {}
@@ -202,6 +202,10 @@ class _Outbox:
             return []
         return [(t, m) for t, m in self.waiting[survivor] if t["touch_id"] != touch["touch_id"]]
 
+    def priority(self, m: sqlite3.Row) -> str:
+        """His click as it stands now: a Send now from an earlier New York day is Send next (`priority_on`)."""
+        return priority_on(m["priority"], m["urgent_at"], moment(self.now), self.cfg)
+
     def _schedule(self, m: sqlite3.Row, survivor: int) -> Schedule | None:
         verdict = self.schedule.get(m["message_id"]) if m["state"] == "approved" else None
         if verdict is None:
@@ -211,7 +215,7 @@ class _Outbox:
         sent = self.sends_today.get(survivor, 0)
         projected = self.projection.get(m["message_id"])
         stage = self.stages.get(verdict.account, proof.PROVEN)
-        if m["priority"] == "now":
+        if self.priority(m) == "now":
             # Send now never shows an estimate: it goes on the sender's next run, or the row says what stops it.
             projected = None
             clock, text = None, (SENDS_NEXT_RUN if verdict.reason == "ready" else
@@ -315,7 +319,7 @@ class _Outbox:
             summary=self._summary(group, touch, m, company, checks, schedule, next_due),
             worst=None if not checks else "block" if blocks else "warn" if warns else "pass", block_count=blocks,
             warn_count=warns, at=self._at(group, touch, m, schedule), schedule=schedule, next_due=next_due,
-            revision=m["revision"], priority=m["priority"] if m["state"] == "approved" else "normal",
+            revision=m["revision"], priority=self.priority(m) if m["state"] == "approved" else "normal",
             h1b=h1b_wire(company.name))
         return item, m
 

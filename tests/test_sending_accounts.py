@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.h1b import lookup
-from outreach.sending import accounts
+from outreach.sending import accounts, queue
 from outreach.sending.config import AccountConfig, SendConfig, load_config
 from outreach.store.timefmt import utcnow
 from tests.storetest import fresh_store, seed_company, seed_touch
@@ -41,6 +41,17 @@ Built 2026-11-14 from USCIS's H-1B Employer Data Hub.
 """
 
 
+# Before H1B_FILE's build day: a company seeded here was on the store when the list was built, whatever the real clock.
+BEFORE_BUILD = "2026-11-01T12:00:00Z"
+
+
+def old_company(conn, name):
+    """A company added before the H-1B list was built."""
+    cid = seed_company(conn, name)
+    conn.execute("UPDATE company SET created_at = ? WHERE company_id = ?", (BEFORE_BUILD, cid))
+    return cid
+
+
 def add_fact(conn, company_id, fact, value):
     conn.execute("INSERT INTO evidence(company_id, fact, value, confidence, source_kind, observed_on, recorded_at) "
                  "VALUES (?, ?, ?, 'estimate', 'linkedin', '2026-11-01', ?)", (company_id, fact, value, utcnow()))
@@ -70,8 +81,9 @@ class AccountsTest(unittest.TestCase):
     def synced(self, cfg=None):
         return accounts.sync(self.conn, cfg or self.cfg, NOW)
 
-    def company_touch(self, name="Acme"):
+    def company_touch(self, name="Acme", created_at=BEFORE_BUILD):
         cid = seed_company(self.conn, name)
+        self.conn.execute("UPDATE company SET created_at = ? WHERE company_id = ?", (created_at, cid))
         return cid, seed_touch(self.conn, cid, f"a@{name.lower()}.com")
 
     def test_sync_inserts_new_account_once(self):
@@ -172,6 +184,57 @@ class AccountsTest(unittest.TestCase):
         self.assertEqual((got[plain_tid][0].cfg.address, got[plain_tid][1]), (GENERAL, "lane"))
         self.assertEqual((got[thread_tid][0].cfg.address, got[thread_tid][1]), (GENERAL, "thread"))
 
+    def test_a_company_added_after_the_list_was_built_waits_for_a_rebuild(self):
+        # Its first email would pin it to the Gmail lane for good, so a company the list never saw waits (#281).
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()  # built 2026-11-14
+        new, new_tid = self.company_touch("Newco", created_at="2026-11-15T09:00:00Z")
+        routed = accounts.route(self.conn, cfg, new_tid, accts)
+        self.assertEqual(routed, (None, "lane_waits"))
+        self.assertEqual(queue.route_line(self.conn, cfg, new_tid, new, routed).text,
+                         "Waits: this company was added after the H-1B list was built. Rebuild the list to decide "
+                         "its sending account.")
+        self.h1b(H1B_FILE.replace("Built 2026-11-14", "Built 2026-11-15"))  # the rebuild saw it
+        self.assertEqual(accounts.route(self.conn, cfg, new_tid, accts)[0].cfg.address, GENERAL)
+
+    def test_a_company_added_before_the_build_or_on_its_day_routes_general(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()
+        _, before = self.company_touch("Before", created_at="2026-11-13T23:00:00Z")
+        _, same_day = self.company_touch("Sameday", created_at="2026-11-14T20:00:00Z")
+        got = accounts.routes(self.conn, cfg, [before, same_day], accts)
+        self.assertEqual({(row.cfg.address, why) for row, why in got.values()}, {(GENERAL, "lane")})
+
+    def test_a_company_added_after_the_build_with_sponsorship_yes_or_approvals_routes_sponsor(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()
+        yes, yes_tid = self.company_touch("Yesco", created_at="2026-11-15T09:00:00Z")
+        add_fact(self.conn, yes, "sponsorship", "yes")
+        _, listed_tid = self.company_touch("Acme", created_at="2026-11-15T09:00:00Z")  # its name has approvals
+        got = accounts.routes(self.conn, cfg, [yes_tid, listed_tid], accts)
+        self.assertEqual({(row.cfg.address, why) for row, why in got.values()}, {(SPONSOR, "lane")})
+
+    def test_a_newer_company_merged_into_an_old_one_holds_it_until_a_rebuild(self):
+        # The newest company in the merge family counts: the list never checked the newer one's name.
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b()
+        survivor, tid = self.company_touch("Oldco")
+        newer = seed_company(self.conn, "Oldco Labs")
+        self.conn.execute("UPDATE company SET created_at = '2026-11-15T09:00:00Z', merged_into = ?, "
+                          "status = 'removed', remove_reason = 'merged' WHERE company_id = ?", (survivor, newer))
+        self.assertEqual(accounts.route(self.conn, cfg, tid, accts), (None, "lane_waits"))
+
+    def test_without_a_build_line_a_new_company_routes_as_before(self):
+        cfg = config(acct(GMAIL, sends=False), acct(GENERAL, "general"), acct(SPONSOR, "sponsor"))
+        accts = self.synced(cfg)
+        self.h1b(H1B_FILE.replace("Built 2026-11-14 from", "Made from"))
+        _, tid = self.company_touch("Newco", created_at="2026-11-15T09:00:00Z")
+        self.assertEqual(accounts.route(self.conn, cfg, tid, accts)[0].cfg.address, GENERAL)
+
     def test_no_facts_is_general(self):
         cid, _ = self.company_touch()
         self.assertEqual(accounts.lane_of(self.conn, cid), "general")
@@ -223,7 +286,7 @@ class AccountsTest(unittest.TestCase):
 
     def merged(self):
         loser, tid = self.company_touch("Loser")
-        survivor = seed_company(self.conn, "Survivor")
+        survivor = old_company(self.conn, "Survivor")
         self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' WHERE company_id = ?",
                           (survivor, loser))
         return loser, survivor, tid
@@ -237,7 +300,7 @@ class AccountsTest(unittest.TestCase):
 
     def test_a_sponsor_fact_on_the_merged_away_company_counts_for_the_survivor(self):
         # A merge does not move evidence: the loser's H-1B line still makes the survivor a sponsor company.
-        loser = seed_company(self.conn, "Loser")
+        loser = old_company(self.conn, "Loser")
         survivor, tid = self.company_touch("Survivor")
         self.conn.execute("UPDATE company SET merged_into = ?, status = 'removed', remove_reason = 'merged' "
                           "WHERE company_id = ?", (survivor, loser))

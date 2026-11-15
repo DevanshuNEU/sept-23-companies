@@ -388,6 +388,7 @@ describe('send next and send now', () => {
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByText('Send this now, outside the normal hours?')).toBeInTheDocument();
     expect(within(dialog).getByText(/at most 3 can go past today’s limit/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/If it cannot go today, it becomes Send next/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep it in line' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(approve).not.toHaveBeenCalled();

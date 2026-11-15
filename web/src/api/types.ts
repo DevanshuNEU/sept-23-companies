@@ -150,7 +150,8 @@ export interface Schedule { // derived: the sender's verdict for an approved ema
   text: string; companySentToday: number; companySlotsLeft: number;
 }
 /** His Send next (first in its account's queue, every rule kept) or Send now (the sender's next run, outside the
- * normal hours too, every stop kept). Only an approved email has one other than normal (#281). */
+ * normal hours too, every stop kept; one that could not go that New York day reads as Send next). Only an approved
+ * email has one other than normal (#281). */
 export type SendPriority = 'normal' | 'next' | 'now';
 /** A company's H-1B tag from the H-1B list (#252): a plain fact, never a sort or a hide. `detail` is the hover text. */
 export interface H1bTag { label: string; detail: string; trend: string }

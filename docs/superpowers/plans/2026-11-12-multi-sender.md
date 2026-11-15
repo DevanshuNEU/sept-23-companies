@@ -280,13 +280,19 @@ config.toml gets three `[[account]]` blocks with the Global Constraints values (
 
 # Phase B: Northeastern through Mail.app (branch 2, after PR 1 merges)
 
-### Task B0: Spike (Devanshu runs it)
+### Task B0: Spike (done 2026-11-15)
 
-- [ ] `osascript .context/mailapp_spike.applescript send devanshuchi9@gmail.com` prints `sent: Knock spike HHMMSS`.
-- [ ] `... find devanshuchi9@gmail.com "Knock spike HHMMSS"` prints `found 1` with a Message-ID ending `@northeastern.edu`, and the time it took to appear (note it).
-- [ ] `... reply devanshuchi9@gmail.com "Knock spike HHMMSS"` sends; in Gmail the reply sits in the same thread, without quoted text, from "Devanshu Chicholikar".
-- [ ] The same three from the launchd context: a one-off plist runs `find` once and logs output, to raise and grant macOS's "control Mail" prompt for `/opt/homebrew/bin/python3`.
-- Results go into the spec. If reply threading fails, follow-ups from Mail.app are sent as a new message with subject "Re: <first subject>" (Outlook and Gmail thread on it) and the spec says so.
+Run from a Terminal shell (not launchd) with his yes, to his own inboxes:
+- Send: `make new outgoing message` with `visible:false`, sender set, `send`: works. Exchange shows the directory name
+  "Devanshu Rajesh Chicholikar" whatever display name the script sets.
+- Find: Sent Items has the email within seconds, with a Message-ID ending `@northeastern.edu` and the To address.
+- Reply: `reply orig opening window no`, To replaced, content set: the sent body is only the new text (no quote) and
+  carries `In-Reply-To` with the first Message-ID. Gmail filed it in a separate thread, likely because the first was in
+  Spam; the header is right, so follow-ups use `reply`.
+- The email goes out as multipart/alternative (Outlook's text plus HTML), SPF, DKIM and DMARC pass at Gmail.
+- Placement (own accounts, one plain body): .edu to both Gmails landed in Spam; both Gmails to .edu landed in Inbox.
+  See #9 "Placement test ruling (2026-11-15)".
+- Still to do at deploy: the launchd context grant (macOS's "control Mail" prompt for `/opt/homebrew/bin/python3`).
 
 ### Task B1: AppleScript runner
 
@@ -321,7 +327,7 @@ A bounce: From matches `MicrosoftExchange[0-9a-f]+@` or `postmaster@`, or Conten
 
 ### Task B4: Wire the Northeastern account
 
-**Files:** Modify `outreach/sending/__main__.py` (build `MailAppClient` for `kind="mailapp"`), `outreach/sending/config.toml` (`sends = true` for Northeastern), `outreach/api/queries/outbox.py` (no thread link for mailapp), `CLAUDE.md` (Mail.app must stay open; the Automation grant)
+**Files:** Modify `outreach/sending/__main__.py` (build `MailAppClient` for `kind="mailapp"`), `outreach/sending/config.toml` (Northeastern keeps `sends = false`: #9 placement test ruling; he turns it on), `outreach/api/queries/outbox.py` (no thread link for mailapp), `CLAUDE.md` (Mail.app must stay open; the Automation grant)
 - [ ] Failing test `test_tick_with_gmail_and_mailapp` (FakeGmail + FakeMailApp: each sends its lane; Mail.app closed holds only the sponsor lane and raises one Needs-you a day). Implement, pass, commit `sending: Northeastern sends the sponsor lane through Mail.app`.
 
 ### Task B5: Simulation over two weeks
@@ -329,10 +335,20 @@ A bounce: From matches `MicrosoftExchange[0-9a-f]+@` or `postmaster@`, or Conten
 **Files:** Modify `tests/test_sending_simulation.py`
 - [ ] `test_two_accounts_two_weeks`: 10 business days, both accounts clean: account 2 reaches 40 on day 10; account 3 reaches 42 on day 10; no company gets two accounts; no send outside the window; one Mail.app timeout on day 3 ends `sent` from Sent Items with no second send. Commit `tests: two-account simulation`.
 
+### Task B6: Two sending accounts in the status and Outbox
+
+Carried from Phase A (ledger): once two accounts send, one account's block must not hide or hold the other.
+
+**Files:** `outreach/sending/status.py`, `outreach/api` (status and capacity routes), web status strip and Details.
+- [ ] Failing tests: a paused or signed-out account's limit is left out of the summed day limit and the Today capacity;
+  each account line has its own Resume (resume names the account and clears only its pause); Details shows the ramp line
+  per account (level, today's limit, next day's). Implement, pass, commit `sending: status per account`.
+
 ### Phase B Done when
 
 - Spike results written into the spec; suite green; PR clean on `master`.
-- Live: Mail.app open, the Automation prompt granted; the first Northeastern email goes alone and is found in Sent Items, then the sponsor lane ramps from 15.
+- Live: Mail.app open, the Automation prompt granted; Northeastern sends nothing until he turns it on after the placement
+  test (#9, 2026-11-15); then its first email goes alone and is found in Sent Items, and the sponsor lane ramps from 15.
 
 ---
 

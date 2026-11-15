@@ -120,6 +120,12 @@ Every AppleScript call has a timeout (sends 60 s, reads 120 s). A timeout on a s
 by the Sent Items rule, never by sending again. If Mail.app is not running, the account waits and raises one
 Needs-you item a day.
 
+**Spike results (2026-11-15):** send, find in Sent Items (Message-ID within seconds) and `reply` (In-Reply-To set, no
+quoted text) all work from a Terminal shell. Exchange shows the directory name "Devanshu Rajesh Chicholikar". The
+launchd grant waits for the deploy. A placement test between his own accounts put both .edu first emails in Gmail
+Spam with SPF, DKIM and DMARC passing, so the Northeastern account ships with sending off until a seed placement test
+(#9 "Placement test ruling (2026-11-15)").
+
 ## What stays
 
 His click approves every email; the sender sends only what he approved; Claude never sends. Drafting, the voice

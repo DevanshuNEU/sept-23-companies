@@ -32,6 +32,7 @@ Live means real contacts and real sends.
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 | Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
 | Follow-up drafter (daily 04:30) | live checkout, `python -m outreach.followup_drafter run` | `com.devanshu.outreach-followup-drafter` |
+| H-1B list build (daily 06:50) | live checkout, `python -m outreach.h1b build` (reads the store read only, sends nothing, writes `h1b/companies.md` whole or not at all) | `com.devanshu.outreach-h1b` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
 The Needs-you, prepare and plan jobs (#16, #15) install when their templates land. The prepare job (05:30) is off by

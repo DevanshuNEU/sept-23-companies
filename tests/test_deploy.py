@@ -104,7 +104,7 @@ class JobTableTest(unittest.TestCase):
             "com.devanshu.outreach-api", "com.devanshu.outreach-sender", "com.devanshu.outreach-crawl",
             "com.devanshu.outreach-sources", "com.devanshu.outreach-needs-you", "com.devanshu.outreach-reader-night",
             "com.devanshu.outreach-prepare", "com.devanshu.outreach-plan", "com.devanshu.outreach-judge",
-            "com.devanshu.outreach-followup-drafter"])
+            "com.devanshu.outreach-followup-drafter", "com.devanshu.outreach-h1b"])
         self.assertEqual([job.label for job in OLD_JOBS], [
             "com.devanshu.outreach-mail-sender", "com.devanshu.outreach-mail-server",
             "com.devanshu.outreach-dashboard", "com.devanshu.outreach-refresh"])

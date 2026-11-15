@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The H-1B list build (#252): daily at 06:50, after the 06:30 sources job, rewrite companies.md and unsure.md in
+  `<store folder>/h1b/` from the USCIS files already on disk, so a company added since the last build gets its line
+  (or "No H-1B on record" stays true). It reads the store read only and sends no request. The files are written whole
+  or not at all (a temp file renamed over the old one), so the job list and the Outbox never read half a file.
+  confirmed.md, his hand written answers, is read and never written.
+
+  The USCIS input is locked (sources/h1b-uscis/h1b_hub_fy2022-2026.csv); with no CSV the run exits 1 and leaves the
+  old files. A new USCIS export is a manual step: replace the file, and the next run picks it up.
+
+  StartCalendarInterval (not StartInterval), so a run missed while the Mac sleeps fires on wake. A rerun is safe.
+
+  It follows the deploy tool's one convention (#17, outreach/deploy/jobs.py): WorkingDirectory is the live checkout,
+  the program is the checkout's venv python run as a module, and both streams go to the log. Placeholders, filled by
+  the deploy tool: {{LIVE_CHECKOUT}} is the live checkout, {{LOG_PATH}} the log file. Nothing else is filled; the
+  store is the default.
+
+  Not installed by the repo, and never loaded from a worktree. Installing it goes through the deploy tool
+  (python -m outreach.deploy plan, then install). To remove it:
+    launchctl bootout gui/$(id -u)/com.devanshu.outreach-h1b
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.devanshu.outreach-h1b</string>
+  <key>WorkingDirectory</key>
+  <string>{{LIVE_CHECKOUT}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{LIVE_CHECKOUT}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>outreach.h1b</string>
+    <string>build</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>50</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

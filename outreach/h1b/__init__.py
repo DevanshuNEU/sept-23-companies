@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import bisect
 import csv
+import os
 import re
 import sqlite3
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -202,6 +204,27 @@ def _near(key: str, sorted_keys: list[str], known: set[str]) -> set[str]:
     return found
 
 
+def _write_files(files: dict[Path, str]) -> None:
+    """Write every file whole or not at all: each text goes to a temp file in the same folder, then each is renamed
+    over its target (`os.replace`, atomic on one volume), so a reader (the API reads companies.md while a build may run)
+    never sees half a file and a failed write leaves the old files as they were."""
+    temps: list[tuple[str, Path]] = []
+    try:
+        for path, text in files.items():
+            fd, temp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            temps.append((temp, path))
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        for temp, path in temps:
+            os.replace(temp, path)
+    finally:
+        for temp, _ in temps:
+            try:
+                os.unlink(temp)  # only a temp that was never renamed is still there
+            except FileNotFoundError:
+                pass
+
+
 def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: list[int] | None = None,
           now: datetime | None = None) -> BuildReport:
     """Read every USCIS file in `source_dir`, match the employers to Knock's companies and write the markdown files
@@ -276,16 +299,17 @@ def build(conn: sqlite3.Connection, source_dir: Path, out_dir: Path, *, years: l
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
     head = " | ".join(f"FY{y}" for y in shown)
     rule = " | ".join("---" for _ in shown)
-    (out_dir / "companies.md").write_text(
-        f"# H-1B approvals by company\n\nBuilt {stamp} from USCIS's H-1B Employer Data Hub (initial plus continuing "
-        f"approvals, fiscal years {shown[0]} to {shown[-1]}). A company that is not listed has no H-1B on record.\n"
-        f"Trend: the last year against the mean of the two before it (rising at 25% more, falling at 25% less).\n"
-        f"To fix a match, add `- Knock name = USCIS NAME` or `- Knock name = none` to confirmed.md and build again.\n\n"
-        f"| Company | {head} | Trend | USCIS name |\n| --- | {rule} | --- | --- |\n" + "\n".join(lines) + "\n",
-        encoding="utf-8")
-    (out_dir / "unsure.md").write_text(
-        f"# Names to check\n\nBuilt {stamp}. Each company below has an open software job at his level and a USCIS "
-        f"employer with a nearly matching name. Add `- Knock name = USCIS NAME` to confirmed.md for the same company "
-        f"(several names joined by ` | ` add up), or `- Knock name = none`.\n\n"
-        + "\n".join(unsure) + ("\n" if unsure else ""), encoding="utf-8")
+    _write_files({
+        out_dir / "companies.md":
+            f"# H-1B approvals by company\n\nBuilt {stamp} from USCIS's H-1B Employer Data Hub (initial plus continuing "
+            f"approvals, fiscal years {shown[0]} to {shown[-1]}). A company that is not listed has no H-1B on record.\n"
+            f"Trend: the last year against the mean of the two before it (rising at 25% more, falling at 25% less).\n"
+            f"To fix a match, add `- Knock name = USCIS NAME` or `- Knock name = none` to confirmed.md and build again.\n\n"
+            f"| Company | {head} | Trend | USCIS name |\n| --- | {rule} | --- | --- |\n" + "\n".join(lines) + "\n",
+        out_dir / "unsure.md":
+            f"# Names to check\n\nBuilt {stamp}. Each company below has an open software job at his level and a USCIS "
+            f"employer with a nearly matching name. Add `- Knock name = USCIS NAME` to confirmed.md for the same company "
+            f"(several names joined by ` | ` add up), or `- Knock name = none`.\n\n"
+            + "\n".join(unsure) + ("\n" if unsure else ""),
+    })
     return BuildReport(years=tuple(shown), employers=len(per_key), matched=len(lines), unsure=len(unsure))

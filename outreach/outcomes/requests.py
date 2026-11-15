@@ -102,5 +102,5 @@ def record_request(conn: sqlite3.Connection, *, person_id: int, company_id: int,
                  (person_id, sent_at, note, recorded_at))
     touch_id = log_touch(conn, person_id=person_id, company_id=company_id, channel="linkedin_request",
                          sent_at=sent_at, context=context, posting_id=posting_id, idempotency_key=idempotency_key,
-                         actor=actor)
+                         actor=actor, created_at=recorded_at)
     return touch_id, True

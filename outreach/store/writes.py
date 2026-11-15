@@ -159,6 +159,7 @@ def log_touch(
     email_touch_id: int | None = None,
     idempotency_key: str,
     actor: str = "devanshu",
+    created_at: str | None = None,
 ) -> int:
     """Record that Devanshu reached out. Returns the touch id: the existing one when `idempotency_key` was used
     before (nothing else is written then). A new touch appends an `outreach_touch` event of kind `sent`.
@@ -166,7 +167,8 @@ def log_touch(
     `context` is the dict #11's `build_context` makes; the schema refuses any other shape. The touch row and its
     event are two statements: wrap the call in `db.transaction` when it sits beside other writes. `ValueError` when
     `idempotency_key` is missing or empty (without one a retry would log the touch again). `actor` is the event's
-    actor: Devanshu's click by default, `sender` or `import` for those writers.
+    actor: Devanshu's click by default, `sender` or `import` for those writers. `created_at`: when the row is
+    recorded, the real clock by default; a caller on a given clock (the MCP's `log_sent`) passes its own.
     """
     if not isinstance(idempotency_key, str) or not idempotency_key:
         raise ValueError("log_touch needs a non-empty idempotency_key")
@@ -180,7 +182,7 @@ def log_touch(
             "INSERT INTO outreach_touch(person_id, company_id, channel, posting_id, email_touch_id, sent_at, "
             "context, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (person_id, company_id, channel, posting_id, email_touch_id, sent,
-             json.dumps(context, sort_keys=True), idempotency_key, utcnow()),
+             json.dumps(context, sort_keys=True), idempotency_key, created_at or utcnow()),
         )
     except sqlite3.IntegrityError:
         # Another connection logged this key between the lookup and the insert: that touch stands.

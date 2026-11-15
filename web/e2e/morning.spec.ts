@@ -20,7 +20,8 @@ function watchRequests(page: Page): string[] {
  * Only the Outbox's "Sending 3" group toggle (a status heading) is allowed; "Sends ..." or "Sender ..." would be caught.
  */
 async function expectCleanPage(page: Page, consoleErrors: string[], foreign: string[]) {
-  await expect(page.getByRole('button', { name: /^Send(?!ing \d+$)/i })).toHaveCount(0);
+  // Exactly "Send next" and "Send now" pass: they only set the priority of his approved email (#281); the sender sends.
+  await expect(page.getByRole('button', { name: /^Send(?!ing \d+$| next$| now$)/i })).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
   expect(foreign).toEqual([]);
 }

@@ -183,7 +183,8 @@ def skip_message(ctx: WriteCtx, message_id: int, revision: int) -> int:
         return row["touch_id"]
     if row["state"] not in SKIPPABLE:
         raise ApiProblem("not_allowed", f"It is already skipped. {NOT_SAVED}")
-    bump(ctx.conn, "message", "message_id", message_id, revision, {"state": "skipped"}, at=ctx.now)
+    bump(ctx.conn, "message", "message_id", message_id, revision,
+         {"state": "skipped", "priority": "normal", "urgent_at": None}, at=ctx.now)
     _event(ctx, row, "skipped", {"revision": revision + 1})
     if row["seq"] == 0 and row["touch_state"] == "open" and row["first_sent_at"] is None:
         ctx.conn.execute("UPDATE touch SET state = 'closed', close_reason = 'skipped', closed_at = ?, updated_at = ?, "

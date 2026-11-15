@@ -39,13 +39,12 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
     sends = {company: list(sent) for company, sent in p.sends.items()}
     today = cal.ny_date(now, cfg)
     sent_by_day = {a: {today: d.sent_today} for a, d in p.days.items()}
-    urgent_by_day = {a: {today: d.urgent_today} for a, d in p.days.items()}  # Send now's own count (its cap)
     next_send = {a: d.next_send for a, d in p.days.items()}
     placed: dict[int, datetime] = {}
     at = now
     while pending and at <= end:
         found = queue.decide_all(p, at, cfg, gate=None, pending=pending, sends=sends, sent_by_day=sent_by_day,
-                                 next_send=next_send, urgent_by_day=urgent_by_day)
+                                 next_send=next_send)
         # The sender's pick for each account: earliest window close, then queue order. After one placement the
         # queue is decided again at the same moment, so the next account sees that send at its company.
         account = q = None
@@ -58,8 +57,6 @@ def project(p: queue.Prepared, now: datetime, cfg: SendConfig) -> dict[int, date
             sends.setdefault(q.company_id, []).append((at, q.seq == 0, p.days[account].account_id))
             day = cal.ny_date(at, cfg)
             sent_by_day[account][day] = sent_by_day[account].get(day, 0) + 1
-            if q.urgent:
-                urgent_by_day[account][day] = urgent_by_day[account].get(day, 0) + 1
             pending.remove(q)
             # The sender's rule: minutes left in the window of the account's recipients that can still go today (as
             # decided at `at`, before this placement) over the account's sends left, never below its full window

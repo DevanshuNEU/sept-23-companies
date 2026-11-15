@@ -78,6 +78,22 @@ def next_window_start(at: datetime, zone: ZoneInfo, cfg: SendConfig) -> datetime
     return _at(day, cfg.window_start, zone)
 
 
+def in_hours(at: datetime, zone: ZoneInfo, cfg: SendConfig) -> bool:
+    """True when the recipient's local time is inside the window's hours, any day (Send now skips weekends and
+    holidays, never the hours of a day it has carried over to)."""
+    return cfg.window_start <= _aware(at).astimezone(zone).time() <= cfg.window_end
+
+
+def next_hours_start(at: datetime, zone: ZoneInfo, cfg: SendConfig) -> datetime:
+    """The first moment at or after `at` inside the window's hours in `zone`, weekends and holidays included: `at`
+    itself, else `window_start` later that local day, else on the next local day."""
+    if in_hours(at, zone, cfg):
+        return at.astimezone(timezone.utc)
+    local = at.astimezone(zone)
+    day = local.date() if local.time() < cfg.window_start else local.date() + timedelta(days=1)
+    return _at(day, cfg.window_start, zone)
+
+
 def ny_day_bounds(d: date, cfg: SendConfig) -> tuple[str, str]:
     """Canonical UTC start and end of a New York date, as [start, end): the end is the next date's start."""
     zone = ZoneInfo(cfg.day_tz)

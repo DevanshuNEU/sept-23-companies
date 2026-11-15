@@ -3,7 +3,9 @@
 Send next: first in its account's queue at the next allowed moment, every rule kept. Send now: the sender's next
 tick, inside or outside the window, weekends and holidays included, past the spacing and the company gap; it still
 needs his click, a signed-in sending account that is not paused, the marker proof and every stop; it counts toward
-the account's day and may go past the day's limit by at most 3 urgent emails per account per New York day."""
+the account's day and may go past the day's limit by at most 3 per account per New York day. Send now means today
+(fix round 1 ruling): one that did not go on the New York day he clicked it keeps its place and still skips weekends,
+holidays, spacing and the company gap, but waits for the recipient's 08:00."""
 import json
 import random
 from datetime import timedelta
@@ -41,7 +43,7 @@ class UrgentQueueTest(tq.Base):
     def test_send_now_on_saturday_evening_is_ready(self):
         _, normal = self.approve(company=seed_company(self.db, "N"))
         _, urgent = self.approve()
-        mark(self.db, urgent, "now")
+        mark(self.db, urgent, "now", iso(SAT))
         found = self.verdicts_at(SAT)
         self.assertEqual(found[normal].reason, "not_business_day")
         self.assertEqual(found[urgent].reason, "ready")
@@ -127,17 +129,46 @@ class UrgentQueueTest(tq.Base):
             self.sent_urgent(tq.MON - timedelta(minutes=10 - n))
         verdict = self.verdicts_at()[urgent]
         self.assertEqual(verdict.reason, "daily_limit")
-        self.assertIn("3", verdict.text)
-        self.assertEqual(verdict.earliest_at, tq.ny(3, 0))  # the next New York day, outside the window too
+        self.assertEqual(verdict.text, queue.URGENT_LIMIT_TEXT)
+        self.assertIn("limit plus 3", verdict.text)
+        self.assertNotIn("midnight", verdict.text)
+        self.assertEqual(verdict.earliest_at, tq.ny(3, 8))  # the next morning, 08:00 in the recipient's time
 
-    def test_send_now_emails_within_the_limit_count_toward_the_three(self):
+    def test_send_now_emails_within_the_limit_do_not_use_up_the_three(self):
+        # #9's words: past the day's limit by at most 3. Send now emails inside the limit are part of the day.
         put_day(self.db, tq.MON_DAY, 5)
         self.sent_at(seed_company(self.db, "Day"), tq.ny(2, 8, 30), n=2)
         for n in range(3):
             self.sent_urgent(tq.ny(2, 9, n))
         _, urgent = self.approve()
         mark(self.db, urgent, "now")
-        self.assertEqual(self.reason(urgent), "daily_limit")  # 5 of 5, and 3 Send now emails today already
+        self.assertEqual(self.reason(urgent), "ready")  # 5 of 5: three more may still go
+
+    def test_a_capped_send_now_goes_at_eight_the_next_morning_not_at_midnight(self):
+        put_day(self.db, tq.MON_DAY, 2)
+        self.sent_at(seed_company(self.db, "Day"), tq.ny(2, 8, 30), n=5)  # the limit plus 3 is reached
+        _, urgent = self.approve()
+        _, west = self.approve(company=seed_company(self.db, "West"), tz="America/Los_Angeles")
+        for mid in (urgent, west):
+            mark(self.db, mid, "now", iso(tq.ny(2, 15)))
+        found = self.verdicts_at(tq.ny(2, 16))
+        self.assertEqual((found[urgent].reason, found[urgent].earliest_at), ("daily_limit", tq.ny(3, 8)))
+        self.assertEqual(found[west].earliest_at, tq.ny(3, 11))  # 08:00 in Los Angeles
+        # Just after midnight the day has room again, but Send now meant Monday: it waits for the morning.
+        found = self.verdicts_at(tq.ny(3, 0, 5))
+        self.assertEqual((found[urgent].reason, found[urgent].earliest_at), ("window", tq.ny(3, 8)))
+        self.assertEqual(self.reason(urgent, tq.ny(3, 8)), "ready")
+        self.assertEqual(self.reason(west, tq.ny(3, 8)), "window")
+        # It keeps its first place: queue order puts it ahead of an older normal approval.
+        self.assertEqual(queue.load_queue(self.db, tq.CFG)[0].message_id, urgent)
+
+    def test_a_send_now_from_yesterday_skips_the_weekend_but_waits_for_the_morning(self):
+        _, urgent = self.approve()
+        mark(self.db, urgent, "now", iso(tq.ny(6, 20)))  # Friday 20:00, held overnight by a paused company
+        found = self.verdicts_at(tq.ny(7, 7))
+        self.assertEqual((found[urgent].reason, found[urgent].earliest_at), ("window", tq.ny(7, 8)))
+        self.assertEqual(self.reason(urgent, tq.ny(7, 9)), "ready")  # Saturday 09:00: no wait for Monday
+        self.assertEqual(self.reason(urgent, tq.ny(7, 18)), "window")  # past the recipient's hours
 
     def test_send_now_never_goes_more_than_three_past_a_lowered_limit(self):
         put_day(self.db, tq.MON_DAY, 2)
@@ -154,6 +185,20 @@ class UrgentQueueTest(tq.Base):
         _, urgent = self.approve()
         mark(self.db, urgent, "now")
         self.assertEqual(self.reason(urgent), "ready")
+
+    def test_a_send_now_that_is_skipped_or_stopped_drops_its_priority(self):
+        from outreach.api.queries.outcomes import stop_unsent_messages
+        from outreach.sending.followups import stop_touch_messages
+        person, stopped = self.approve()
+        mark(self.db, stopped, "now")
+        stop_touch_messages(self.db, self.touch_of(person), reason="replied", now="2026-11-02T14:00:00Z")
+        other, by_reply = self.approve(company=seed_company(self.db, "Said no"))
+        mark(self.db, by_reply, "next")
+        stop_unsent_messages(self.db, other, "said_no", now="2026-11-02T14:00:00Z", keys=iter(["k1", "k2"]))
+        for mid in (stopped, by_reply):
+            row = self.db.execute("SELECT state, priority, urgent_at FROM message WHERE message_id = ?",
+                                  (mid,)).fetchone()
+            self.assertEqual(tuple(row), ("skipped", "normal", None))
 
     def test_send_now_does_not_skip_the_per_company_first_email_limit(self):
         put_day(self.db, tq.MON_DAY, 15)
@@ -211,7 +256,7 @@ class UrgentTickTest(tt.Base):
 
     def test_send_now_goes_on_the_next_tick_on_saturday_evening(self):
         self.clock.set(SAT)
-        normal = self.approve()
+        normal = self.approve()  # a Send now clicked at Saturday 18:00 goes on the next tick
         urgent = self.approve()
         mark(self.db, urgent, "now", iso(SAT))
         report = self.tick()

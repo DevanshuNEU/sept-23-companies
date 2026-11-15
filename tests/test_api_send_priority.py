@@ -107,6 +107,14 @@ class PriorityRouteTest(WritesBase):
         mid = self.approved()
         self.assertEqual(self.set(mid, "normal").json()["code"], "not_allowed")
 
+    def test_skip_drops_the_priority(self):
+        mid = self.approved()
+        self.set(mid, "now")
+        res = self.post(f"/api/messages/{mid}/skip", {"revision": 2})
+        self.assertEqual(res.status_code, 200, res.text)
+        row = self.message(mid)
+        self.assertEqual((row["state"], row["priority"], row["urgent_at"]), ("skipped", "normal", None))
+
     def test_unapprove_drops_the_priority(self):
         mid = self.approved()
         self.set(mid, "now")
@@ -150,10 +158,12 @@ class OnlyHisClicksSetPriorityTest(unittest.TestCase):
                         isinstance(a, ast.Dict) and any(isinstance(k, ast.Constant) and k.value == "priority"
                                                         for k in a.keys) for a in node.args):
                     writers.append(rel)
-        # The API's approve, priority route and unapprove, and the sender's back-to-review (which only resets it).
-        self.assertEqual(sorted(set(writers)), ["outreach/api/services/outbox.py", "outreach/sending/precheck.py"])
-        precheck = (ROOT / "outreach/sending/precheck.py").read_text(encoding="utf-8")
-        self.assertEqual(re.findall(r"priority = '(\w+)'", precheck), ["normal"])
+        # The API's approve and priority route set it; everything else only puts it back to normal when a message
+        # leaves approved (back to review, skipped, stopped by a reply or a bounce, the importer's skip).
+        self.assertIn("outreach/api/services/outbox.py", writers)
+        for rel in sorted(set(writers) - {"outreach/api/services/outbox.py"}):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertEqual(set(re.findall(r"priority = (\S+?)[,\s]", text)), {"'normal'"}, rel)
 
 
 if __name__ == "__main__":

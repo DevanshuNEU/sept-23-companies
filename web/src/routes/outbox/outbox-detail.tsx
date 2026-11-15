@@ -56,10 +56,11 @@ import { ReplyDetail, Thread, type ReplyChoice } from './reply-detail';
 
 const SAVE_FIRST = 'Save your edits first (Cmd S)';
 
-/** Send next and Send now (#9 outreach fixes ruling, 2026-11-14): what the toast and the line say once he chose. */
-const PRIORITY_DONE: Record<SendPriority, string> = { normal: 'Back in the normal order', next: 'Sends next', now: 'Sends on the next run' };
+/** Send next and Send now (#9 outreach fixes ruling, 2026-11-14): what the toast says once he chose. It names his
+ * choice, never a time: the line under the header shows what the sender will really do. */
+const PRIORITY_DONE: Record<SendPriority, string> = { normal: 'Back in the normal order', next: 'Marked Send next', now: 'Marked Send now' };
 const SEND_NOW_TITLE = 'Send this now, outside the normal hours?';
-const SEND_NOW_TEXT = 'It goes on the next run, even at night or on a weekend. Stops, holds and the daily cap still apply.';
+const SEND_NOW_TEXT = 'It goes on the next run, even at night or on a weekend. Stops and holds still apply, and at most 3 can go past today’s limit.';
 
 /** His choice on an approved email, with the sender's own line for it ("Sends on the next run", or what stops it). */
 function PriorityLine({ item }: { item: OutboxItem }) {
@@ -68,7 +69,7 @@ function PriorityLine({ item }: { item: OutboxItem }) {
   return (
     <p role="status" aria-label="Send priority" className={ready ? 'text-sm' : 'text-sm text-warn'}>
       <span className="font-medium">{item.priority === 'now' ? 'Send now. ' : 'Send next. '}</span>
-      {item.schedule?.text ?? PRIORITY_DONE[item.priority]}
+      {item.schedule?.text ?? (item.priority === 'now' ? 'Waits for the sender.' : 'First in its account.')}
     </p>
   );
 }
@@ -450,8 +451,8 @@ function DetailBody({
     const det: Patch<OutboxDetail> = { key: detailKey, apply: (x) => patchDetailItem(x, { priority }) };
     write({
       id: `priority:${messageId}`,
-      label: `${person.name}: ${PRIORITY_DONE[priority].toLowerCase()}.`,
-      afterCommit: `${person.name}: ${PRIORITY_DONE[priority].toLowerCase()}.`,
+      label: `${person.name}: ${PRIORITY_DONE[priority]}.`,
+      afterCommit: `${person.name}: ${PRIORITY_DONE[priority]}.`,
       immediate: true,
       patches: [list, det],
       commit: async (o) => noted(await client.setPriority(messageId, priority, revision, o)),

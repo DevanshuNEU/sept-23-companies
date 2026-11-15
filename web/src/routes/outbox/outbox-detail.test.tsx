@@ -374,7 +374,7 @@ describe('send next and send now', () => {
     startClock();
     fireEvent.click(screen.getByRole('button', { name: 'Send next' }));
     await settle();
-    expect(toastText()).toContain('Approved Omar Haddad. Sends next.');
+    expect(toastText()).toContain('Approved Omar Haddad. Marked Send next.');
     await settle(8000);
     expect(approve).toHaveBeenCalledTimes(1);
     expect(approve.mock.calls[0]?.slice(0, 2)).toEqual([messageOf(T.omar), 1]);
@@ -387,6 +387,7 @@ describe('send next and send now', () => {
     fireEvent.click(sendNowButton());
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByText('Send this now, outside the normal hours?')).toBeInTheDocument();
+    expect(within(dialog).getByText(/at most 3 can go past today’s limit/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep it in line' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(approve).not.toHaveBeenCalled();
@@ -397,7 +398,8 @@ describe('send next and send now', () => {
     startClock();
     fireEvent.click(confirm);
     await settle();
-    expect(toastText()).toContain('Approved Omar Haddad. Sends on the next run.');
+    expect(toastText()).toContain('Approved Omar Haddad. Marked Send now.');
+    expect(toastText()).not.toContain('next run');
     await settle(8000);
     expect(approve).toHaveBeenCalledTimes(1);
     expect(approve.mock.calls[0]?.[3]).toBe('now');

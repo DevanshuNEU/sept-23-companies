@@ -7,8 +7,9 @@ precondition refuses and stores nothing: no address, a LinkedIn contact, a no-go
 removed company, an email already sent, a message he saved or approved. Nothing here approves: the message is always
 `drafted` and `saved_by` claude, and the guard refuses anything else on this connection.
 
-The mail server answer comes from the `mx_check` cache only (this server has no network): fresh `ok` or `none`, else
-`unknown`, which warns. The banned phrases list is read on every save; an unreadable list blocks (fail closed).
+The mail server answer is the `mx_check` cache when fresh, else a live lookup before the write transaction opens
+(`outreach.drafts.mx`, 5 second timeout, nothing stored: `mx_check` is the app's table); a failed lookup is `unknown`,
+which warns, and the Outbox reads the cache again when it shows the draft (#281). The banned phrases list is read on every save; an unreadable list blocks (fail closed).
 
 save_linkedin_note goes through #15's one writer of `linkedin_draft`, `outreach.plan.drafts.save_linkedin_draft`,
 always as `saved_by='claude'`, so the reason line is stored `proposed` and only Devanshu confirms or writes it. That
@@ -31,7 +32,8 @@ from outreach.drafting.voice import VoiceUnreadable, load_voice_pack
 from outreach.drafting.sameness import evidence_used, load_corpus, overused, recent_openings, recent_subjects
 from outreach.drafting.signature import read_signature
 from outreach.drafts.checks import (DEFAULT_BANNED_PHRASES, DEFAULT_WORDS, HOOK_DATE, MAX_LINKS, URL, DraftInput,
-                                    cached_mx, email_domain, load_banned, run_checks)
+                                    email_domain, load_banned, run_checks)
+from outreach.drafts.mx import lookup as mail_server_status
 from outreach.drafts.followups import (MAX_FOLLOWUPS, company_map, due_followups, held_survivors, no_go_sets,
                                        resolve_company)
 from outreach.mcp.guard import Grant
@@ -101,13 +103,21 @@ def banned_list() -> list:
     return load_banned()[0]
 
 
+def mail_server_of(ctx: Ctx, person_id: int) -> str:
+    """The person's mail server status, looked up live when the cache has no fresh row (#281). Call it before any
+    write transaction opens: a lookup can take 5 seconds, and `mx_check` is the app's table, so nothing is stored
+    here (the app stores the answer when it looks the domain up itself). A failed lookup is `unknown`."""
+    row = ctx.conn.execute("SELECT email FROM person WHERE person_id = ?", (person_id,)).fetchone()
+    domain = email_domain(row["email"]) if row else None
+    return mail_server_status(ctx.conn, domain, ctx.now) if domain else "none"
+
+
 def checks_of(ctx: Ctx, person: sqlite3.Row, *, message_id: int | None, seq: int, subject: str, body: str,
-              hook: str, banned: list, ground: str | None = None) -> list[dict]:
-    domain = email_domain(person["email"])
+              hook: str, banned: list, ground: str | None = None, mx: str = "unknown") -> list[dict]:
     d = DraftInput(message_id=message_id, seq=seq, subject=subject, body=body, hook=hook,
                    role_kind=person["role_kind"], person_name=person["name"], person_email=person["email"],
                    person_id=person["person_id"], company_id=person["company_id"],
-                   mx=cached_mx(ctx.conn, domain, ctx.now) if domain else "none")
+                   mx=mx)
     return run_checks(ctx.conn, d, banned=banned, now=ctx.now, ground=ground)
 
 
@@ -280,6 +290,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
     hook = stored_hook(args, ctx.today)
     evidence, stories, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
+    mx = mail_server_of(ctx, args.person_id)  # outside the transaction
     with transaction(conn):
         p = person_row(conn, args.person_id)
         family = Family(conn)
@@ -298,7 +309,7 @@ def save_draft(ctx: Ctx, args: SaveDraftInput) -> dict:
             raise stale(args.revision)
         found = checks_of(ctx, p, message_id=first["message_id"] if first else None, seq=0, subject=subject,
                           body=body, hook=hook, banned=banned,
-                          ground=ground_text(ctx, evidence, stories, p))
+                          ground=ground_text(ctx, evidence, stories, p), mx=mx)
         found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
                       "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if first is not None and (first["subject"], first["body"], first["hook"], first["project"]) == (
@@ -366,7 +377,8 @@ def check_draft(ctx: Ctx, args: CheckDraftInput) -> dict:
                          (touch["touch_id"], args.seq)).fetchone()
         subject, message_id = f"Re: {first['subject']}", m["message_id"] if m else None
     found = checks_of(ctx, p, message_id=message_id, seq=args.seq, subject=subject, body=body, hook=args.hook,
-                      banned=banned_list(), ground=ground_text(ctx, evidence, stories, p))
+                      banned=banned_list(), ground=ground_text(ctx, evidence, stories, p),
+                      mx=mail_server_of(ctx, args.person_id))
     return {"word_count": word_count(body),
             "blocks": [brief(c) for c in found if c["severity"] == "block"],
             "warns": [brief(c) for c in found if c["severity"] == "warn"],
@@ -411,6 +423,7 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
     body = text(args.body, "body")
     evidence, stories, digest = require_brief(args.brief_id, args.person_id)
     banned = banned_list()
+    mx = mail_server_of(ctx, args.person_id)  # outside the transaction
     with transaction(conn):
         p = person_row(conn, args.person_id)
         touch = conn.execute("SELECT touch_id, state, first_sent_at FROM touch WHERE person_id = ?",
@@ -441,7 +454,7 @@ def save_followup(ctx: Ctx, args: SaveFollowupInput) -> dict:
             raise stale(args.revision)
         subject = f"Re: {first['subject']}"
         found = checks_of(ctx, p, message_id=m["message_id"], seq=args.seq, subject=subject, body=body, hook="",
-                          banned=banned, ground=ground_text(ctx, evidence, stories, p))
+                          banned=banned, ground=ground_text(ctx, evidence, stories, p), mx=mx)
         found.append({"code": "voice_brief", "severity": "pass", "title": "Voice pack read",
                       "detail": f"brief {args.brief_id}, voice {digest[:12]}", "fix": None, "spans": []})
         if m["state"] == "drafted" and (m["subject"], m["body"]) == (subject, body):

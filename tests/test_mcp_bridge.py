@@ -334,6 +334,15 @@ class LogSentTest(BridgeCase):
     def log(self, **request):
         return self.ok("log_sent", {"requests": [{"channel": "linkedin_request", **request}]})
 
+    def test_the_touch_is_stamped_with_the_tools_clock_not_the_real_one(self):
+        # #284: created_at came from the real clock, and the guard refuses a touch recorded more than 5 days after it
+        # was sent, so these tests broke the day the real date passed their fixed one by 5 days.
+        from unittest import mock
+        with mock.patch("outreach.store.writes.utcnow", return_value="2030-01-01T00:00:00Z"):
+            self.log(person_id=self.lin, note_text=NOTE)
+        (touch,) = self.db.execute("SELECT created_at, sent_at FROM outreach_touch").fetchall()
+        self.assertEqual((touch["created_at"], touch["sent_at"]), (NOW, NOW))
+
     def test_a_request_is_one_log_row_one_touch_and_its_events_and_a_repeat_writes_nothing(self):
         out = self.log(person_id=self.lin, note_text=NOTE)
         (r,) = out["results"]

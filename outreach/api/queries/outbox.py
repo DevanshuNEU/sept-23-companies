@@ -30,13 +30,13 @@ from outreach.api.queries.h1b import h1b_wire
 from outreach.api.queries.company import CLOSE_WORDS, Holds, company_holds, person_ref, rank_postings, role_to_name
 from outreach.api.queries.outcomes import company_refs, people_by_ids
 from outreach.api.queries.sending import moment, sending_status
-from outreach.drafts.checks import HOOK_DATE
+from outreach.drafts.checks import HOOK_DATE, refresh_mail_server
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 from outreach.sending.pace import company_paces, default_pace
 from outreach.sending import calendar as cal
 from outreach.sending.config import SendConfig
 from outreach.sending import accounts, proof
-from outreach.sending.queue import TIME_REASONS, load_queue, route_line
+from outreach.sending.queue import TIME_REASONS, load_queue, priority_on, route_line
 from outreach.sending.status import queue_projection, queue_schedule, reason_text
 from outreach.store.timefmt import ISO_FMT
 
@@ -53,6 +53,7 @@ GMAIL_THREAD_ANY = "https://mail.google.com/mail/u/0/#all/{}"
 PREVIEW_CHARS = 140
 COMPARE_MIN_MATCH = 12  # shorter shared stretches are words in common, not copied text
 NOT_SHOWN = "planned"
+SENDS_NEXT_RUN = "Sends on the next run"  # a Send now email the sender takes on its next tick
 
 
 def derive_group(state: str, touch_state: str, company: CompanyRef, *, no_go: bool = False) -> str:
@@ -78,8 +79,13 @@ def current_message(messages: list[sqlite3.Row]) -> sqlite3.Row | None:
     return skipped[-1] if skipped else None
 
 
-def stored_checks(text: str) -> list[Check]:
-    return [Check.model_validate(c) for c in json.loads(text or "[]")]
+def stored_checks(text: str, *, live: tuple[sqlite3.Connection, str, str | None] | None = None) -> list[Check]:
+    """The checks stored on a message. With `live` (conn, now, address) a draft's mail server entry is read again
+    from the cache, so a warning saved before the lookup answered never outlives the answer (#281)."""
+    found = json.loads(text or "[]")
+    if live is not None:
+        found = refresh_mail_server(found, live[2], live[0], live[1])
+    return [Check.model_validate(c) for c in found]
 
 
 def _ny(iso: str, cfg: SendConfig) -> datetime:
@@ -152,7 +158,7 @@ class _Outbox:
         self.messages: dict[int, list[sqlite3.Row]] = defaultdict(list)
         for m in conn.execute(
                 "SELECT message_id, touch_id, seq, state, subject, due_on, checks, approved_at, claimed_at, sent_at, "
-                "updated_at, revision, error FROM message ORDER BY touch_id, seq"):
+                "updated_at, revision, error, priority, urgent_at FROM message ORDER BY touch_id, seq"):
             self.messages[m["touch_id"]].append(m)
         self.replies: dict[int, sqlite3.Row] = {}  # the newest human reply of each thread
         self.bounces: dict[int, sqlite3.Row] = {}
@@ -196,6 +202,10 @@ class _Outbox:
             return []
         return [(t, m) for t, m in self.waiting[survivor] if t["touch_id"] != touch["touch_id"]]
 
+    def priority(self, m: sqlite3.Row) -> str:
+        """His click as it stands now: a Send now from an earlier New York day is Send next (`priority_on`)."""
+        return priority_on(m["priority"], m["urgent_at"], moment(self.now), self.cfg)
+
     def _schedule(self, m: sqlite3.Row, survivor: int) -> Schedule | None:
         verdict = self.schedule.get(m["message_id"]) if m["state"] == "approved" else None
         if verdict is None:
@@ -204,9 +214,16 @@ class _Outbox:
             verdict.earliest_at.strftime(ISO_FMT) if verdict.earliest_at is not None else None)
         sent = self.sends_today.get(survivor, 0)
         projected = self.projection.get(m["message_id"])
-        clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
-                       else (None, schedule_text(verdict.reason, when, self.now, self.cfg,
-                                                    self.stages.get(verdict.account, proof.PROVEN), verdict.text)))
+        stage = self.stages.get(verdict.account, proof.PROVEN)
+        if self.priority(m) == "now":
+            # Send now never shows an estimate: it goes on the sender's next run, or the row says what stops it.
+            projected = None
+            clock, text = None, (SENDS_NEXT_RUN if verdict.reason == "ready" else
+                                 reason_text(verdict.reason, stage, verdict.text) if verdict.text
+                                 else schedule_text(verdict.reason, when, self.now, self.cfg, stage))
+        else:
+            clock, text = (projection_words(projected, self.now, self.cfg, paused=self.paused) if projected is not None
+                           else (None, schedule_text(verdict.reason, when, self.now, self.cfg, stage, verdict.text)))
         return Schedule(earliest_at=when, tz=self.tz.get(m["message_id"], self.cfg.day_tz), reason=verdict.reason,
                         projected_at=projected.strftime(ISO_FMT) if projected is not None else None,
                         projected_day=cal.ny_date(projected, self.cfg).isoformat() if projected is not None else None,
@@ -271,6 +288,11 @@ class _Outbox:
             return "person"
         return "company" if self.survivor[touch["touch_id"]] in self.no_go_companies else None
 
+    def _checks(self, m: sqlite3.Row, touch: sqlite3.Row) -> list[Check]:
+        if m["state"] != "drafted":  # a sent or approved email keeps the record of what was checked
+            return stored_checks(m["checks"])
+        return stored_checks(m["checks"], live=(self.conn, self.now, self.people[touch["person_id"]]["email"]))
+
     def _next_due(self, touch_id: int, seq: int) -> NextDue | None:
         later = [m for m in self.messages[touch_id] if m["seq"] > seq and m["state"] in UNSENT and m["due_on"]]
         return NextDue(seq=later[0]["seq"], on=later[0]["due_on"]) if later else None
@@ -283,7 +305,7 @@ class _Outbox:
         company = self.refs[survivor]
         no_go = self.no_go_of(touch)
         group = derive_group(m["state"], touch["state"], company, no_go=no_go is not None)
-        checks = stored_checks(m["checks"])
+        checks = self._checks(m, touch)
         schedule = self._schedule(m, survivor)
         next_due = self._next_due(touch["touch_id"], m["seq"]) if group == "sent" else None
         reply = self.replies.get(touch["touch_id"])
@@ -297,7 +319,8 @@ class _Outbox:
             summary=self._summary(group, touch, m, company, checks, schedule, next_due),
             worst=None if not checks else "block" if blocks else "warn" if warns else "pass", block_count=blocks,
             warn_count=warns, at=self._at(group, touch, m, schedule), schedule=schedule, next_due=next_due,
-            revision=m["revision"], h1b=h1b_wire(company.name))
+            revision=m["revision"], priority=self.priority(m) if m["state"] == "approved" else "normal",
+            h1b=h1b_wire(company.name))
         return item, m
 
     # ------------------------------------------------------------------------------------------ the list
@@ -348,7 +371,7 @@ class _Outbox:
         bounce = self.bounces.get(touch_id)
         return OutboxDetail(
             as_of=self.now, item=item, body=m["body"], hook=OutboxHook(text=hook, on=on), project=m["project"],
-            role=self._role(self.survivor[touch_id]), checks=stored_checks(m["checks"]), saved_by=m["saved_by"],
+            role=self._role(self.survivor[touch_id]), checks=self._checks(m, touch), saved_by=m["saved_by"],
             saved_at=m["updated_at"],
             followups=[OutboxFollowup(seq=f["seq"], due_on=f["due_on"], sent_at=f["sent_at"], state=f["state"])
                        for f in self.messages[touch_id] if f["seq"] >= 1],

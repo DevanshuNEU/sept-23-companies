@@ -1227,9 +1227,9 @@ class MultiBase(Base):
                                (mid,)).fetchone()[0]
 
     def sponsor(self, mid: int) -> None:
-        """The message's company sponsors (an E-Verify fact): it is in the sponsor lane."""
+        """The message's company sponsors (a sponsorship yes fact): it is in the sponsor lane."""
         self.db.execute("INSERT INTO evidence(company_id, fact, value, confidence, source_kind, observed_on, "
-                        "recorded_at) VALUES (?, 'everify', 'enrolled', 'estimate', 'linkedin', '2026-11-01', "
+                        "recorded_at) VALUES (?, 'sponsorship', 'yes', 'estimate', 'linkedin', '2026-11-01', "
                         "'2026-11-01T12:00:00Z')", (self.company_of(mid),))
 
     def account_of(self, account_id: int) -> sqlite3.Row:

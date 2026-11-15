@@ -19,6 +19,7 @@ import difflib
 import os
 import re
 import sqlite3
+import types
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -32,7 +33,7 @@ from outreach.drafting.voice_checks import voice_checks
 from outreach.drafts.followups import company_map, no_go_sets, resolve_company
 
 __all__ = ["DEFAULT_BANNED_PHRASES", "MX_TTL", "DraftInput", "load_banned", "normalise_domain", "email_domain",
-           "cached_mx", "draft_input", "run_checks", "BLOCK_CODES", "WARN_CODES", "find_links", "link_host"]
+           "cached_mx", "refresh_mail_server", "draft_input", "run_checks", "BLOCK_CODES", "WARN_CODES", "find_links", "link_host"]
 
 DEFAULT_BANNED_PHRASES = "~/Desktop/DevVault/job-search/outreach/banned_phrases.txt"
 MX_TTL = timedelta(hours=24)
@@ -82,7 +83,7 @@ BLOCK_CODES = ("no_mail_server", "banned_list_missing", "placeholder", "markdown
                "link_shortener", "followup_subject", "near_identical", "no_go_person", "said_no", "closed_no_sponsorship")
 WARN_CODES = ("banned_phrase", "dash", "length", "stale_hook", "subject_wording", "subject_length",
               "subject_reused", "link_count", "signature", "narrated_email", "reused_sentence", "same_opening",
-              "no_person_fact", "recruiter", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
+              "no_person_fact", "mail_server_unknown", "voice_eager", "voice_house_word", "voice_system_word",
               "voice_recital", "voice_rhythm", "voice_ungrounded")
 _ORDER = {code: i for i, code in enumerate(BLOCK_CODES + WARN_CODES)}
 _RANK = {"block": 0, "warn": 1, "pass": 2}
@@ -237,6 +238,34 @@ def _check(code: str, severity: str, title: str, detail: str, fix: dict | None =
 
 
 def _mail_server(d: DraftInput) -> list[Check]:
+    return mail_server_checks(d.person_email, d.mx)
+
+
+MAIL_SERVER_CODES = ("no_mail_server", "mail_server_unknown")
+
+
+def refresh_mail_server(found: list[Check], email: str | None, conn: sqlite3.Connection, now: str) -> list[Check]:
+    """The stored checks with the mail server entry read again from a fresh `mx_check` answer (#281); no fresh answer keeps the stored entry. A draft saved before
+    the lookup answered keeps showing `mail_server_unknown` otherwise. A list with no mail server entry is untouched."""
+    if not any(c["code"] in MAIL_SERVER_CODES for c in found):
+        return found
+    domain = email_domain(email)
+    mx = cached_mx(conn, domain, now) if domain else "none"
+    if mx == "unknown":  # no fresh answer: keep what the save stored (the MCP may have verified it live)
+        return found
+    live = mail_server_checks(email, mx)
+    out, placed = [], False
+    for c in found:
+        if c["code"] not in MAIL_SERVER_CODES:
+            out.append(c)
+        elif not placed:
+            out.extend(live)
+            placed = True
+    return out
+
+
+def mail_server_checks(person_email: str | None, mx: str) -> list[Check]:
+    d = types.SimpleNamespace(person_email=person_email, mx=mx)
     if email_domain(d.person_email) is None:  # nothing to look up, so nothing can take the mail
         return [_check("no_mail_server", "block", "No usable email address",
                        f"{d.person_email or 'This person has no address'}: there is no valid domain to send to. "
@@ -473,15 +502,6 @@ def _sameness(conn, d: DraftInput) -> list[Check]:
     return out
 
 
-def _recruiter(d: DraftInput) -> Check:
-    if d.role_kind != "recruiter":
-        return _check("recruiter", "pass", "Not a recruiter", f"Role kind is {d.role_kind}.")
-    return _check("recruiter", "warn", "Recruiter",
-                  "This person is a recruiter. Email a recruiter only when no engineer, manager or founder is "
-                  "found, and name the exact role up front. If the role kind is wrong, change it.",
-                  fix={"kind": "role_kind"})
-
-
 # Rules on current data
 
 def _family(companies: dict, survivor: int) -> list[int]:
@@ -622,7 +642,6 @@ def run_checks(conn: sqlite3.Connection, d: DraftInput, *, banned: Sequence[tupl
         _stale_hook(d, now),
         _subject_wording(d),
         _subject_length(d),
-        _recruiter(d),
         *voice_checks(d.body, d.role_kind, ground=ground),
         _followup_subject(conn, d),
         _near_identical(conn, d, family),

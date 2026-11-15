@@ -574,8 +574,8 @@ class _Writer:
         what = "first email" if seq == 0 else "follow-up"
         name = self.plan.people[t.person_key].name
         if row["state"] in ("planned", "drafted", "approved", "failed"):
-            conn.execute("UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
-                         "WHERE message_id = ?", (self.now, row["message_id"]))
+            conn.execute("UPDATE message SET state = 'skipped', priority = 'normal', urgent_at = NULL, updated_at = ?, "
+                         "revision = revision + 1 WHERE message_id = ?", (self.now, row["message_id"]))
             append_event(conn, entity="message", kind="skipped", actor="import", entity_id=row["message_id"],
                          company_id=company_id, at=self.now,
                          idempotency_key=f"import:sent-after-import:{row['message_id']}",

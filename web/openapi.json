@@ -194,6 +194,31 @@
         "title": "AppliedView",
         "type": "object"
       },
+      "ApproveBody": {
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "default": "normal",
+            "enum": [
+              "normal",
+              "next",
+              "now"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ApproveBody",
+        "type": "object"
+      },
       "BaseRates": {
         "properties": {
           "accepts": {
@@ -5015,6 +5040,15 @@
             "title": "Preview",
             "type": "string"
           },
+          "priority": {
+            "enum": [
+              "normal",
+              "next",
+              "now"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -5121,6 +5155,7 @@
           "schedule",
           "nextDue",
           "revision",
+          "priority",
           "h1b"
         ],
         "title": "OutboxItem",
@@ -6203,6 +6238,31 @@
           "score"
         ],
         "title": "PreviousScore",
+        "type": "object"
+      },
+      "PriorityBody": {
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "enum": [
+              "normal",
+              "next",
+              "now"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "priority",
+          "revision"
+        ],
+        "title": "PriorityBody",
         "type": "object"
       },
       "ProfileHistory": {
@@ -7731,7 +7791,6 @@
               "company_held",
               "per_company_limit",
               "per_company_gap",
-              "recruiter_waits",
               "no_address",
               "no_thread",
               "lane_waits",
@@ -12433,7 +12492,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MessageRevisionBody"
+                "$ref": "#/components/schemas/ApproveBody"
               }
             }
           },
@@ -12522,6 +12581,121 @@
           }
         },
         "summary": "Approve",
+        "tags": [
+          "outbox"
+        ]
+      }
+    },
+    "/api/messages/{message_id}/priority": {
+      "post": {
+        "description": "His Send next or Send now on an approved email, or back to normal.",
+        "operationId": "set_priority",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "maximum": 4611686018427387904,
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriorityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "bad_request: the request was not valid"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "forbidden: not one of this app's own pages"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "not_found: no such record"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "conflict, capacity or not_allowed: the write changed nothing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "blocked or idempotency_mismatch: the write changed nothing"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "server_error: nothing was saved"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "busy: the store is in use, nothing was saved, try again"
+          }
+        },
+        "summary": "Set Priority",
         "tags": [
           "outbox"
         ]

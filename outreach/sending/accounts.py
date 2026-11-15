@@ -2,6 +2,15 @@
 
 A company's first email goes from its pin when that account sends, else from the sending account of its lane.
 A follow-up always goes from the account that sent the first email. Routing only reads; `pin` and `sync` write.
+
+A company the H-1B list never saw has no lane yet (#281, final review). The build matches USCIS employers to the
+companies in the store when it runs, so a company added later is missing from the list without that meaning it has
+no approvals, and its first email would pin it to the general lane for good. So a company with no thread, no pin, no
+sponsorship yes and no approvals on the list waits as `lane_waits` when the newest `created_at` in its merge family
+falls on a UTC day later than the list's `Built` day (`lookup.built_on`, the UTC day the build ran). The newest member
+counts because the list checked only the names it saw. The build line holds a day, not a time, so a company added
+later on the build day itself routes as one the list saw. A list with no build line (the build always writes one) has
+no day to compare, so nothing waits on it.
 """
 import sqlite3
 from dataclasses import dataclass
@@ -9,7 +18,8 @@ from typing import Literal
 
 from outreach.drafts.followups import canonical_company, company_map, resolve_company
 from outreach.sending.config import AccountConfig, SendConfig
-from outreach.store.writes import append_event
+from outreach.h1b.lookup import built_on, has_list, tag_for
+from outreach.store.writes import NAME_ALIAS_SOURCES, append_event
 
 
 @dataclass(frozen=True)
@@ -41,19 +51,84 @@ def sync(conn: sqlite3.Connection, cfg: SendConfig, now: str) -> dict[str, Accou
     return out
 
 
-# A company fact that puts a company in the sponsor lane.
-_SPONSOR_FACT = ("(fact = 'everify' AND value = 'enrolled') OR (fact = 'sponsorship' AND value IN ('yes', 'opt_only')) "
-                 "OR fact = 'lca'")
+# A company fact that puts a company in the sponsor lane (he marked sponsorship yes). E-Verify and "OPT only" do not
+# decide it any more (#281); the H-1B list does.
+_SPONSOR_FACT = "fact = 'sponsorship' AND value = 'yes'"
+
+
+# The survivor (the one parameter) and every company merged into it, at any depth.
+_FAMILY = ("WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c "
+           "JOIN family f ON c.merged_into = f.id) ")
+
+
+def _h1b_sponsor(names: list[str]) -> bool:
+    """True when the H-1B list shows approvals under any of these names. No list on disk: False."""
+    return any((tag := tag_for(n)) is not None and tag.total > 0 for n in dict.fromkeys(names))
 
 
 def lane_of(conn: sqlite3.Connection, company_id: int) -> Literal["sponsor", "general"]:
-    """Sponsor when the company is enrolled in E-Verify, sponsors (or takes OPT only), or has any LCA row. The whole
-    merge family counts: the survivor and every company merged into it, since a merge does not move evidence."""
-    row = conn.execute(
-        "WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT c.company_id FROM company c JOIN family f "
-        f"ON c.merged_into = f.id) SELECT 1 FROM company_fact WHERE company_id IN family AND ({_SPONSOR_FACT}) "
-        "LIMIT 1", (canonical_company(conn, company_id),)).fetchone()
-    return "sponsor" if row else "general"
+    """Sponsor when the H-1B list shows approvals for the company (its name, its merged companies' names and its name
+    aliases, as the MCP `h1b_history` reads them) or the company or anyone merged into it has sponsorship yes. With
+    no list on disk only the sponsorship fact counts."""
+    survivor = canonical_company(conn, company_id)
+    family = _FAMILY
+    if conn.execute(family + f"SELECT 1 FROM company_fact WHERE company_id IN family AND ({_SPONSOR_FACT}) LIMIT 1",
+                    (survivor,)).fetchone():
+        return "sponsor"
+    src = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
+    names = [r[0] for r in conn.execute(
+        family + "SELECT name FROM company WHERE company_id = ? OR company_id IN family ORDER BY company_id = ? DESC, "
+        "company_id", (survivor, survivor, survivor))]
+    names += [r[0] for r in conn.execute(
+        family + f"SELECT alias FROM company_alias WHERE company_id IN family AND source IN ({src}) ORDER BY alias_key",
+        (survivor, *NAME_ALIAS_SOURCES))]
+    return "sponsor" if _h1b_sponsor(names) else "general"
+
+
+def _family_newest(conn: sqlite3.Connection, companies: dict) -> dict[int, str]:
+    """survivor -> the newest `created_at` in its merge family (the survivor and every company merged into it)."""
+    out: dict[int, str] = {}
+    for cid, created in conn.execute("SELECT company_id, created_at FROM company"):
+        top = resolve_company(companies, cid)[-1] if cid in companies else cid
+        if created and (top not in out or created > out[top]):
+            out[top] = created
+    return out
+
+
+def added_after_list(conn: sqlite3.Connection, company_id: int) -> bool:
+    """True when the company's merge family has a company added on a UTC day after the H-1B list's build day (module
+    text). False with no list or no build line."""
+    built = built_on()
+    if built is None:
+        return False
+    newest = conn.execute(
+        _FAMILY + "SELECT MAX(created_at) FROM company WHERE company_id IN family",
+        (canonical_company(conn, company_id),)).fetchone()[0]
+    return newest is not None and newest[:10] > built
+
+
+def _family_names(conn: sqlite3.Connection, companies: dict, survivors: set[int]) -> dict[int, list[str]]:
+    """survivor -> the survivor's name, its merged companies' names, then their name aliases: two queries however many
+    survivors. The same names `lane_of` reads."""
+    if not survivors:
+        return {}
+    survivor_of = {cid: resolve_company(companies, cid)[-1] for cid in companies}
+    out: dict[int, list[str]] = {cid: [] for cid in survivors}
+    names = {r["company_id"]: r["name"] for r in conn.execute("SELECT company_id, name FROM company")}
+    for cid in survivors:  # the survivor's own name first
+        if cid in names:
+            out[cid].append(names[cid])
+    for cid in sorted(names):
+        top = survivor_of.get(cid)
+        if top in out and top != cid:
+            out[top].append(names[cid])
+    src = ", ".join("?" for _ in NAME_ALIAS_SOURCES)
+    for r in conn.execute(f"SELECT company_id, alias FROM company_alias WHERE source IN ({src}) ORDER BY alias_key",
+                          NAME_ALIAS_SOURCES):
+        top = survivor_of.get(r["company_id"])
+        if top in out:
+            out[top].append(r["alias"])
+    return out
 
 
 def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
@@ -63,7 +138,10 @@ def route(conn: sqlite3.Connection, cfg: SendConfig, touch_id: int,
     thread_missing: the touch's account is not in `accounts`. A touch with a Gmail thread but no account was sent
     before touches carried one, so its thread is account 1's (as everywhere else a NULL account is). A pin to an
     account that does not send (or is not in config) counts as no pin. The company is followed through
-    `merged_into`; a pin on the raw id still counts, and the lane reads the sponsor facts of the whole merge family."""
+    `merged_into`; a pin on the raw id still counts. The lane is the sponsor lane when the H-1B list shows approvals
+    under the company's merge family names or the family has sponsorship yes. With no usable H-1B list, a company with
+    no thread, no pin and no sponsorship yes is (None, lane_waits): its lane is not decided. So is one with no
+    approvals on the list that was added after the list was built (`added_after_list`, module text)."""
     return routes(conn, cfg, [touch_id], accounts)[touch_id]
 
 
@@ -80,9 +158,18 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
     companies = company_map(conn)
     pins = {row["company_id"]: row["account_id"] for row in conn.execute(
         "SELECT company_id, account_id FROM company_sender")}
-    # Each sponsor fact counts for its company's survivor: a merge does not move evidence.
+    # Each sponsorship-yes fact counts for its company's survivor: a merge does not move evidence.
     sponsors = {resolve_company(companies, row[0])[-1] if row[0] in companies else row[0] for row in conn.execute(
         f"SELECT DISTINCT company_id FROM company_fact WHERE {_SPONSOR_FACT}")}
+    survivors = {resolve_company(companies, t["company_id"])[-1] if t["company_id"] in companies else t["company_id"]
+                 for t in touches}
+    listed = has_list()
+    h1b_names = _family_names(conn, companies, survivors - sponsors) if listed else {}
+    sponsors |= {cid for cid, names in h1b_names.items() if _h1b_sponsor(names)}
+    # Added after the list was built: the list cannot say such a company has no approvals.
+    built = built_on() if listed else None
+    newest = _family_newest(conn, companies) if built is not None else {}
+    unseen = {cid for cid in survivors - sponsors if built is not None and newest.get(cid, "")[:10] > built}
     by_id = {a.account_id: a for a in accounts.values()}
     out: dict[int, tuple[AccountRow | None, str]] = {}
     for touch in touches:
@@ -99,6 +186,12 @@ def routes(conn: sqlite3.Connection, cfg: SendConfig, touch_ids, accounts: dict[
         pinned = by_id.get(pin) if pin is not None else None
         if pinned is not None and pinned.cfg.sends:
             out[touch["touch_id"]] = (pinned, "pinned")
+            continue
+        if cid not in sponsors and not listed:  # the H-1B list cannot be read: the lane is not decided
+            out[touch["touch_id"]] = (None, "lane_waits")
+            continue
+        if cid in unseen:
+            out[touch["touch_id"]] = (None, "lane_waits")
             continue
         lane_cfg = cfg.lane_account("sponsor" if cid in sponsors else "general")
         if lane_cfg is not None and lane_cfg.address in accounts:

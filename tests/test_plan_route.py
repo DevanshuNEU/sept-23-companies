@@ -23,7 +23,7 @@ def company(**over) -> CompanyFacts:
 def person(name="Priya Rao", title="Software Engineer", **over) -> PersonFacts:
     base = dict(name=name, title=title, role_kind=classify_role(title, CFG), seniority=seniority(title, CFG),
                 tenure_months=None, no_go=False, said_no=False, asked_on=None, email_code=None, has_email=False,
-                recruiter_blocked=False, wants_email=False)
+                wants_email=False)
     base.update(over)
     return PersonFacts(**base)
 
@@ -95,12 +95,12 @@ class RouteTest(unittest.TestCase):
         self.assertIn("Nov 4", got.reason)
         self.assert_route(route(person(asked_on=date(2026, 10, 1))), "find_someone_else", "linkedin.rotate_days")
 
-    def test_outside_engineering_and_a_recruiter_with_others_known_are_someone_else(self):
+    def test_outside_engineering_is_someone_else_and_a_recruiter_is_routed_like_anyone(self):
         got = route(person(title="Account Executive"))
         self.assert_route(got, "find_someone_else", "route.reach_kinds")
         self.assertIn("your pick", got.reason)
-        self.assert_route(route(person(title="Technical Recruiter", recruiter_blocked=True)), "find_someone_else",
-                          "#9 recruiters last")
+        self.assert_route(route(person(title="Technical Recruiter"), company(email_people=1, wave_people=1)),
+                          "linkedin_note", "linkedin.hard_total")
         self.assert_route(route(person(title="Technical Recruiter")), "linkedin_note", "linkedin.hard_total")
 
     def test_a_full_wave_is_a_heads_up_and_never_stops_a_connect(self):
@@ -122,9 +122,8 @@ class RouteTest(unittest.TestCase):
         crowded = route(gave, company(email_people=2, wave_people=4))
         self.assert_route(crowded, "email", "#9 supplied email")
         self.assertIn("your call", crowded.reason)
-        recruiter = person("Rae Recruiter", "Technical Recruiter", has_email=True, wants_email=True,
-                           recruiter_blocked=True)
-        self.assert_route(route(recruiter), "find_someone_else", "#9 recruiters last")
+        recruiter = person("Rae Recruiter", "Technical Recruiter", has_email=True, wants_email=True)
+        self.assert_route(route(recruiter, company(email_people=1, wave_people=1)), "email", "#9 supplied email")
         self.assert_route(route(person("Sam Sales", "Account Executive", has_email=True, wants_email=True)),
                           "find_someone_else", "route.reach_kinds")
 
@@ -160,12 +159,12 @@ class OrderTest(unittest.TestCase):
     PEOPLE = [person("Mo Lead", "Engineering Manager"), person("Sam Senior", "Senior Software Engineer"),
               person("Rae Recruiter", "Technical Recruiter"), person("Ian Plain", "Software Engineer")]
 
-    def test_the_preference_puts_plain_engineers_first_and_recruiters_last(self):
+    def test_the_preference_puts_plain_engineers_first_and_a_recruiter_is_one_of_the_rest(self):
         self.assertEqual(order_people(self.PEOPLE, CFG), [3, 1, 0, 2])
 
-    def test_with_the_preference_off_the_paste_order_stands_but_recruiters_still_go_last(self):
+    def test_with_the_preference_off_the_paste_order_stands_for_everyone_recruiters_included(self):
         off = dataclasses.replace(CFG, route={**CFG.route, "prefer_ic_in_role": False})
-        self.assertEqual(order_people(self.PEOPLE, off), [0, 1, 3, 2])
+        self.assertEqual(order_people(self.PEOPLE, off), [0, 1, 2, 3])
 
     def test_route_all_hides_nobody_and_a_full_wave_only_warns(self):
         six = self.PEOPLE + [person("Una Plain", "Software Engineer"), person("Ned Plain", "Software Engineer")]
@@ -176,7 +175,7 @@ class OrderTest(unittest.TestCase):
         verdicts = {six[i].name: r.verdict for i, r, _p in out}
         self.assertEqual(verdicts, {"Ian Plain": "linkedin_note", "Una Plain": "linkedin_note",
                                     "Ned Plain": "linkedin_note", "Sam Senior": "linkedin_note", "Mo Lead": "linkedin_note",
-                                    "Rae Recruiter": "find_someone_else"})
+                                    "Rae Recruiter": "linkedin_note"})
         prefs = [p for _i, _r, p in out]
         self.assertTrue(all(p["key"] == "route.prefer_ic_in_role" and p["label"] == "unmeasured" for p in prefs))
 

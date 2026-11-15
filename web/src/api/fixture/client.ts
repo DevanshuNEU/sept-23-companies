@@ -3,7 +3,7 @@ import type {
   Check, CloseReason, CompanyRef, CompanyView, DailyEntry, DoneView, DraftCompare, Fact, FactKind, HealthView, Id, IsoDate, IsoTime, JobRow, LinkedInPerson, LinkedInStep, LinkedInView,
   NeedsYouView, NoGoReason, NoGoView, OutboxDetail, OutboxGroup, OutboxItem, OutboxView, PersonRef, PostingHit, RemovedRow, RemoveReason, ReplyKind,
   ResolvedReview, ReviewFix, Revision, RoleKind, Pulse, SearchIndex, SendingStatus, ShellSummary, TodayView,
-  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedRow, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus,
+  BenchCompany, BenchView, BrowseCompany, BrowseParams, BrowseView, SwapResult, FindingsView, FunnelKey, LoggedPerson, LogPeopleResult, NoteDraft, OutcomeKind, OutcomePromptView, PlanRow, PlanView, ProgressPeriod, ProgressView, PromptTouch, ScoreView, StepKind, TomorrowRow, WatchView, Win, WinKind, WinsView, PassReason, PassResult, JobsParams, JobsView, PassJobResult, AppliedResult, AppliedRow, AppliedView, DoneResult, ClearDoneResult, CheckNowResult, CheckStatus, SendPriority,
 } from '../types';
 import { buildFixture, computeShell, countGroups, fixtureAccounts, GROUP_INDEX, linkedinActivity, settledOn, STEP_LINE, type FixtureDb, type SettledReview } from './data';
 import { rescanNote, tomorrowText, winsOnDay } from './plan-data';
@@ -43,6 +43,13 @@ const refOf = (c: CompanyRef): CompanyRef => ({
   heldByReply: c.heldByReply,
 });
 const notAllowed = (message: string) => new ApiError('not_allowed', message);
+/** A Send now row reads as the live API words it: it goes on the sender's next run. */
+const SENDS_NEXT_RUN = 'Sends on the next run';
+function urgentLine(item: OutboxItem, priority: SendPriority): Partial<OutboxItem> {
+  if (priority !== 'now') return {};
+  const schedule = item.schedule ? { ...item.schedule, reason: 'ready' as const, text: SENDS_NEXT_RUN, projectedAt: null, projectedDay: null, projectedClock: null } : null;
+  return { schedule, summary: SENDS_NEXT_RUN };
+}
 // The API's words for a settled item's note (outreach.review.words).
 const EDIT_LABEL: Record<Extract<ReviewFix, { kind: 'edit' }>['field'], string> = { size: 'Size', domain: 'Email domain', sponsorship: 'Sponsorship', board_url: 'Job board' };
 const NO_GO_PHRASE: Record<NoGoReason, string> = {
@@ -491,13 +498,24 @@ export class FixtureClient implements OutreachClient {
     });
   }
 
-  approve(messageId: Id, revision: Revision, o: WriteOptions): Promise<OutboxDetail> {
+  approve(messageId: Id, revision: Revision, o: WriteOptions, priority: SendPriority = 'normal'): Promise<OutboxDetail> {
     return this.write(o, () => {
       const { item, detail } = this.message(messageId, revision);
       if (item.state !== 'drafted') throw notAllowed('Only a draft can be approved');
       const blocks = detail.checks.filter((c) => c.severity === 'block');
       if (blocks.length > 0) throw new ApiError('blocked', 'A check is blocking this email', blocks);
-      this.patchItem(item, { state: 'approved', revision: item.revision + 1 });
+      this.patchItem(item, { state: 'approved', priority, revision: item.revision + 1, ...urgentLine(item, priority) });
+      this.place(item);
+      return detail;
+    });
+  }
+
+  setPriority(messageId: Id, priority: SendPriority, revision: Revision, o: WriteOptions): Promise<OutboxDetail> {
+    return this.write(o, () => {
+      const { item, detail } = this.message(messageId, revision);
+      if (item.state !== 'approved') throw notAllowed(item.state === 'drafted' ? 'Approve it first' : 'The sender has already taken this email');
+      if (item.priority === priority) throw notAllowed('It is already set that way');
+      this.patchItem(item, { priority, revision: item.revision + 1, ...urgentLine(item, priority) });
       this.place(item);
       return detail;
     });
@@ -507,7 +525,7 @@ export class FixtureClient implements OutreachClient {
     return this.write(o, () => {
       const { item, detail } = this.message(messageId, revision);
       if (item.state !== 'approved') throw notAllowed(item.state === 'drafted' ? 'This email is not approved' : 'The sender has already taken this email');
-      this.patchItem(item, { state: 'drafted', revision: item.revision + 1 });
+      this.patchItem(item, { state: 'drafted', priority: 'normal', revision: item.revision + 1 });
       this.place(item);
       return detail;
     });

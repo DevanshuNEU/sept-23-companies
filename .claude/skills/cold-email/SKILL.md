@@ -238,13 +238,24 @@ address are not tools yet (#183, #182).
 - **`log_sent`** only after he says he sent LinkedIn requests: each person, the exact note he sent (empty if
   none) and `at` when it was not just now. It records requests only, never an email, accept, reply or undo.
 
+## Sending lanes and finding people
+
+Who goes first follows the reach out ruling's order by company size (#9). Recruiters are not held to last.
+
+The sender picks the account, never this skill. A company with H-1B approvals on the H-1B list, or marked sponsorship
+yes, goes from the Northeastern account. Every other company goes from the Gmail account. Do not name or choose an
+account in a draft.
+
+When you find or enrich people with the Apollo MCP, search first (it is free). Reveal an email (1 credit) only after
+Devanshu says yes. Keep only verified emails. Never guess an address.
+
 ## Follow-ups
 
-#9: up to 4 follow-ups, at 3, 7, 14 and 21 business days after the first email, in the same thread. Each is short.
+#9: one follow-up, 7 business days after the first email, in the same thread. More he writes himself. It is short.
 It may be a plain human nudge ("just bumping this in case it got buried") and may say it is following up; it may
 add one new thing (a result, a link, a narrower ask) when there is a good one. It stays on the first email's role,
 never repeats a sentence from the thread, uses no markdown, ends with the brief's `signature`, and never mentions
-visa, OPT or sponsorship. The fourth is a polite close. A reply from anyone at the company stops all queued email
+visa, OPT or sponsorship. A reply from anyone at the company stops all queued email
 there.
 
 A nightly job drafts every follow-up due the next business day into the Outbox the same way (#142), so by hand

@@ -84,12 +84,12 @@ class ProjectionTest(Base):
         _, mid = self.approve_followup("2026-11-11")
         self.assertGreaterEqual(self.project()[mid], ny(11, 8, 0))
 
-    def test_recruiter_goes_after_the_others_at_the_company(self):
+    def test_a_recruiter_approved_first_does_not_wait_for_the_others_at_the_company(self):
         _, recruiter = self.approve(role="recruiter", approved_at="2026-11-06T10:00:00Z")
         _, one = self.approve(approved_at="2026-11-06T11:00:00Z")
         _, two = self.approve(approved_at="2026-11-06T12:00:00Z")
         got = self.project()
-        self.assertGreater(got[recruiter], max(got[one], got[two]))
+        self.assertLessEqual(got[recruiter], min(got[one], got[two]))
 
     def test_unsendable_messages_are_not_projected(self):
         paused, closed = seed_company(self.db, "Paused"), seed_company(self.db, "Closed")
@@ -190,7 +190,7 @@ class PerAccountProjectionTest(Base):
         cfg = lanes_cfg()
         rows = _accounts.sync(self.db, cfg, "2026-11-06T12:00:00Z")
         sponsor_co = seed_company(self.db, "Sponsor Co")
-        add_fact(self.db, sponsor_co, "everify", "enrolled")
+        add_fact(self.db, sponsor_co, "sponsorship", "yes")
         general = [self.approve(company=seed_company(self.db, f"G{i}"))[1] for i in range(3)]
         sponsor = [self.approve(company=sponsor_co)[1]]
         got = projection.project(queue.prepare(self.db, FRI, cfg, rows, day=None), FRI, cfg)

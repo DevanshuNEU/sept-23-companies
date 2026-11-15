@@ -9,7 +9,7 @@ setting can change, `#9 <the rule>`. First match wins:
 2. wait: he paused the company; someone there replied or a referral or interview is in progress (that thread first);
    this person was asked under `linkedin.rotate_days` ago.
 3. find_someone_else: this person was asked longer ago with no answer; their role is outside `route.reach_kinds`
-   (advice only: the note is still his pick); a recruiter while anyone else at the company is known (#9).
+   (advice only: the note is still his pick).
 4. email: he gave the address and the channel is email (`wants_email`, #9 ruling 2026-10-28): it goes to the Outbox
    with a draft whatever the role basis or the room; he checks it there.
 5. email: `outreach.plan.people.pick_channel` already said email (a published or verified address, for a founder,
@@ -24,13 +24,13 @@ queue, not a gate on people he found himself (#9 ruling 2026-10-28): it adds a h
 7 and changes no verdict.
 
 `route.prefer_ic_in_role` (his call, not measured yet) only orders people inside one company (`order_people`); it
-never hides a person or a company. Recruiters go last whatever it says.
+never hides a person or a company.
 """
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Literal
 
@@ -74,7 +74,6 @@ class PersonFacts:
     asked_on: date | None       # their newest live request or email
     email_code: str | None      # pick_channel's code when it said email, else None
     has_email: bool             # an address is known, usable or not
-    recruiter_blocked: bool     # a recruiter while someone else at the company is known
     wants_email: bool = False   # he gave the address and the channel is email (#131): it goes to the Outbox
 
 
@@ -181,9 +180,6 @@ def route_person(p: PersonFacts, c: CompanyFacts, budget: Budget, taken: Taken, 
     if p.role_kind not in cfg.route["reach_kinds"] and p.role_kind != "recruiter":
         return Route("find_someone_else", f"{p.title or 'No title'} is outside engineering; a note can still go "
                                           "if you want, it is your pick.", "route.reach_kinds")
-    if p.role_kind == "recruiter" and p.recruiter_blocked:
-        return Route("find_someone_else", f"{p.name} is a recruiter and {c.name} has someone else on record; "
-                                          "recruiters come last.", "#9 recruiters last")
     wave_size = cfg.get("queue", "requests_per_company")
     reached = c.wave_people + taken.wave
     heads_up = ""
@@ -219,13 +215,13 @@ def route_person(p: PersonFacts, c: CompanyFacts, budget: Budget, taken: Taken, 
 
 def order_people(people: Sequence[PersonFacts], cfg: PlanConfig) -> list[int]:
     """The indices of `people` in the order they are offered: with `route.prefer_ic_in_role`, plain IC engineers
-    first, then senior ICs, then leads, then the rest; recruiters always last; ties keep the paste order."""
+    first, then senior ICs, then leads, then the rest (a recruiter is one of the rest); ties keep the paste order."""
     prefer = cfg.route["prefer_ic_in_role"]
 
     def key(i: int):
         p = people[i]
         rank = (_IC_RANK.get(p.seniority, 3) if p.role_kind in ("engineer", "manager") else 3) if prefer else 0
-        return (p.role_kind == "recruiter", rank, i)
+        return (rank, i)
     return sorted(range(len(people)), key=key)
 
 
@@ -243,14 +239,11 @@ def route_all(people: Sequence[PersonFacts], c: CompanyFacts, budget: Budget, to
               cfg: PlanConfig) -> list[tuple[int, Route, dict]]:
     """Every person at one company routed in `order_people` order, each counting against the wave, the email room
     and the LinkedIn window the ones before them took. `(index, route, preference)` for every person: nobody is
-    dropped. A recruiter is blocked when anyone else in the list is not one."""
-    others = any(p.role_kind != "recruiter" for p in people)
+    dropped."""
     taken = Taken()
     out = []
     for position, i in enumerate(order_people(people, cfg), 1):
         p = people[i]
-        if p.role_kind == "recruiter" and others and not p.recruiter_blocked:
-            p = replace(p, recruiter_blocked=True)
         r = route_person(p, c, budget, taken, today, cfg)
         if r.verdict == "linkedin_note":
             taken = Taken(taken.wave + 1, taken.email, taken.linkedin + 1)

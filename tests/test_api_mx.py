@@ -11,6 +11,7 @@ import urllib.request
 from unittest import mock
 
 from outreach.api import mx
+from outreach.drafts import mx as dmx
 from outreach.api.app import create_app
 from outreach.api.db import connect_for
 from outreach.store import connect
@@ -110,7 +111,7 @@ class DohRequest(ApiCase):
                 self.assertEqual(dict(request.header_items()), {"Accept": "application/dns-json"})
 
     def test_the_default_opener_keeps_no_cookies_and_names_nobody(self):
-        opener = mx._opener()
+        opener = dmx._opener()
         self.assertFalse(any(isinstance(h, urllib.request.HTTPCookieProcessor) for h in opener.handlers))
         headers = dict(opener.addheaders)
         self.assertEqual(set(headers), {"User-agent"})
@@ -120,7 +121,7 @@ class DohRequest(ApiCase):
     def test_endpoints_are_cloudflare_then_google(self):
         self.assertEqual(mx.DOH_ENDPOINTS, ("https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"))
         opener = FakeOpener(error=OSError("down"))
-        with mock.patch.object(mx, "_opener", return_value=opener):
+        with mock.patch.object(dmx, "_opener", return_value=opener), mock.patch.dict("os.environ", {"OUTREACH_NO_DNS": ""}):
             self.assertEqual(mx.check_domain("acme.example"), "unknown")
         self.assertEqual([urllib.parse.urlsplit(r.full_url).netloc for r, _ in opener.requests],
                          ["cloudflare-dns.com", "dns.google"])

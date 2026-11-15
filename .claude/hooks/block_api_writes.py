@@ -5,7 +5,7 @@ Reads the hook JSON on stdin. Exit 2 with a plain reason on stderr refuses the c
 command that
 
   1. names a loopback host (127.x, localhost, [::1], 0.0.0.0, in any case, or a numeric spelling of 127.0.0.1) and an
-     /api/ path with a write word in it (approve, unapprove, skip, save, pause, resume, release, send), or
+     /api/ path with a write word in it (approve, unapprove, skip, save, pause, resume, release, send, priority), or
   2. names a loopback host, a network client (curl, wget, httpie, python, node, bun, deno, nc ...) and a write
      method or body flag (-X POST/PUT/PATCH/DELETE, -d, -F, -T, --data*, --post-data, --json, --form, .post( ...), or
   3. builds the host from a shell variable and names an /api/ write path (curl "$BASE/api/outbox/1/approve"), or
@@ -22,7 +22,8 @@ import json
 import re
 import sys
 
-WRITE_WORDS = frozenset({"approve", "unapprove", "skip", "save", "pause", "resume", "release", "send"})
+WRITE_WORDS = frozenset({"approve", "unapprove", "skip", "save", "pause", "resume", "release", "send",
+                         "priority"})
 
 LOOPBACK = re.compile(
     r"(?<![\d.])127(?:\.\d+){1,3}"  # 127.0.0.1, 127.1, 127.0.1

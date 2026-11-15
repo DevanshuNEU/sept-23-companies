@@ -100,3 +100,29 @@ test('the Approve bar reviews the drafts he may tick, and Undo takes the batch b
   await expect(bar.getByText('5 ready to approve')).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
+
+test('Send next and Send now sit beside Approve, and Send now asks one line first', async ({ page, consoleErrors }) => {
+  await page.goto('/outbox/2006');
+  await expect(page.getByRole('heading', { level: 2, name: 'Omar Haddad' })).toBeVisible();
+  const footer = page.locator('footer').filter({ has: page.getByRole('button', { name: 'Approve' }) });
+  await expect(footer.getByRole('button', { name: 'Send next' })).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Send now' })).toBeVisible();
+  await page.screenshot({ path: '../.context/send-now/outbox-draft-buttons.png' });
+
+  await footer.getByRole('button', { name: 'Send now' }).click();
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm.getByText('Send this now, outside the normal hours?')).toBeVisible();
+  await page.screenshot({ path: '../.context/send-now/outbox-send-now-confirm.png', animations: 'disabled' });
+  await confirm.getByRole('button', { name: 'Keep it in line' }).click();
+  await expect(confirm).toBeHidden();
+
+  // An approved email: Send now moves it to the next run, and the line says so.
+  await page.goto('/outbox/2009');
+  await expect(page.getByRole('heading', { level: 2, name: 'Jordan Price' })).toBeVisible();
+  await page.getByRole('button', { name: 'Send now' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Send now' }).click();
+  await expect(page.getByRole('status', { name: 'Send priority' })).toHaveText('Send now. Sends on the next run');
+  await expect(page.getByRole('button', { name: 'Send in the normal order' })).toBeVisible();
+  await page.screenshot({ path: '../.context/send-now/outbox-approved-send-now.png' });
+  expect(consoleErrors).toEqual([]);
+});

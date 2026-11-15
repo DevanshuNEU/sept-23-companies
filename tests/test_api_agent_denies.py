@@ -55,6 +55,8 @@ DENIED_BY_PATTERNS = [
     "curl -X POST http://127.0.0.1:3100/api/sending/resume",
     "curl -X POST http://127.0.0.1:3100/api/sending/release",
     "curl -X POST http://127.0.0.1:3100/api/outbox/5/send",
+    "curl -X POST http://127.0.0.1:3100/api/messages/5/priority --json '{}'",
+    "curl http://localhost:55111/api/messages/5/priority",
     "curl -X POST http://[::1]:3100/api/outbox/5/approve",
     "curl -X POST http://0.0.0.0:3100/api/outbox/5/approve",
     "curl -X POST http://127.1:3100/api/outbox/5/approve",
@@ -86,6 +88,7 @@ DENIED_BY_PATTERNS = [
 # Commands only the hook can catch: nothing in the pattern syntax sees inside sh -c, a raw socket, or a shell variable.
 DENIED_ONLY_BY_HOOK = [
     "sh -c 'curl -X POST http://127.0.0.1:3100/api/outbox/5/approve'",
+    "sh -c 'curl http://127.0.0.1:3100/api/messages/5/priority'",
     "bash -c \"curl --data x localhost:55111/api/outbox/5/save\"",
     "env HOST=localhost curl -d '{}' http://$HOST:3100/api/outbox/5/save",
     "exec 3<>/dev/tcp/127.0.0.1/3100; printf 'POST /api/outbox/5/approve HTTP/1.0\\r\\n\\r\\n' >&3",
@@ -192,7 +195,7 @@ class DenyPatternsTest(unittest.TestCase):
             self.assertIn(f"WebFetch(domain:{host})", deny)
 
     def test_resume_and_release_are_denied_for_every_client_family(self):
-        for word in ("resume", "release", "send", "approve", "skip", "save", "pause"):
+        for word in ("resume", "release", "send", "approve", "skip", "save", "pause", "priority"):
             for command in (
                 f"curl http://h/api/x/{word}",
                 f"wget http://h/api/x/{word}",

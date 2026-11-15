@@ -206,6 +206,29 @@ class SaveDraftTest(DraftCase):
         self.assertIn("no_mail_server", self.codes(self.ok("save_draft", self.draft_args(
             subject="Third try"))["blocks"]))
 
+    def test_a_save_looks_the_mail_server_up_when_the_cache_has_no_row(self):
+        from outreach.drafts import mx as dmx
+        self.db.execute("DELETE FROM mx_check")
+        asked = []
+        resolver = lambda domain: asked.append(domain) or ["10 mx.acme.example."]  # noqa: E731
+        with mock.patch.object(dmx, "default_resolvers", return_value=[resolver]):
+            got = self.ok("save_draft", self.draft_args())
+        self.assertEqual(asked, ["acme.example"])
+        self.assertNotIn("mail_server_unknown", self.codes(got["warns"]))
+        self.assertNotIn("mail_server_unknown", [c["code"] for c in json.loads(self.first()["checks"])])
+
+    def test_a_failed_lookup_stays_unknown_and_a_fresh_cache_asks_nobody(self):
+        from outreach.drafts import mx as dmx
+        self.db.execute("DELETE FROM mx_check")
+        with mock.patch.object(dmx, "default_resolvers", return_value=[lambda d: None]):
+            got = self.ok("check_draft", {"person_id": self.pat, "subject": SUBJECT, "body": BODY})
+        self.assertIn("mail_server_unknown", self.codes(got["warns"]))
+        self.mx("acme.example", "ok")
+        boom = mock.Mock(side_effect=AssertionError("asked"))
+        with mock.patch.object(dmx, "default_resolvers", return_value=[boom]):
+            self.ok("check_draft", {"person_id": self.pat, "subject": SUBJECT, "body": BODY})
+        boom.assert_not_called()
+
     def test_a_near_identical_colleague_draft_blocks_and_names_the_other_message(self):
         lee = seed.person(self.db, self.acme, "Lee Colleague", email="lee@acme.example")
         other = seed.message(self.db, seed.touch(self.db, lee), 0, subject="Something else", body=BODY)

@@ -19,6 +19,14 @@ os.environ["OUTREACH_DB"] = os.path.join(tempfile.mkdtemp(prefix="outreach-db-te
 os.environ["OUTREACH_CONTACTED_TXT"] = os.path.join(tempfile.mkdtemp(prefix="outreach-contacted-test-"), "none.txt")
 # No test pops a real Mac notification, even in the live checkout during a deploy test run (#153).
 os.environ["OUTREACH_NO_NOTIFY"] = "1"
+# No test asks a real DNS resolver (#281); a test that wants an answer injects resolvers.
+os.environ["OUTREACH_NO_DNS"] = "1"
+# A usable but empty H-1B list: the sending lane waits when the list cannot be read (#281), so sending tests need one.
+# Tests of the list itself, or of a missing one, point OUTREACH_H1B_DIR at their own folder.
+_h1b_dir = tempfile.mkdtemp(prefix="outreach-h1b-test-")
+with open(os.path.join(_h1b_dir, "companies.md"), "w", encoding="utf-8") as _f:
+    _f.write("# H-1B approvals by company\n\n| Company | FY2025 | Trend | USCIS name |\n| --- | --- | --- | --- |\n")
+os.environ["OUTREACH_H1B_DIR"] = _h1b_dir
 SCRATCH = True
 
 # The shipped send limit is flat 200 a day (#9, 2026-11-12) and its pacing is human (#9, 2026-11-06). Most sending

@@ -1,5 +1,6 @@
 """The Outbox: its reads (`GET /api/outbox`, `/api/outbox/compare`, `/api/outbox/{touchId}`) and its writes
-(`POST /api/messages/{id}/save`, `/approve`, `/unapprove`, `/skip`, `POST /api/touches/{id}/reply-kind`).
+(`POST /api/messages/{id}/save`, `/approve`, `/priority`, `/unapprove`, `/skip`, `POST /api/touches/{id}/reply-kind`).
+Approve takes his Send next or Send now with it; `/priority` changes it on an email already approved.
 
 Every write runs in `run_write` and answers with the thread's `OutboxDetail`. Approve is the one route that makes a
 message `approved` (#9 safety blocks enforced here, never only in the page): the mail server is looked up before any
@@ -16,7 +17,8 @@ from outreach.api.db import busy_problem, connect_for, is_busy, read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import WriteCtx, run_write
 from outreach.api.models.outbox import DraftCompare, OutboxDetail, OutboxView
-from outreach.api.models.outbox_writes import MessageRevisionBody, ReplyKindBody, SaveMessageBody
+from outreach.api.models.outbox_writes import (ApproveBody, MessageRevisionBody, PriorityBody, ReplyKindBody,
+                                               SaveMessageBody)
 from outreach.api.queries import outbox as queries
 from outreach.api.routers import MAX_ID, row_id
 from outreach.api.services import outbox as service
@@ -88,7 +90,7 @@ def save_message(body: SaveMessageBody, request: Request, message_id: int = row_
 
 
 @router.post("/messages/{message_id}/approve", response_model=OutboxDetail)
-def approve(body: MessageRevisionBody, request: Request, message_id: int = row_id(),
+def approve(body: ApproveBody, request: Request, message_id: int = row_id(),
             clock: Clock = Depends(get_clock)) -> Response:
     state = request.app.state
     with read_conn(request) as conn:
@@ -97,7 +99,8 @@ def approve(body: MessageRevisionBody, request: Request, message_id: int = row_i
         mx.ensure(state.settings, connect_for, domain, clock(), resolvers=state.mx_resolvers)
     banned = _banned(request)
     try:
-        return _write(request, lambda ctx: service.approve_message(ctx, message_id, body.revision, banned))
+        return _write(request, lambda ctx: service.approve_message(ctx, message_id, body.revision, banned,
+                                                                   priority=body.priority))
     except service.Blocked as blocked:
         _save_checks(request, blocked)
         raise ApiProblem("blocked", blocked.message, checks=blocked.checks) from None
@@ -116,6 +119,12 @@ def _save_checks(request: Request, blocked: service.Blocked) -> None:
         raise
     finally:
         conn.close()
+
+
+@router.post("/messages/{message_id}/priority", response_model=OutboxDetail)
+def set_priority(body: PriorityBody, request: Request, message_id: int = row_id()) -> Response:
+    """His Send next or Send now on an approved email, or back to normal."""
+    return _write(request, lambda ctx: service.set_priority(ctx, message_id, body.priority, body.revision))
 
 
 @router.post("/messages/{message_id}/unapprove", response_model=OutboxDetail)

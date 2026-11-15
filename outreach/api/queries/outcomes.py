@@ -242,8 +242,9 @@ def stop_unsent_messages(conn: sqlite3.Connection, person_id: int, reply_kind: s
             stop_planned(conn, r["message_id"], reason=reply_kind, now=now, actor="devanshu")
         else:
             if not conn.execute(
-                    "UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
-                    "WHERE message_id = ? AND state = ?", (now, r["message_id"], r["state"])).rowcount:
+                    "UPDATE message SET state = 'skipped', priority = 'normal', urgent_at = NULL, updated_at = ?, "
+                    "revision = revision + 1 WHERE message_id = ? AND state = ?",
+                    (now, r["message_id"], r["state"])).rowcount:
                 continue
             append_event(conn, entity="message", entity_id=r["message_id"], company_id=r["company_id"],
                          kind=STOPPED, actor="devanshu", at=now, detail=detail, idempotency_key=next(keys))

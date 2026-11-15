@@ -75,7 +75,7 @@ describe('CheckList', () => {
 
   it('passes the role kind select through for a role_kind fix', async () => {
     const onChange = vi.fn();
-    const checks = [check('w1', 'warn', 'Recruiter title', { detail: 'Recruiters go out on day 2.', fix: { kind: 'role_kind' } })];
+    const checks = [check('w1', 'warn', 'Recruiter', { detail: 'If the role kind is wrong, change it.', fix: { kind: 'role_kind' } })];
     render(<CheckList checks={checks} onFix={() => {}} roleKind={{ value: 'recruiter', onChange }} />);
     const select = screen.getByRole('combobox', { name: 'Role kind' });
     expect(select).toHaveTextContent('Recruiter');

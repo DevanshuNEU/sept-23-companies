@@ -39,7 +39,8 @@ from outreach.mcp.guard import Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.reads import MAX_ID, Family, company_row, marks, resolve
 from outreach.mcp.tools.research import DATE, HTTPS, is_linkedin
-from outreach.sources.keys import EMAIL, linkedin_key
+from outreach.rules.rebuild import EvidenceDraft, record_evidence
+from outreach.sources.keys import EMAIL, classify_domain, linkedin_key, registrable_domain
 from outreach.sources.keys import person_name_key as name_key
 from outreach.store import append_event, transaction
 
@@ -196,6 +197,24 @@ def _email_basis(want: dict) -> str:
     return bases[0] if bases else "provided"
 
 
+def fill_domain(ctx: Ctx, company_id: int, person_id: int, email: str | None) -> None:
+    """A guessed `domain` fact for the company from an address added for a person, when no company in its merge
+    family has any domain fact. Never over a known one. Free mail, payroll and platform hosts give nothing, and
+    neither does a `.edu` host (a university's mail is not the employer's domain; Knock keeps no list of companies
+    that are universities, so none is made an exception). The fact is source kind `other`, ref `person:<id>`."""
+    host = registrable_domain(email or "")
+    if host is None or host.endswith(".edu") or classify_domain(host) != "company":
+        return
+    ids = Family(ctx.conn).members(Family(ctx.conn).survivor(company_id))
+    marks_ = ",".join("?" * len(ids))
+    if ctx.conn.execute(f"SELECT 1 FROM evidence WHERE fact = 'domain' AND company_id IN ({marks_})", ids).fetchone():
+        return
+    record_evidence(ctx.conn, Family(ctx.conn).survivor(company_id), [EvidenceDraft(
+        fact="domain", value=host, confidence="guess", source_kind="other", source_ref=f"person:{person_id}",
+        quote="from an email address added for a person", num_low=None, num_high=None, observed_on=None)],
+        actor="claude", at=ctx.now)
+
+
 def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor: int, no_go_people: set[int]
            ) -> dict:
     conn = ctx.conn
@@ -225,6 +244,7 @@ def _known(ctx: Ctx, known: sqlite3.Row, want: dict, *, family: Family, survivor
         detail = {"filled": sorted(filled), "sources_added": added}
         if "email" in filled:
             detail["email"] = _email_basis(want)
+            fill_domain(ctx, survivor, known["person_id"], filled["email"])
         append_event(conn, entity="person", kind="updated", actor="claude", entity_id=known["person_id"],
                      company_id=survivor, at=ctx.now, detail=detail)
     return {"person_id": known["person_id"], "created": False, "refused": None, "flags": flags,
@@ -243,6 +263,7 @@ def _new(ctx: Ctx, want: dict, survivor: int, flags: list[str]) -> dict:
     detail = {"channel": channel, "role_kind": want["role_kind"], "sources": added}
     if want["email"]:
         detail["email"] = _email_basis(want)
+        fill_domain(ctx, survivor, person_id, want["email"])
     append_event(ctx.conn, entity="person", kind="added", actor="claude", entity_id=person_id, company_id=survivor,
                  at=ctx.now, detail=detail)
     return {"person_id": person_id, "created": True, "refused": None, "flags": flags,
@@ -311,5 +332,6 @@ TOOLS = (
              AddPeopleInput, add_people,
              {"person": Grant(insert=True, update=frozenset({"email", "linkedin_url", "channel", "linkedin_reason",
                                                              "profile_text", "notes", "updated_at", "revision"})),
-              "person_source": Grant(insert=True), "event": Grant(insert=True)}),
+              "person_source": Grant(insert=True), "event": Grant(insert=True),
+              "evidence": Grant(insert=True)}),
 )

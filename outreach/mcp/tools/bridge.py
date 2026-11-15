@@ -304,7 +304,6 @@ def _known_facts(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row], c: _Comp
     cands = load_candidates(conn, [c.survivor], canon, set(), today, cfg).get(c.survivor, [])
     by_id = {x.person_id: x for x in cands}
     said_no = said_no_ids(conn, [r["person_id"] for r in rows])
-    others = any(x.role_kind in ("engineer", "manager", "founder", "alum") for x in cands)
     out = {}
     for r in rows:
         cand = by_id.get(r["person_id"])
@@ -317,7 +316,7 @@ def _known_facts(conn: sqlite3.Connection, rows: Sequence[sqlite3.Row], c: _Comp
             name=r["name"], title=title, role_kind=r["role_kind"], seniority=seniority(title, cfg),
             tenure_months=tenure.get(r["person_id"]), no_go=r["person_id"] in no_go_people,
             said_no=r["person_id"] in said_no, asked_on=_asked_on(outbound, r["person_id"]), email_code=code,
-            has_email=r["email"] is not None, recruiter_blocked=r["role_kind"] == "recruiter" and others,
+            has_email=r["email"] is not None,
             wants_email=r["email"] is not None and r["channel"] == "email")
     return out
 
@@ -363,7 +362,7 @@ def _unknown_facts(name: str, title: str, tenure: int | None, cfg: PlanConfig, *
                    said_no: bool = False) -> PersonFacts:
     return PersonFacts(name=name, title=title, role_kind=classify_role(title, cfg), seniority=seniority(title, cfg),
                        tenure_months=tenure, no_go=no_go, said_no=said_no, asked_on=None, email_code=None,
-                       has_email=False, recruiter_blocked=False)
+                       has_email=False)
 
 
 # ---------------------------------------------------------------------------------------------- knock_status
@@ -867,7 +866,8 @@ def log_sent(ctx: Ctx, args: LogSentInput) -> dict:
 
 _PEOPLE_GRANTS = {"person": Grant(insert=True, update=frozenset({"email", "linkedin_url", "channel", "linkedin_reason",
                                                                  "profile_text", "notes", "updated_at", "revision"})),
-                  "person_source": Grant(insert=True), "event": Grant(insert=True)}
+                  "person_source": Grant(insert=True), "event": Grant(insert=True),
+                  "evidence": Grant(insert=True)}
 
 TOOLS = (
     ToolSpec("knock_status",

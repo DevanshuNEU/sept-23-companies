@@ -141,8 +141,10 @@ def stop_touch_messages(conn: sqlite3.Connection, touch_id: int, *, reason: str,
             stop_planned(conn, row["message_id"], reason=reason, now=stamp, actor=actor)
             stopped += 1
             continue
-        cur = conn.execute("UPDATE message SET state = 'skipped', updated_at = ?, revision = revision + 1 "
-                           "WHERE message_id = ? AND state = ?", (stamp, row["message_id"], row["state"]))
+        # A stopped email drops Send next and Send now with it.
+        cur = conn.execute("UPDATE message SET state = 'skipped', priority = 'normal', urgent_at = NULL, "
+                           "updated_at = ?, revision = revision + 1 WHERE message_id = ? AND state = ?",
+                           (stamp, row["message_id"], row["state"]))
         if not cur.rowcount:
             continue
         append_event(conn, entity="message", entity_id=row["message_id"], company_id=company_id,

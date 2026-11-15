@@ -59,6 +59,11 @@ person at once, log the old value in `event` and raise a flagged Needs-you item;
 - Several sender accounts (multi-sender plan, #9): each tick the sender reads every Gmail account that has a token and
   sends only from accounts with `sends = true` in the sending config. An account with no sign-in makes every tick
   partial until he signs it in with `python -m outreach.sending auth --account <address>`.
+- Send next and Send now are his clicks in the Outbox (#9 outreach fixes ruling). Send next puts an approved email
+  first in its account's queue and every rule still holds. Send now goes on the sender's next tick, even outside
+  sending hours or on a weekend; every stop still applies (no-go, bounce, reply hold, paused or closed company, the
+  account's pause and sign-in), and at most 3 can go past the account's day limit. A Send now that could not go on
+  the New York day he clicked it becomes Send next.
 - Store: `~/Library/Application Support/outreach/outreach.db`. It holds everything; the old files are history.
 - `live_checkout.is_live()` is true only in the live checkout, and nothing can change that. With a real Gmail
   token present, `python -m outreach.sending run` (including `--dry-run`) does nothing outside it;
@@ -103,12 +108,12 @@ the mail API on :3002 (`/api/approve`, `/api/save`, `/api/skip`, `/api/unapprove
 `.claude/settings.json` denies the obvious curl forms, and the rule covers every other way too.
 
 The same rule covers the new API (`outreach/api`: :3100 in production, `OUTREACH_API_PORT` in a workspace). Never call
-its write routes (approve, unapprove, skip, save, pause, resume, release, send, and every other POST, PUT or DELETE under
-`/api/`) by any means, on any port. `.claude/settings.json` denies curl, wget, httpie (`http`, `https`, `xh`), python,
-node, bun and deno commands that name one of those paths, and WebFetch to a loopback host. The PreToolUse hook
-`.claude/hooks/block_api_writes.py` also refuses any Bash command that names a loopback host (127.x, localhost, [::1],
-0.0.0.0) together with such a path or a write method or body flag, or that builds the host from a variable. Both read
-the command text only, so the rule still covers every other way: never assemble a request to get around them. A
+its write routes (approve, unapprove, skip, save, pause, resume, release, send, priority, and every other POST, PUT or
+DELETE under `/api/`) by any means, on any port. `.claude/settings.json` denies curl, wget, httpie (`http`, `https`,
+`xh`), python, node, bun and deno commands that name one of those paths, and WebFetch to a loopback host. The PreToolUse
+hook `.claude/hooks/block_api_writes.py` also refuses any Bash command that names a loopback host (127.x, localhost,
+[::1], 0.0.0.0) together with such a path or a write method or body flag, or that builds the host from a variable. Both
+read the command text only, so the rule still covers every other way: never assemble a request to get around them. A
 workspace never binds 3100.
 
 The old dashboard (`dashboard/`, :3001) and mail API (:3002) are retired. Claude never calls either, and never

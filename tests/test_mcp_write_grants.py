@@ -26,7 +26,8 @@ PERSON_UPDATE = frozenset({"email", "linkedin_url", "channel", "linkedin_reason"
 PERSON_EDIT = frozenset({"name", "title", "role_kind", "email", "linkedin_url", "profile_text", "notes", "channel",
                          "linkedin_reason", "updated_at", "revision"})
 PINNED = {
-    "update_person": {"person": Grant(update=PERSON_EDIT), "review_item": INSERT, "event": INSERT},
+    "update_person": {"person": Grant(update=PERSON_EDIT), "review_item": INSERT, "event": INSERT,
+                      "evidence": INSERT},
     "move_person": {"person": Grant(update=frozenset({"company_id", "updated_at", "revision"})),
                     "review_item": INSERT, "event": INSERT},
     "mark_email_bounced": {"person": Grant(update=frozenset({"email", "channel", "linkedin_reason", "updated_at",
@@ -43,7 +44,7 @@ PINNED = {
                       "message": Grant(update=frozenset({"state", "subject", "body", "checks", "saved_by",
                                                          "updated_at", "revision"}))},
     "add_people": {"person": Grant(insert=True, update=PERSON_UPDATE),
-                   "person_source": INSERT, "event": INSERT},
+                   "person_source": INSERT, "event": INSERT, "evidence": INSERT},
     "save_linkedin_note": {"event": INSERT,
                            "linkedin_draft": Grant(insert=True, update=frozenset({
                                "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
@@ -57,7 +58,7 @@ PINNED = {
                               "posting_id", "body", "reason_line", "facts", "checks", "prepared_by_version",
                               "updated_at", "revision"}))},
     "intake": {"person": Grant(insert=True, update=PERSON_UPDATE),
-               "person_source": INSERT, "event": INSERT},
+               "person_source": INSERT, "event": INSERT, "evidence": INSERT},
     "log_sent": {"linkedin_log": INSERT, "outreach_touch": INSERT, "event": INSERT},
     "log_miss": {"miss": INSERT},
 }

@@ -170,6 +170,14 @@ class IntakeTest(BridgeCase):
         self.assertEqual([p["created"] for p in again["people"]], [False, False])
         self.assertEqual([p["route"] for p in again["people"]], [p["route"] for p in out["people"]])
 
+    def test_a_pasted_email_fills_the_missing_company_domain(self):
+        out = self.ok("intake", self.paste({"name": "Jo Warren", "title": "Software Engineer",
+                                            "email": "jwarren@cmtelematics.com"}))
+        pid = out["people"][0]["person_id"]
+        rows = self.db.execute("SELECT value, confidence, source_ref FROM evidence WHERE fact = 'domain' "
+                               "AND company_id = ?", (self.acme,)).fetchall()
+        self.assertEqual([tuple(r) for r in rows], [("cmtelematics.com", "guess", f"person:{pid}")])
+
     def test_an_unknown_company_records_no_one(self):
         before = fingerprint(self.db)
         out = self.ok("intake", self.paste({"name": "Jane Doe", "title": "Engineer"}, company="Avante"))

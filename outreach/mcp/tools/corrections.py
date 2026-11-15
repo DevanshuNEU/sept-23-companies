@@ -26,7 +26,7 @@ from pydantic import Field
 from outreach.drafts.followups import no_go_sets
 from outreach.mcp.guard import MOVE_ONLY_COLUMNS, Grant
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
-from outreach.mcp.tools.people import refuse_bounced
+from outreach.mcp.tools.people import fill_domain, refuse_bounced
 from outreach.mcp.tools.reads import MAX_ID, SENT_STATES, Family, company_row, resolve
 from outreach.mcp.tools.research import clean, raise_flag_in
 from outreach.sources.keys import EMAIL, linkedin_key
@@ -204,6 +204,8 @@ def update_person(ctx: Ctx, args: UpdatePersonInput) -> dict:
         _write(conn, person["person_id"], changes, ctx.now)
         noted = record_edit(ctx, person, changes, kind="edited",
                             summary=clean(f"Claude changed {person['name']}: {said}"))
+        if changes.get("email", (None, None))[1]:
+            fill_domain(ctx, person["company_id"], person["person_id"], changes["email"][1])
     return {"person_id": person["person_id"], "changed": sorted(changes), "review_id": noted["review_id"],
             "channel": _channel_after(person, changes),
             "message": "Done. Devanshu sees it in Needs you; the old values are in the event."}
@@ -289,7 +291,7 @@ TOOLS = (
              "is refused after a sent first email that did not bounce.",
              UpdatePersonInput, update_person,
              {"person": Grant(update=PERSON_EDIT_COLUMNS), "review_item": Grant(insert=True),
-              "event": Grant(insert=True)}),
+              "event": Grant(insert=True), "evidence": Grant(insert=True)}),
     ToolSpec("mark_email_bounced",
              "An address bounced or is dead: clear it from the person and record why. They become a LinkedIn "
              "contact, and the address is never used again. Writes no message and no touch: the sender already "

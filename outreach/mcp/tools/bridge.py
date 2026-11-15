@@ -866,7 +866,8 @@ def log_sent(ctx: Ctx, args: LogSentInput) -> dict:
 
 _PEOPLE_GRANTS = {"person": Grant(insert=True, update=frozenset({"email", "linkedin_url", "channel", "linkedin_reason",
                                                                  "profile_text", "notes", "updated_at", "revision"})),
-                  "person_source": Grant(insert=True), "event": Grant(insert=True)}
+                  "person_source": Grant(insert=True), "event": Grant(insert=True),
+                  "evidence": Grant(insert=True)}
 
 TOOLS = (
     ToolSpec("knock_status",

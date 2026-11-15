@@ -344,5 +344,26 @@ class BouncedAddressTest(CorrectionsCase):
         self.ok("update_person", {"person_id": sam, "email": "sam@acme.example"})
 
 
+class UpdatePersonDomainTest(CorrectionsCase):
+    def domains(self):
+        return [tuple(r) for r in self.db.execute(
+            "SELECT value, confidence, source_kind, source_ref FROM evidence WHERE fact = 'domain'")]
+
+    def test_a_set_email_fills_a_missing_company_domain(self):
+        self.ok("update_person", {"person_id": self.pat, "email": "pat@cmtelematics.com"})
+        self.assertEqual(self.domains(), [("cmtelematics.com", "guess", "other", f"person:{self.pat}")])
+
+    def test_a_free_mail_email_or_a_known_domain_fills_nothing(self):
+        self.ok("update_person", {"person_id": self.pat, "email": "pat@gmail.com"})
+        self.assertEqual(self.domains(), [])
+        seed.evidence(self.db, self.acme, "domain", "acme.example", confidence="guess", source_kind="website")
+        self.ok("update_person", {"person_id": self.pat, "email": "pat@other.example"})
+        self.assertEqual([d[0] for d in self.domains()], ["acme.example"])
+
+    def test_a_title_change_fills_nothing(self):
+        self.ok("update_person", {"person_id": self.pat, "title": "Staff Engineer"})
+        self.assertEqual(self.domains(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

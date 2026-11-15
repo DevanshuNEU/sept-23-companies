@@ -342,5 +342,36 @@ class BouncedAddressTest(PeopleCase):
         self.assertTrue(self.add(person(email="pat@acme.example"))["results"][0]["created"])
 
 
+class CompanyDomainTest(PeopleCase):
+    def domains(self, company_id=None):
+        return [tuple(r) for r in self.db.execute(
+            "SELECT value, confidence, source_kind, source_ref FROM evidence WHERE company_id = ? AND fact = 'domain'",
+            (company_id or self.acme,))]
+
+    def test_an_added_email_fills_the_missing_domain_as_a_guess(self):
+        res = self.add(person(email="jwarren@cmtelematics.com"))["results"][0]
+        self.assertEqual(self.domains(), [("cmtelematics.com", "guess", "other", f"person:{res['person_id']}")])
+
+    def test_a_subdomain_reduces_to_the_registrable_domain(self):
+        self.add(person(email="jw@eng.cmtelematics.com"))
+        self.assertEqual([d[0] for d in self.domains()], ["cmtelematics.com"])
+
+    def test_free_mail_and_university_addresses_fill_nothing(self):
+        for i, addr in enumerate(["x@gmail.com", "y@outlook.com", "z@yahoo.co.in", "w@northeastern.edu"]):
+            self.add(person(f"Pat {chr(65 + i)}", email=addr))
+        self.assertEqual(self.domains(), [])
+
+    def test_a_company_with_any_domain_is_left_alone(self):
+        seed.evidence(self.db, self.acme, "domain", "acme.example", confidence="guess", source_kind="website")
+        self.add(person(email="jwarren@cmtelematics.com"))
+        self.assertEqual([d[0] for d in self.domains()], ["acme.example"])
+
+    def test_an_email_filled_into_a_known_person_fills_the_domain(self):
+        pid = seed.person(self.db, self.acme, "Sam Park", channel="linkedin",
+                          linkedin_url="https://www.linkedin.com/in/sam-park")
+        self.add(person("Sam Park", email="sam@cmtelematics.com", linkedin_url="https://www.linkedin.com/in/sam-park"))
+        self.assertEqual(self.domains(), [("cmtelematics.com", "guess", "other", f"person:{pid}")])
+
+
 if __name__ == "__main__":
     unittest.main()

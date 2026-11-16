@@ -107,12 +107,14 @@ class HistoryExpired(Exception):
 
 
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                   "timeout"})
+                   "timeout", "app_closed"})
 
 # A failure of these kinds says nothing about the message itself (it never went out because of the account, the
-# token, Gmail or the network), so a send proven missing from Sent may be tried again. Not retryable: a bad request
+# token, Gmail, Mail.app not running or the network), so a send proven missing from Sent may be tried again. Not
+# retryable: a bad request
 # (a bad address or header would fail the same way again).
-RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout"})
+RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout",
+                       "app_closed"})
 
 DETAIL_LIMIT = 300
 
@@ -141,7 +143,7 @@ class GmailError(Exception):
     """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one."""
 
     def __init__(self, kind: Literal["auth", "rate_limit", "daily_limit", "account_blocked", "bad_request",
-                                     "server", "network", "timeout"],
+                                     "server", "network", "timeout", "app_closed"],
                  status: int | None = None, detail: str = ""):
         if kind not in KINDS:
             raise ValueError(f"unknown Gmail error kind {kind!r}")

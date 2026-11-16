@@ -290,8 +290,9 @@ Run from a Terminal shell (not launchd) with his yes, to his own inboxes:
   carries `In-Reply-To` with the first Message-ID. Gmail filed it in a separate thread, likely because the first was in
   Spam; the header is right, so follow-ups use `reply`.
 - The email goes out as multipart/alternative (Outlook's text plus HTML), SPF, DKIM and DMARC pass at Gmail.
-- Placement (own accounts, one plain body): .edu to both Gmails landed in Spam; both Gmails to .edu landed in Inbox.
-  See #9 "Placement test ruling (2026-11-15)".
+- Placement (own accounts, one-line probe body): .edu to both Gmails landed in Spam. A GlockApps seed test with a real
+  approved body then put .edu in the inbox at Gmail 20/20, Google Workspace 5/5, Outlook/Hotmail 14/14, Office 365 4/5,
+  0 spam. See #9 "Placement test ruling (2026-11-15)" and its result.
 - Still to do at deploy: the launchd context grant (macOS's "control Mail" prompt for `/opt/homebrew/bin/python3`).
 
 ### Task B1: AppleScript runner
@@ -327,7 +328,7 @@ A bounce: From matches `MicrosoftExchange[0-9a-f]+@` or `postmaster@`, or Conten
 
 ### Task B4: Wire the Northeastern account
 
-**Files:** Modify `outreach/sending/__main__.py` (build `MailAppClient` for `kind="mailapp"`), `outreach/sending/config.toml` (Northeastern keeps `sends = false`: #9 placement test ruling; he turns it on), `outreach/api/queries/outbox.py` (no thread link for mailapp), `CLAUDE.md` (Mail.app must stay open; the Automation grant)
+**Files:** Modify `outreach/sending/__main__.py` (build `MailAppClient` for `kind="mailapp"`), `outreach/sending/config.toml` (`sends = true` for Northeastern: the #9 placement test passed, 2026-11-15), `outreach/api/queries/outbox.py` (no thread link for mailapp), `CLAUDE.md` (Mail.app must stay open; the Automation grant)
 - [ ] Failing test `test_tick_with_gmail_and_mailapp` (FakeGmail + FakeMailApp: each sends its lane; Mail.app closed holds only the sponsor lane and raises one Needs-you a day). Implement, pass, commit `sending: Northeastern sends the sponsor lane through Mail.app`.
 
 ### Task B5: Simulation over two weeks
@@ -347,8 +348,8 @@ Carried from Phase A (ledger): once two accounts send, one account's block must 
 ### Phase B Done when
 
 - Spike results written into the spec; suite green; PR clean on `master`.
-- Live: Mail.app open, the Automation prompt granted; Northeastern sends nothing until he turns it on after the placement
-  test (#9, 2026-11-15); then its first email goes alone and is found in Sent Items, and the sponsor lane ramps from 15.
+- Live: Mail.app open, the Automation prompt granted; the first Northeastern email goes alone and is found in Sent
+  Items, then the sponsor lane ramps from 15 (placement test passed, #9 2026-11-15).
 
 ---
 

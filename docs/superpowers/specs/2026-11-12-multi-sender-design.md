@@ -123,8 +123,9 @@ Needs-you item a day.
 **Spike results (2026-11-15):** send, find in Sent Items (Message-ID within seconds) and `reply` (In-Reply-To set, no
 quoted text) all work from a Terminal shell. Exchange shows the directory name "Devanshu Rajesh Chicholikar". The
 launchd grant waits for the deploy. A placement test between his own accounts put both .edu first emails in Gmail
-Spam with SPF, DKIM and DMARC passing, so the Northeastern account ships with sending off until a seed placement test
-(#9 "Placement test ruling (2026-11-15)").
+Spam with SPF, DKIM and DMARC passing; a GlockApps seed test with a real approved body then landed in the inbox at
+Gmail (20 of 20), Google Workspace (5 of 5), Outlook and Hotmail (14 of 14) and Office 365 (4 of 5), 0 spam. The
+Northeastern account takes the whole sponsor lane (#9 "Placement test ruling (2026-11-15)" and its result).
 
 ## What stays
 

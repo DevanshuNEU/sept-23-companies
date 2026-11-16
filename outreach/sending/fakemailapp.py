@@ -6,7 +6,9 @@ handler does, dates as local wall-clock text), the subject matched without regar
 does. So every test and the simulator run the client's own code; only Mail.app is fake. Nothing here starts
 osascript, opens a socket or a file. `FakeMailApp.sent` is the only count of emails that "went out".
 
-Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.app's Outbox), `deliver_reply`,
+Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.app's Outbox), `unseen_next_send` (it
+goes out and its copy never shows in Sent Items or an Outbox), `refuse_next_send` (the script stops before Mail.app's
+`send` and prints `notsent`), `deliver_reply`,
 `deliver_auto_reply`, `deliver_ndr` (a Microsoft "Undeliverable" notice), `deliver_unrelated`, `add_to_sent`,
 `add_to_mailbox`, `copy_to`, `fail_mailbox`, and `closed` (Mail.app not running: every script fails with `app_closed`).
 `probe(method_name)` runs at the start of every client method; `calls` lists them, `scripts` the scripts run,
@@ -118,6 +120,8 @@ class FakeMailApp(MailAppClient):
         self.seconds_per_record = 0                          # what one record costs a fetch's time budget
         self._failures: list[_Failure] = []
         self._slow: list[timedelta | None] = []
+        self._unseen = 0
+        self._refusals: list[str] = []
         self._failing_boxes: set[str] = set()
         self._outgoing: Outgoing | None = None
         self._next = 0
@@ -130,6 +134,16 @@ class FakeMailApp(MailAppClient):
         took it) and reaches Sent Items (`lands_after` later, waiting in the Outbox until then, or never with
         `in_sent=False`). Calls queue up."""
         self._failures.append(_Failure(error, accepted, in_sent, lands_after))
+
+    def unseen_next_send(self) -> None:
+        """The next email goes out (the script prints `sent`) but its copy never shows in Sent Items or an Outbox
+        while this test runs: Exchange files it late. Calls queue up."""
+        self._unseen += 1
+
+    def refuse_next_send(self, text: str) -> None:
+        """The next send or reply script fails before Mail.app's `send` (building the email) and prints `notsent` with
+        `text`, as the real scripts do: nothing goes out. Calls queue up."""
+        self._refusals.append(text)
 
     def fail_mailbox(self, mailbox: str) -> None:
         """Mail.app cannot read `mailbox` (as an Exchange Tasks or Notes folder may refuse `messages of`): the history
@@ -259,6 +273,8 @@ class FakeMailApp(MailAppClient):
 
     def _send_script(self, args: list[str]) -> list[str]:
         subject, body, sender, to = args
+        if self._refusals:
+            return [_record("notsent", _esc(self._refusals.pop(0)))]
         self._go_out(subject, body, sender, to, None)
         return ["sent"]
 
@@ -267,6 +283,8 @@ class FakeMailApp(MailAppClient):
         hits = [s for s in self._visible(sent_box) if s.msgid == original_id]
         if len(hits) != 1:
             return [_record("noorig", str(len(hits)))]
+        if self._refusals:
+            return [_record("notsent", _esc(self._refusals.pop(0)))]
         self._go_out(subject, body, sender, to, hits[0])
         return ["sent"]
 
@@ -393,7 +411,10 @@ class FakeMailApp(MailAppClient):
         elif slow:
             leaves = now + slow
         self.sent.append((self._outgoing, f"<{msgid}>", now))
-        if failure is None or failure.in_sent:
+        unseen = failure is None and self._unseen > 0
+        if unseen:
+            self._unseen -= 1
+        if (failure is None and not unseen) or (failure is not None and failure.in_sent):
             self.store.append(Stored(box="Sent Items", msgid=msgid, sender=sender, to=to, subject=subject,
                                      sent_at=now, received_at=now, headers=headers, content=body,
                                      replied_to=original.msgid if original is not None else None,

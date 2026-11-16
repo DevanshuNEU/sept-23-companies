@@ -119,12 +119,12 @@ class ThreadUnsupported(Exception):
 
 
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                   "timeout", "app_closed"})
+                   "timeout", "app_closed", "not_allowed"})
 
 # A failure of these kinds says nothing about the message itself (it never went out because of the account, the
 # token, Gmail, Mail.app not running or the network), so a send proven missing from Sent may be tried again. Not
-# retryable: a bad request
-# (a bad address or header would fail the same way again).
+# retryable: a bad request (a bad address or header would fail the same way again), and `not_allowed` (macOS does not
+# let the sender control Mail.app, error -1743: it fails the same way until he allows it).
 RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout",
                        "app_closed"})
 
@@ -152,22 +152,25 @@ def scrub(text: str, *secrets: str) -> str:
 
 
 class GmailError(Exception):
-    """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one."""
+    """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one. `maybe_sent`: the
+    email may have gone out whatever the kind (Mail.app took it, or its send script was cut short), so a Sent miss
+    never makes it retryable: it is settled by the Sent Items rule, never by sending it again. Gmail never sets it."""
 
     def __init__(self, kind: Literal["auth", "rate_limit", "daily_limit", "account_blocked", "bad_request",
-                                     "server", "network", "timeout", "app_closed"],
-                 status: int | None = None, detail: str = ""):
+                                     "server", "network", "timeout", "app_closed", "not_allowed"],
+                 status: int | None = None, detail: str = "", *, maybe_sent: bool = False):
         if kind not in KINDS:
             raise ValueError(f"unknown Gmail error kind {kind!r}")
         self.kind = kind
         self.status = status
         self.detail = scrub(detail)
+        self.maybe_sent = maybe_sent
         super().__init__(f"Gmail {kind}" + (f" {status}" if status is not None else "") +
                          (f": {self.detail}" if self.detail else ""))
 
     @property
     def retryable(self) -> bool:
-        return self.kind in RETRYABLE
+        return self.kind in RETRYABLE and not self.maybe_sent
 
 
 class SentAmbiguous(GmailError):
@@ -175,8 +178,8 @@ class SentAmbiguous(GmailError):
     Nothing can tell which is this send, so it stays in doubt and is never sent again; the tick tells him. A
     GmailError of kind `server`, so any caller that keeps a send in doubt on a failed search does the same here."""
 
-    def __init__(self, detail: str = ""):
-        super().__init__("server", None, detail)
+    def __init__(self, detail: str = "", *, maybe_sent: bool = False):
+        super().__init__("server", None, detail, maybe_sent=maybe_sent)
 
 
 def classify_http(status: int, body: str) -> str:

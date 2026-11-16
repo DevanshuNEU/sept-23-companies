@@ -1748,7 +1748,8 @@ class MailAppProofTest(MailAppBase):
 
     def test_a_first_email_missing_from_sent_items_after_the_settle_time_stops_as_on_gmail(self):
         first, second = self.approve_sponsor(), self.approve_sponsor()
-        self.mail.fail_next_send(GmailError("timeout", None, "Mail.app did not answer"))  # it never went out
+        # Mail.app quit before the send: it never went out (a send script timeout may have sent it: never retried)
+        self.mail.fail_next_send(GmailError("app_closed", None, "execution error: Mail.app is not running (-600)"))
         self.tick()
         self.assertEqual(self.message(first)["state"], "send_unknown")
         self.clock.advance(minutes=4)
@@ -1965,6 +1966,98 @@ class MailAppTickTest(MailAppBase):
         self.assertEqual((self.gmail.sent, self.gmail2.sent), ([], []))
         self.mail.closed = False
         self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "sent")
+        self.assertEqual(len(self.mail.sent), 1)
+
+    # F2 (final review): every Mail.app sign-in failure waits on the Mail.app path, worded for Mail.app.
+    def profile_fails(self, err: GmailError) -> None:
+        def fail(name):
+            if name == "profile":
+                raise err
+        self.mail.probe = fail
+
+    def assert_waits_on_mail_app(self, report, sponsor: int, general: int) -> None:
+        self.assertEqual(report.sent, (general,))
+        self.assertEqual(self.message(sponsor)["state"], "approved")
+        self.assertNotEqual(report.accounts[NEU], "ok")
+        self.assertNotEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
+        lines = [line for line in report.lines if NEU in line]
+        self.assertTrue(lines)
+        self.assertTrue(all("Mail.app" in line and "Gmail did not" not in line for line in lines), lines)
+        self.assertNotIn("Gmail", self.runs()[-1]["error"])
+        self.assertIn("Mail.app", self.runs()[-1]["error"])
+        self.assert_no_gmail_signal()
+
+    def test_mail_app_automation_denied_waits_and_says_how_to_allow_it_once_a_day(self):
+        sponsor, general = self.approve_sponsor(), self.approve()
+        self.profile_fails(GmailError("not_allowed", None, "Not authorized to send Apple events to Mail. (-1743)"))
+        report = self.tick()
+        self.assert_waits_on_mail_app(report, sponsor, general)
+        allow = ("Knock may not control Mail. Open System Settings, Privacy and Security, Automation, and allow Mail "
+                 "for python3.")
+        self.assertEqual([text for _, text in self.notices if text == allow], [allow])
+        self.clock.advance(minutes=30)
+        self.tick()
+        self.assertEqual([text for _, text in self.notices if text == allow], [allow])  # once a day
+
+    def test_any_other_mail_app_sign_in_failure_waits_and_names_mail_app_never_gmail(self):
+        sponsor, general = self.approve_sponsor(), self.approve()
+        self.profile_fails(GmailError("server", None, "execution error: Mail got an error. (-10000)"))
+        report = self.tick()
+        self.assert_waits_on_mail_app(report, sponsor, general)
+        [(title, text)] = self.mailapp_notices()
+        self.assertEqual(title, tick.WAIT_TITLE)
+        self.assertIn(NEU, text)
+        self.assertNotIn("Gmail did not", text)
+
+    # F1 (final review): a send Mail.app took is settled by the Sent Items rule, never by sending it again.
+    def assert_sent_once_and_left_failed(self, sponsor: int) -> None:
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "send_unknown")
+        self.assertEqual(len(self.mail.sent), 1)
+        for minutes in (CFG.reconcile_after_minutes + 2, 60, 60):
+            self.clock.advance(minutes=minutes)
+            self.tick()
+            self.assertEqual(len(self.mail.sent), 1)
+        self.assertEqual(self.message(sponsor)["state"], "failed")
+        self.assertEqual(self.events("requeued"), [])
+        claims = [e for e in self.events("claimed") if e["entity_id"] == sponsor]
+        self.assertEqual(len(claims), 1)
+        [failed] = self.events("claim_failed")
+        self.assertIs(json.loads(failed["detail"])["retryable"], False)
+        self.assertIn("Sent Items", self.message(sponsor)["error"])
+        self.assertNotIn("did not go out", self.message(sponsor)["error"])
+        self.assert_no_gmail_signal()
+
+    def test_an_accepted_send_never_seen_in_sent_items_goes_once_and_stays_failed(self):
+        sponsor = self.approve_sponsor()
+        self.mail.unseen_next_send()  # the script printed `sent`; the Sent Items copy is later than every read
+        self.assert_sent_once_and_left_failed(sponsor)
+
+    def test_a_send_script_timeout_after_mail_app_took_it_goes_once_and_stays_failed(self):
+        sponsor = self.approve_sponsor()
+        self.mail.fail_next_send(GmailError("timeout", None, "osascript took longer than 60 seconds"), accepted=True,
+                                 in_sent=False)
+        self.assert_sent_once_and_left_failed(sponsor)
+
+    def test_a_tick_killed_mid_send_on_mail_app_is_never_sent_again(self):
+        sponsor = self.approve_sponsor()
+        self.mail.fail_next_send(SystemExit("killed"), accepted=True, in_sent=False)
+        with self.assertRaises(SystemExit):
+            self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "sending")
+        self.clock.advance(minutes=2)
+        self.assert_sent_once_and_left_failed(sponsor)
+
+    def test_mail_app_closed_before_the_send_still_gets_its_one_retry(self):
+        sponsor = self.approve_sponsor()
+        self.mail.fail_next_send(GmailError("app_closed", None, "execution error: Mail.app is not running (-600)"))
+        self.tick()
+        self.assertEqual(self.mail.sent, [])
+        self.clock.advance(minutes=CFG.reconcile_after_minutes + 2)
+        self.tick()
+        self.clock.advance(minutes=60)
         self.tick()
         self.assertEqual(self.message(sponsor)["state"], "sent")
         self.assertEqual(len(self.mail.sent), 1)

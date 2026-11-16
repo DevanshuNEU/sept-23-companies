@@ -43,6 +43,13 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(err.kind, "app_closed")
         self.assertTrue(err.retryable)
 
+    def test_automation_not_allowed_maps_to_not_allowed_and_is_never_retried(self):
+        err, _ = self.run_with(completed(stderr="execution error: Not authorized to send Apple events to Mail. (-1743)",
+                                         code=1))
+        self.assertEqual(err.kind, "not_allowed")
+        self.assertIn("not_allowed", KINDS)
+        self.assertFalse(err.retryable)
+
     def test_other_failure_maps_to_server_and_detail_is_short_and_scrubbed(self):
         err, _ = self.run_with(completed(stderr="boom Bearer abc123 " + "x" * 500, code=1))
         self.assertEqual(err.kind, "server")

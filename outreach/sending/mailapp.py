@@ -37,9 +37,10 @@ over 120 s for 17 messages that way, about 3 s read first). Dates come back as M
 Live checkout only: the client on the real runner (`osascript_runner`) refuses to be built anywhere else. Tests use
 `outreach.sending.fakemailapp.FakeMailApp`, this client with an in-memory Mail.app as its runner.
 """
+import contextlib
 import re
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterator
 from datetime import datetime, timedelta, timezone
 from email.parser import HeaderParser
 from email.utils import parseaddr
@@ -196,15 +197,21 @@ on run argv
 end run
 '''
 
-# argv: subject, body, sender ("Name <address>"), to address. Prints `sent`.
+# argv: subject, body, sender ("Name <address>"), to address. Prints `sent`, or `notsent <text>` when building the
+# email failed before Mail.app's `send` (nothing went out). An error at or after `send` is not caught: the runner
+# reports it, and the client takes it as a send in doubt.
 SEND_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set {subj, bodyText, fromText, toAddr} to {item 1 of argv, item 2 of argv, item 3 of argv, item 4 of argv}
 	tell application "Mail"
-		set m to make new outgoing message with properties {subject:subj, content:bodyText, visible:false}
-		set sender of m to fromText
-		tell m to make new to recipient at end of to recipients with properties {address:toAddr}
+		try
+			set m to make new outgoing message with properties {subject:subj, content:bodyText, visible:false}
+			set sender of m to fromText
+			tell m to make new to recipient at end of to recipients with properties {address:toAddr}
+		on error errText number errNum
+			return my fields({"notsent", my esc(errText & " (" & errNum & ")")})
+		end try
 		send m
 	end tell
 	return "sent"
@@ -212,21 +219,26 @@ end run
 '''
 
 # argv: account name, Sent Items name, the first email's Message-ID (no brackets), subject, body, sender, to
-# address. Prints `noorig <count>` (nothing sent) unless exactly one Sent Items message has that id, else `sent`.
+# address. Prints `noorig <count>` (nothing sent) unless exactly one Sent Items message has that id, `notsent <text>`
+# when building the reply failed before Mail.app's `send` (nothing went out), else `sent`.
 REPLY_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set {acctName, sentName, origId} to {item 1 of argv, item 2 of argv, item 3 of argv}
 	set {subj, bodyText, fromText, toAddr} to {item 4 of argv, item 5 of argv, item 6 of argv, item 7 of argv}
 	tell application "Mail"
-		set hits to (messages of mailbox sentName of account acctName whose message id is origId)
-		if (count of hits) is not 1 then return my fields({"noorig", (count of hits) as text})
-		set r to reply (item 1 of hits) opening window no
-		delete every to recipient of r
-		tell r to make new to recipient at end of to recipients with properties {address:toAddr}
-		set subject of r to subj
-		set content of r to bodyText
-		set sender of r to fromText
+		try
+			set hits to (messages of mailbox sentName of account acctName whose message id is origId)
+			if (count of hits) is not 1 then return my fields({"noorig", (count of hits) as text})
+			set r to reply (item 1 of hits) opening window no
+			delete every to recipient of r
+			tell r to make new to recipient at end of to recipients with properties {address:toAddr}
+			set subject of r to subj
+			set content of r to bodyText
+			set sender of r to fromText
+		on error errText number errNum
+			return my fields({"notsent", my esc(errText & " (" & errNum & ")")})
+		end try
 		send r
 	end tell
 	return "sent"
@@ -487,6 +499,27 @@ def _shape(records: list[list[str]], kinds: dict[str, int]) -> list[list[str]]:
     return records
 
 
+# The send script's failures that come before Mail.app could take the email: Mail.app not running (`requireMail`, the
+# script's first line) and macOS refusing the Apple events (the first `tell`). Everything else from the send script
+# on may have sent it.
+_NOT_STARTED = frozenset({"app_closed", "not_allowed"})
+
+
+@contextlib.contextmanager
+def _in_doubt(*, before: Collection[str] = frozenset()) -> Iterator[None]:
+    """Every failure inside is raised as a GmailError with `maybe_sent` (the email may have gone out), but a
+    GmailError whose kind is in `before` (it stopped the script before Mail.app's `send`), which is raised as it is."""
+    try:
+        yield
+    except GmailError as err:
+        if err.maybe_sent or err.kind in before:
+            raise
+        raise GmailError(err.kind, err.status, err.detail, maybe_sent=True) from err
+    except Exception as err:
+        raise GmailError("server", None, f"the send failed after Mail.app was asked to send: {type(err).__name__}",
+                         maybe_sent=True) from err
+
+
 class MailAppClient(MailClient):
     """One Mail.app account as a sender (`account.kind == "mailapp"`). `runner` runs a script with its arguments and
     a timeout and returns its output (tests pass a fake); `clock` is aware now; `sleep` waits between Sent Items reads
@@ -529,9 +562,11 @@ class MailAppClient(MailClient):
         return Profile(email=email, history_id=self._now_text())
 
     def send(self, m: Outgoing) -> Sent:
-        """Send through Mail.app, then find it in Sent Items within 60 seconds of the start. Any failure after the
-        script started is a send in doubt for `find_sent`; a follow-up whose first email is not in Sent Items is
-        refused (`bad_request`) with nothing sent."""
+        """Send through Mail.app, then find it in Sent Items within 60 seconds of the start. A follow-up whose first
+        email is not in Sent Items is refused (`bad_request`), and so is one that fails before Mail.app's `send`
+        (`notsent`: `server`), each with nothing sent; Mail.app not running is `app_closed`. Any other failure, from
+        the send script on (it timed out, failed at `send`, or printed `sent` and the poll did not see it), may have
+        sent the email: it is raised with `maybe_sent`, a send in doubt settled by `find_sent` and never retried."""
         try:
             check_outgoing(m)
         except ValueError as err:
@@ -544,27 +579,36 @@ class MailAppClient(MailClient):
         deadline = start + timedelta(seconds=SEND_TIMEOUT)
         first = m.in_reply_to or m.thread_id  # a follow-up replies to the email it follows, in Sent Items
         if first:
-            answer = self._records(REPLY_SCRIPT, [self.mailapp_account, SENT_BOX, bare(first), m.subject, m.body,
-                                                  sender, to], SEND_TIMEOUT)
-            if answer and answer[0][0] == "noorig":
-                raise GmailError("bad_request", None, "the first email is not in Sent Items once, so the follow-up "
-                                 "cannot reply to it; nothing was sent")
+            script, args = REPLY_SCRIPT, [self.mailapp_account, SENT_BOX, bare(first), m.subject, m.body, sender, to]
         else:
-            self._records(SEND_SCRIPT, [m.subject, m.body, sender, to], SEND_TIMEOUT)
+            script, args = SEND_SCRIPT, [m.subject, m.body, sender, to]
+        with _in_doubt(before=_NOT_STARTED):
+            answer = _shape(self._records(script, args, SEND_TIMEOUT), {"sent": 1, "noorig": 2, "notsent": 2})
+        if answer and answer[0][0] == "noorig":
+            raise GmailError("bad_request", None, "the first email is not in Sent Items once, so the follow-up "
+                             "cannot reply to it; nothing was sent")
+        if answer and answer[0][0] == "notsent":
+            text = answer[0][1]
+            kind = "not_allowed" if "(-1743)" in text else "app_closed" if "(-600)" in text else "server"
+            raise GmailError(kind, None, f"Mail.app could not build the email, so nothing was sent: {text}")
+        if [rec[0] for rec in answer] != ["sent"]:
+            raise GmailError("server", None, "Mail.app gave an answer the sender cannot read after the send",
+                             maybe_sent=True)
         since_ms = int(start.timestamp() * 1000) - CLOCK_SKEW_MS
-        for _ in range(SEND_TIMEOUT // POLL_SECONDS + 2):  # bounded by tries too, whatever the clock does
-            remaining = (deadline - self._clock()).total_seconds()
-            if remaining < 1:
-                break
-            hits, _waiting = self._sent_items(to, m.subject, since_ms, remaining)
-            if len(hits) > 1:
-                raise GmailError("server", None, "more than one email in Sent Items has this address and subject")
-            if len(hits) == 1:
-                msgid, thread = hits[0]
-                return Sent(gmail_message_id=_gmail_id(msgid), thread_id=m.thread_id or thread,
-                            rfc_message_id=msgid, marker=m.marker)
-            self._sleep(min(POLL_SECONDS, remaining))
-        raise GmailError("timeout", None, f"the email was not in Sent Items {SEND_TIMEOUT} seconds after the send")
+        with _in_doubt():  # Mail.app took it: whatever fails now, the email may have gone out
+            for _ in range(SEND_TIMEOUT // POLL_SECONDS + 2):  # bounded by tries too, whatever the clock does
+                remaining = (deadline - self._clock()).total_seconds()
+                if remaining < 1:
+                    break
+                hits, _waiting = self._sent_items(to, m.subject, since_ms, remaining)
+                if len(hits) > 1:
+                    raise GmailError("server", None, "more than one email in Sent Items has this address and subject")
+                if len(hits) == 1:
+                    msgid, thread = hits[0]
+                    return Sent(gmail_message_id=_gmail_id(msgid), thread_id=m.thread_id or thread,
+                                rfc_message_id=msgid, marker=m.marker)
+                self._sleep(min(POLL_SECONDS, remaining))
+            raise GmailError("timeout", None, f"the email was not in Sent Items {SEND_TIMEOUT} seconds after the send")
 
     def _sent_items(self, to: str, subject: str, since_ms: int,
                     timeout: float) -> tuple[list[tuple[str, str]], bool]:

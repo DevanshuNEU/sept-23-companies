@@ -130,6 +130,83 @@ class SendTest(Base):
             self.mail.send(m)
         self.assertEqual(caught.exception.kind, "server")
         self.assertEqual(len(self.mail.sent), 1)
+        self.assertFalse(caught.exception.retryable)  # it went out: never sent again
+
+    # F1 (final review): once Mail.app may have taken the email, a failure is settled by the Sent Items rule only.
+    def send_error(self, m: Outgoing | None = None) -> GmailError:
+        with self.assertRaises(GmailError) as caught:
+            self.mail.send(m or outgoing())
+        return caught.exception
+
+    def test_a_send_mail_app_took_but_sent_items_never_shows_is_never_retryable(self):
+        self.mail.unseen_next_send()
+        err = self.send_error()
+        self.assertEqual(err.kind, "timeout")
+        self.assertTrue(err.maybe_sent)
+        self.assertFalse(err.retryable)
+        self.assertEqual(len(self.mail.sent), 1)
+
+    def test_a_send_script_that_timed_out_is_never_retryable(self):
+        self.mail.fail_next_send(GmailError("timeout", None, "osascript took longer than 60 seconds"))
+        err = self.send_error()
+        self.assertEqual(err.kind, "timeout")
+        self.assertFalse(err.retryable)
+
+    def test_a_send_script_that_failed_at_mail_apps_send_is_never_retryable(self):
+        self.mail.fail_next_send(GmailError("server", None, "execution error: Mail got an error. (-10000)"))
+        self.assertFalse(self.send_error().retryable)
+
+    def test_a_follow_up_whose_reply_script_timed_out_is_never_retryable(self):
+        first = self.mail.send(outgoing())
+        self.mail.fail_next_send(GmailError("timeout", None, "osascript took longer than 60 seconds"))
+        err = self.send_error(outgoing(2, subject="Re: Your team and the backend role", body="Following up.",
+                                       thread_id=first.thread_id, in_reply_to=first.rfc_message_id))
+        self.assertFalse(err.retryable)
+
+    def test_mail_app_closing_during_the_sent_items_poll_is_never_retryable(self):
+        original = self.mail._send_script
+
+        def then_quit(args):
+            out = original(args)
+            self.mail.closed = True  # Mail.app took it, then quit before Sent Items showed it
+            return out
+        self.mail._send_script = then_quit
+        self.mail.slow_sent(timedelta(minutes=3))
+        err = self.send_error()
+        self.assertEqual(err.kind, "app_closed")
+        self.assertFalse(err.retryable)
+        self.assertEqual(len(self.mail.sent), 1)
+
+    def test_mail_app_not_running_before_the_send_stays_retryable_and_nothing_goes(self):
+        self.mail.closed = True
+        err = self.send_error()
+        self.assertEqual(err.kind, "app_closed")
+        self.assertTrue(err.retryable)
+        self.assertEqual(self.mail.sent, [])
+
+    def test_an_error_before_mail_apps_send_stays_retryable_and_nothing_goes(self):
+        self.mail.refuse_next_send("Mail got an error: Can't make class outgoing message. (-2710)")
+        err = self.send_error()
+        self.assertEqual(err.kind, "server")
+        self.assertTrue(err.retryable)
+        self.assertFalse(err.maybe_sent)
+        self.assertIn("-2710", err.detail)
+        self.assertEqual(self.mail.sent, [])
+
+    def test_automation_refused_before_mail_apps_send_is_not_allowed_and_nothing_goes(self):
+        self.mail.refuse_next_send("Not authorized to send Apple events to Mail. (-1743)")
+        err = self.send_error()
+        self.assertEqual(err.kind, "not_allowed")
+        self.assertFalse(err.maybe_sent)
+        self.assertEqual(self.mail.sent, [])
+
+    def test_a_follow_up_refused_before_mail_apps_send_stays_retryable(self):
+        first = self.mail.send(outgoing())
+        self.mail.refuse_next_send("Mail got an error: Can't set content. (-10006)")
+        err = self.send_error(outgoing(2, subject="Re: Your team and the backend role", body="Following up.",
+                                       thread_id=first.thread_id, in_reply_to=first.rfc_message_id))
+        self.assertTrue(err.retryable)
+        self.assertEqual(len(self.mail.sent), 1)
 
 
 class FindSentTest(Base):

@@ -97,6 +97,9 @@ COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skippe
 WAIT_TITLE = "Outreach sending waits"
 STOP_TITLE = "Outreach sending stopped"
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
+# macOS refused the sender's Apple events to Mail.app (error -1743): he allows it once in System Settings.
+MAILAPP_NOT_ALLOWED = ("Knock may not control Mail. Open System Settings, Privacy and Security, Automation, and allow "
+                       "Mail for python3.")
 # What each phase of the first-send proof adds to the tick's report (see `proof`).
 _PHASE_LINE = {
     proof.FIRST_SEND: "Gmail is not yet shown to keep the sender's marker, so the first email goes out alone and is "
@@ -416,18 +419,10 @@ class _Tick:
                     profile = client.profile()
                 except GmailError as err:
                     text = scrub(str(err))
-                    if acct.kind == "mailapp" and err.kind in ("app_closed", "timeout"):
-                        # Mail.app is not running or not answering: this account waits, the others go on. Not a
-                        # sign-out, not a Gmail error: nothing pauses and the ramp is not touched.
-                        closed = err.kind == "app_closed"
-                        self.signed[address] = "app_closed" if closed else "unknown"
-                        checks.append((address, "app_closed" if closed else "mailapp_slow", text))
-                        failures.append(f"Mail.app is not running, so {address} waits" if closed
-                                        else f"Mail.app did not answer the sign-in check on {address}: {text}")
-                        self._line(f"Mail.app is not running ({text}); nothing is read or sent from {address} until "
-                                   "it is open again" if closed else
-                                   f"Mail.app did not answer the sign-in check on {address} ({text}); nothing is read "
-                                   "or sent from it this tick, and the next tick tries again")
+                    if acct.kind == "mailapp" and err.kind != "auth":
+                        # Mail.app is not running, not answering, not allowed or failing: this account waits, the
+                        # others go on. Not a sign-out, not a Gmail error: nothing pauses and the ramp is not touched.
+                        self._mailapp_failed(address, err, checks, failures)
                         continue
                     if err.kind != "auth":
                         self.signed[address] = "unknown"
@@ -463,6 +458,33 @@ class _Tick:
             self.status, self.error = "partial", scrub(failures[0])
         return checks
 
+    def _mailapp_failed(self, address: str, err: GmailError, checks: list[tuple[str, str, str]],
+                        failures: list[str]) -> None:
+        """A Mail.app account whose check failed other than `auth`: by kind, Mail.app not running (`app_closed`, kept
+        on its row), not allowed to be controlled (`mailapp_not_allowed`), not answering in time (`mailapp_slow`), or
+        any other failure (`mailapp_failed`). Each line names Mail.app, never Gmail."""
+        text = _mailapp_text(err)
+        if err.kind == "app_closed":
+            state, failure, line = ("app_closed", f"Mail.app is not running, so {address} waits",
+                                    f"Mail.app is not running ({text}); nothing is read or sent from {address} until it "
+                                    "is open again")
+        elif err.kind == "not_allowed":
+            state, failure, line = ("mailapp_not_allowed", f"macOS does not let Knock control Mail.app, so {address} "
+                                    "waits", f"macOS does not let Knock control Mail.app ({text}); nothing is read or "
+                                    f"sent from {address} until Automation allows Mail for python3")
+        elif err.kind == "timeout":
+            state, failure, line = ("mailapp_slow", f"Mail.app did not answer the sign-in check on {address}: {text}",
+                                    f"Mail.app did not answer the sign-in check on {address} ({text}); nothing is read "
+                                    "or sent from it this tick, and the next tick tries again")
+        else:
+            state, failure, line = ("mailapp_failed", f"Mail.app failed the sign-in check on {address}: {text}",
+                                    f"Mail.app failed the sign-in check on {address} ({text}); nothing is read or sent "
+                                    "from it this tick, and the next tick tries again")
+        self.signed[address] = "app_closed" if state == "app_closed" else "unknown"
+        checks.append((address, state, text))
+        failures.append(failure)
+        self._line(line)
+
     def _write_sign_ins(self, checks: list[tuple[str, str, str]]) -> None:
         """Step 2's write, inside the caller's transaction: every account has a row, and each one checked holds its
         state (account 1's also on `sender` row 1, which the readers of one account still show)."""
@@ -473,8 +495,8 @@ class _Tick:
                 self._signed_ok(row)
             elif state == "signed_out":
                 self._signed_out(row, text)
-            elif state in ("app_closed", "mailapp_slow"):
-                self._mailapp_down(row, text, closed=state == "app_closed")
+            elif state in ("app_closed", "mailapp_slow", "mailapp_failed", "mailapp_not_allowed"):
+                self._mailapp_down(row, text, how=state)
             else:
                 self._wrong_account(row, text)
 
@@ -485,15 +507,21 @@ class _Tick:
             self.conn.execute("UPDATE sender SET auth_state = 'ok', account = ?, auth_error = '', auth_checked_at = ? "
                               "WHERE sender_id = 1", (self.emails.get(row.cfg.address, ""), self.stamp))
 
-    def _mailapp_down(self, row: accounts.AccountRow, text: str, *, closed: bool) -> None:
-        """Mail.app not running (`app_closed`, kept on the account's row) or not answering (nothing kept): the account
-        waits this tick and he is told once a New York day that Mail.app must be open. No sign-out event, no signal:
-        it never pauses the account, never counts against its ramp, and Gmail keeps sending."""
+    def _mailapp_down(self, row: accounts.AccountRow, text: str, *, how: str) -> None:
+        """Mail.app not running (`app_closed`, kept on the account's row), not answering (`mailapp_slow`), failing
+        (`mailapp_failed`) or not allowed to be controlled (`mailapp_not_allowed`), each with nothing else kept: the
+        account waits this tick and he is told once a New York day what to do in Mail.app (macOS's Automation
+        setting for the last, its own notice). No sign-out event, no signal: it never pauses the account, never
+        counts against its ramp, and Gmail keeps sending."""
         address = row.cfg.address
-        if closed:
+        if how == "app_closed":
             self.conn.execute("UPDATE sender_account SET auth_state = 'app_closed', auth_error = ?, "
                               "auth_checked_at = ? WHERE account_id = ?", (text, self.stamp, row.account_id))
-        what = "is not open" if closed else "did not answer in time"
+        if how == "mailapp_not_allowed":
+            notify_once(self.conn, self.notify, "mailapp_not_allowed", self.today, WAIT_TITLE, MAILAPP_NOT_ALLOWED,
+                        at=self.stamp, account_id=row.account_id)
+            return
+        what = {"app_closed": "is not open", "mailapp_slow": "did not answer in time"}.get(how, "gave an error")
         notify_once(self.conn, self.notify, "mailapp_closed", self.today, WAIT_TITLE,
                     f"Mail.app {what}, so nothing is sent from {address} and its replies are not read. Keep Mail.app "
                     f"open with the {row.cfg.mailapp_account} account signed in; Gmail keeps sending.",
@@ -549,7 +577,8 @@ class _Tick:
         else:
             with self._tx():
                 self._write_sign_ins(checks)
-                n = claim.leftover_claims(self.conn, self.stamp)
+                mailapp = [row.account_id for row in self.rows.values() if row.cfg.kind == "mailapp"]
+                n = claim.leftover_claims(self.conn, self.stamp, in_doubt_accounts=mailapp)
         self.counts["leftover"] = n
         if n:
             self._line(f"{n} send(s) were cut short by an earlier tick; they are settled against Sent")
@@ -606,7 +635,7 @@ class _Tick:
             except GmailError as err:
                 self._partial(f"Sent could not be searched for message {u.message_id} on {row.cfg.address} "
                               f"({scrub(str(err))}); it stays in doubt until a later tick")
-                if err.kind in ("timeout", "app_closed"):
+                if err.kind in ("timeout", "app_closed", "not_allowed"):
                     break  # the next search would wait as long again: the rest of this account waits a tick
                 continue
             found[u.message_id] = (hit, complete, u.rfc_id)
@@ -871,15 +900,16 @@ class _Tick:
         return True
 
     def _send_failed(self, picked: queue.Queued, err: GmailError, account: accounts.AccountRow) -> None:
-        text = scrub(str(err))
+        text = _mailapp_text(err) if account.cfg.kind == "mailapp" else scrub(str(err))
         rfc = self.conn.execute(
             "SELECT json_extract(detail, '$.pending_rfc_id') FROM event WHERE entity = 'message' AND entity_id = ? "
             "AND kind = 'claimed' ORDER BY event_id DESC LIMIT 1", (picked.message_id,)).fetchone()
         rfc = rfc[0] if rfc is not None else f"message-{picked.message_id}"
         detail = {"message_id": picked.message_id, "error_kind": err.kind, "status": err.status, "source": "send"}
         signal = {"at": self.stamp, "cfg": self.cfg, "notify": self.notify, "now": self.now, "account": account}
-        self._partial(f"the send of message {picked.message_id} from {account.cfg.address} failed ({text}); it is "
-                      "checked against Sent before any retry")
+        then = ("it may have gone out, so it is settled by Sent Items and never sent again" if err.maybe_sent else
+                "it is checked against Sent before any retry")
+        self._partial(f"the send of message {picked.message_id} from {account.cfg.address} failed ({text}); {then}")
         with self._tx():
             if err.kind in ("rate_limit", "daily_limit"):
                 ramp.note_signal(self.conn, "gmail_limit", detail=detail, key=f"gmail_limit:send:{rfc}", **signal)
@@ -888,6 +918,11 @@ class _Tick:
             elif err.kind == "auth":
                 self.signed[account.cfg.address] = "signed_out"
                 self._signed_out(account, text)
+
+
+def _mailapp_text(err: GmailError) -> str:
+    """A Mail.app failure as one scrubbed line: its kind and detail, never the word Gmail (`str(GmailError)` says it)."""
+    return scrub(f"{err.kind}: {err.detail}" if err.detail else err.kind)
 
 
 def _sign_in_command(cfg: SendConfig, address: str) -> str:

@@ -19,6 +19,8 @@ Runner = Callable[[str, Sequence[str], float], str]
 
 # AppleScript's error number when the target application is not running ("Application isn't running").
 _NOT_RUNNING = "(-600)"
+# macOS refused the Apple events ("Not authorized to send Apple events to Mail"): Automation is not allowed for it.
+_NOT_ALLOWED = "(-1743)"
 
 
 def osascript_runner(script: str, args: Sequence[str], timeout: float) -> str:
@@ -26,7 +28,8 @@ def osascript_runner(script: str, args: Sequence[str], timeout: float) -> str:
     is UTF-8 both ways whatever the locale: subjects are matched exactly, so their decoding must not vary.
 
     Raises GmailError: `timeout` when the call outlasts `timeout`, `app_closed` when Mail.app is not running
-    (error -600), `server` for any other failure. The detail is scrubbed and at most 300 characters.
+    (error -600), `not_allowed` when macOS does not let it control Mail.app (error -1743), `server` for any other
+    failure. The detail is scrubbed and at most 300 characters.
     """
     try:
         done = subprocess.run(["osascript", "-", *args], input=script, capture_output=True, text=True,
@@ -41,6 +44,8 @@ def osascript_runner(script: str, args: Sequence[str], timeout: float) -> str:
         stderr = done.stderr or ""
         if _NOT_RUNNING in stderr:
             raise GmailError("app_closed", detail=stderr)
+        if _NOT_ALLOWED in stderr:
+            raise GmailError("not_allowed", detail=stderr)
         raise GmailError("server", detail=stderr or f"osascript exited {done.returncode}")
     return done.stdout
 

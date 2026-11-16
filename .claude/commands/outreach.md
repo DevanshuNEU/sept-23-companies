@@ -18,6 +18,10 @@ work. DevVault's own `/outreach` is the old company-file flow; it is not used fo
 
 ## Standing rules (#9, one outreach path ruling, 2026-11-16)
 
+- **His link is his call.** He sends only jobs and companies he has judged worth it. Never stop, skip or warn over
+  the posting's terms (citizenship, clearance, sponsorship), a full wave, how many people at the company were already
+  emailed, or when Knock says the company is free again (#296). The only thing that drops a person is their own stop:
+  already emailed, no-go or said no.
 - **No questions mid-run.** A job link or company in `$ARGUMENTS` is his yes to research that company and to spend
   Apollo credits within the budget below. Ask only when two companies share the name and the link does not settle
   which.
@@ -71,6 +75,9 @@ User invoked: `/outreach $ARGUMENTS`
    `apollo_people_bulk_match` for the picked people only (their `apollo_id`). For anyone without a verified work
    email, run the waterfall once (`run_waterfall_email`, only when enabled) and keep drafting the others meanwhile;
    check `apollo_webhook_result_show` after each draft and give it about 3 minutes in all. Still nothing: drop them.
+   Then check each revealed person: drop anyone whose current employer in the reveal is not this company, or whose
+   email domain is not the company's (Knock's domain fact, else the domain you searched), even when the title said
+   so (#296: a "Recruiter" at Verkada was an agency contractor with an aequor.com address).
 8. **Into Knock.** One `intake` call for everyone with a sure address: full name, title, `company_id`, `email`,
    `linkedin_url` when known. Report every `stop` route as a drop; `wait` and `find_someone_else` are a heads-up only.
 9. **Draft each person** through the skill's steps 2 to 10: `person`, `draft_brief` part 1 with `posting_url` set to

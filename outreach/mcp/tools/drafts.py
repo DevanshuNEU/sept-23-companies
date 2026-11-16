@@ -196,14 +196,22 @@ class BriefInput(PersonInput):
                                    description="A posting id from the company tool: the brief names that posting.")
 
 
+GREENHOUSE_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io", "boards.eu.greenhouse.io",
+                    "job-boards.eu.greenhouse.io"}
+
+
 def posting_key(url: str) -> str:
-    """A job link compared loosely: no query or fragment, no trailing slash or /application, host in lower case."""
+    """A job link compared loosely: no query or fragment, no trailing slash or /application, host in lower case.
+    Greenhouse serves one job on several hosts (#296), so any of them is the same key."""
     base = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
     if base.endswith("/application"):
         base = base[: -len("/application")]
     scheme, _, rest = base.partition("://")
     host, _, path = rest.partition("/")
-    return f"{scheme.lower()}://{host.lower()}/{path}"
+    host = host.lower()
+    if host in GREENHOUSE_HOSTS:
+        return f"greenhouse:/{path}"
+    return f"{scheme.lower()}://{host}/{path}"
 
 
 def pasted_role(ctx: Ctx, args: BriefInput, survivor: int) -> dict | None:

@@ -26,3 +26,13 @@ commands, retiring the company-file flow) is its own PR in the DevVault repo.
 
 Python changed in the MCP and the API: pull, `uv sync`, tests, kickstart `com.devanshu.outreach-api`. The next
 Claude Code session loads the new MCP tool input. No migration.
+
+## Added the same day: pick_people (his ask: "fix the choosing in MCP")
+
+The reach out ruling (#9, 2026-11-14) says who gets emailed, but only its design exists (docs on the `reach-out`
+branch). Every session picked people by its own judgment. `pick_people` (`outreach/mcp/tools/picking.py`, reads
+only) takes the people an Apollo search returned and the job link, and code picks in the ruling's order by size
+band (Knock's size via `outreach/pipeline/sizes.py`, shared with the sender's pacing; else Apollo's count; unknown
+uses the 50 to 200 order), the job's city, then state, then the US, and team words from the posting title. Roles are
+taken in turn, so five picks are not five recruiters. Everyone left out gets a reason. The two-arm test, the reach
+tables and the scheduled job stay in the reach-out design. Tests: `test_mcp_pick_people`.

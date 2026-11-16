@@ -18,7 +18,7 @@ get past. This file's full path is `~/Desktop/Sept 23 Companies/.claude/skills/c
 started anywhere else (DevVault's `/outreach`) reads it there.
 
 **From a job link** (`/outreach <job link or company>`, #9 ruling of 2026-11-16): he gives a job or a company and
-nothing else. Check Knock (`contact_check`), pick the people, get each address from Apollo (see "Sending lanes and
+nothing else. Check Knock (`contact_check`), let `pick_people` choose who from an Apollo search, get each address from Apollo (see "Sending lanes and
 finding people"), drop anyone without a sure address, `intake` the rest, then steps 2 to 10 for each, and report
 who is in the Outbox and who was dropped and why. His giving the link is his yes to research that company and to
 spend Apollo credits within the budget; do not stop to ask. Do not show him drafts, versions or a pick: he reviews
@@ -259,8 +259,12 @@ The sender picks the account, never this skill. A company with H-1B approvals on
 yes, goes from the Northeastern account. Every other company goes from the Gmail account. Do not name or choose an
 account in a draft.
 
-Addresses come from the Apollo MCP (#9 ruling of 2026-11-16). Search first (free). Then `apollo_people_bulk_match`
-for the people you picked; for anyone it returns without an email, the waterfall search once. Budget: up to 5
+**Who** is decided by code, not by you: search Apollo first (free; people at the company's domain, with the
+fields `pick_people` takes), then call `pick_people` with the company, the job link and the results (and Apollo's
+employee count when Knock has no size). It returns the picks in #9's reach out order with why, and the reason for
+everyone left out. Do not pick around it; if its order looks wrong, say so to Devanshu.
+
+Addresses come from the Apollo MCP (#9 ruling of 2026-11-16). `apollo_people_bulk_match` for the picked people only; for anyone it returns without an email, the waterfall search once. Budget: up to 5
 credits per company, waterfall included, spent without asking him each time; report the credits used and the
 balance at the end. Past 5, stop and tell him how many people are left without an address. Keep only an address
 Apollo marks verified, or one the person publishes on a page you opened (pass that page as `email_source` with

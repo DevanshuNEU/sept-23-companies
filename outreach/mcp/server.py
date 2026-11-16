@@ -39,7 +39,7 @@ MAX_PROBLEMS = 8
 GROUPS: tuple[str, ...] = ("outreach.mcp.tools.reads", "outreach.mcp.tools.research", "outreach.mcp.tools.drafts",
                            "outreach.mcp.tools.people", "outreach.mcp.tools.reader", "outreach.mcp.tools.finding",
                            "outreach.mcp.tools.bridge", "outreach.mcp.tools.pipeline", "outreach.mcp.tools.corrections",
-                           "outreach.mcp.tools.h1b")
+                           "outreach.mcp.tools.h1b", "outreach.mcp.tools.picking")
 
 INSTRUCTIONS = """\
 Outreach store for Devanshu's job search: ranked companies, the people at them, their drafts and due follow-ups,

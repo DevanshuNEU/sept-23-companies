@@ -35,7 +35,7 @@ export const TRIGGER = {
   size_check: { label: 'May be a subsidiary', tone: 'warn' },
 } satisfies Record<ReviewKind, Status>;
 
-const ICON: Record<ReviewKind, LucideIcon> = {
+export const ICON: Record<ReviewKind, LucideIcon> = {
   domain_missing: Mail,
   size_unknown: User,
   size_guess: User,
@@ -84,8 +84,10 @@ const OK_LABEL: Record<ReviewKind, string> = {
   size_check: 'Size is fine',
 };
 
-const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };
-const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
+// eslint-disable-next-line react-refresh/only-export-components
+export const FIELD_LABEL: Record<EditField, string> = { domain: 'Email domain', size: 'Size', sponsorship: 'Sponsorship', board_url: 'Board URL' };
+// eslint-disable-next-line react-refresh/only-export-components
+export const FIELD_HINT: Record<Exclude<EditField, 'sponsorship'>, string> = {
   domain: 'company.com',
   size: 'About 45, or 11 to 50',
   board_url: 'https://jobs.ashbyhq.com/company',
@@ -99,7 +101,8 @@ const HINT: Partial<Record<EditField, string>> = {
 };
 
 /** Input hygiene only (the server parses): a size needs a digit, a domain a dot. */
-function valueReady(field: EditField, value: string): boolean {
+// eslint-disable-next-line react-refresh/only-export-components
+export function valueReady(field: EditField, value: string): boolean {
   const v = value.trim();
   if (v === '') return false;
   if (field === 'size') return /\d/.test(v);
@@ -110,7 +113,7 @@ function valueReady(field: EditField, value: string): boolean {
 /** Past this many days an item reads "Waiting N days" in amber instead of its opening day. */
 const STALE_DAYS = 7;
 
-function Age({ item }: { item: ReviewItem }) {
+export function Age({ item }: { item: ReviewItem }) {
   if (item.ageDays > STALE_DAYS) {
     return (
       <Badge variant="warn">

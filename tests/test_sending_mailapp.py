@@ -292,6 +292,20 @@ class MessageTest(Base):
         meta = self.mail.message("mailapp:" + long.rfc_id)
         self.assertEqual(len(meta.snippet), 1999)  # 2000 characters of body, the last space collapsed away
 
+    def test_the_delivery_block_of_a_long_notice_is_appended_to_the_snippet(self):
+        first = self.mail.send(outgoing())
+        body = "quoted " * 2000 + "\nFinal-Recipient: rfc822;lee@example.com\nAction: failed\nStatus: 5.1.1\n" + "x" * 3000
+        notice = self.mail.deliver_reply(first, "postmaster@acme.example", content=body)
+        meta = self.mail.message("mailapp:" + notice.rfc_id)
+        self.assertIn("Final-Recipient: rfc822;lee@example.com Action: failed Status: 5.1.1", meta.snippet)
+        self.assertLessEqual(len(meta.snippet), 2000 + 1 + 1200)
+
+    def test_reporting_mta_is_the_block_when_there_is_no_final_recipient(self):
+        first = self.mail.send(outgoing())
+        body = "quoted " * 2000 + "\nReporting-MTA: dns;mx.example.com\nStatus: 5.1.1\n"
+        meta = self.mail.message("mailapp:" + self.mail.deliver_reply(first, "p@acme.example", content=body).rfc_id)
+        self.assertIn("Reporting-MTA: dns;mx.example.com Status: 5.1.1", meta.snippet)
+
     def test_a_sent_items_message_is_labelled_sent(self):
         first = self.mail.send(outgoing())
         meta = self.mail.message(first.gmail_message_id)

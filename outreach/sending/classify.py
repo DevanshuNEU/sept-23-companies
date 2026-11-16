@@ -48,12 +48,17 @@ _REPORT = re.compile(r"multipart/report\b[^;]*;[^\n]*report-type\s*=\s*\"?delive
 _ADDR = r"([^\s<>()\"',;]+@[^\s<>()\"',;]+)"
 _FAILED_IN_TEXT = tuple(re.compile(p, re.I) for p in (
     r"Final-Recipient:\s*rfc822;\s*" + _ADDR + r"(?=[\s.,;]|$)",
+    # The older Outlook notice: "<server> rejected your message to the following email addresses: Name (<addr>)".
+    r"rejected your message to the following email addresses:\s*[^<>()]*\(\s*<?" + _ADDR + r">?\s*\)",
     r"Your message to\s+" + _ADDR + r"\s+couldn't be delivered",
     _ADDR + r"\s+Remote Server returned",
     r"<" + _ADDR + r">\.\.\.\s*User unknown",
     r"had permanent fatal errors\W*<?" + _ADDR + r">?(?=[\s>.,;]|$)",
 ))
-_STATUS_LINE = re.compile(r"Status:\s*([245])\.\d{1,3}\.\d{1,3}(?!\d)", re.I)
+# The notice's machine-readable part: from `Final-Recipient:` (else `Reporting-MTA:`) on. Its Status and
+# Diagnostic-Code lines say what the failure was; the text above it can quote help pages and the original.
+_BLOCK_START = re.compile(r"Final-Recipient:|Reporting-MTA:", re.I)
+_STATUS_LINE = re.compile(r"Status:\s*([45])\.\d{1,3}\.\d{1,3}(?!\d)", re.I)
 
 
 @dataclass(frozen=True)
@@ -89,13 +94,20 @@ def dsn_class(meta: MessageMeta) -> str:
     """How a bounce reads, from its snippet: `limit`, `provider_block`, `policy`, `hard` or `unknown` (counted as a
     bounce)."""
     text = meta.snippet or ""
+    start = _BLOCK_START.search(text)
+    report = text[start.start():] if start else None
     if _LIMIT.search(text):
         return "limit"
-    if _BLOCK.search(text):
+    # With a delivery block, only it can say the provider refused the account: Microsoft's help text inside a
+    # recipient-side rejection names these codes too.
+    if _BLOCK.search(report if report is not None else text):
         return "provider_block"
     if _POLICY_ALWAYS.search(text) or (_POLICY_WITH_WORDS.search(text) and _POLICY_WORDS.search(text)):
         return "policy"
     if _HARD_CODE.search(text) or _HARD_WORDS.search(text):
+        return "hard"
+    status = _STATUS_LINE.search(report) if report is not None else None
+    if status and status.group(1) == "5":  # a permanent status in the delivery block: any 5.x.x is a hard bounce
         return "hard"
     return "unknown"
 
@@ -147,7 +159,8 @@ def classify(meta: MessageMeta, account: str) -> Inbound:
         klass = dsn_class(meta)
         text = meta.snippet or ""
         # A `Status:` line decides when the notice has one; else any 4.x.x code with no 5.x.x beside it.
-        status = _STATUS_LINE.search(text)
+        block = _BLOCK_START.search(text)
+        status = _STATUS_LINE.search(text[block.start():] if block else text)
         temporary = klass not in ("limit", "provider_block") and (
             status.group(1) == "4" if status else bool(_TEMPORARY.search(text) and not _PERMANENT.search(text)))
         if (DELAY_SUBJ.search(subject) and klass == "unknown") or temporary:

@@ -124,13 +124,25 @@ on firstTo(h)
 end firstTo
 
 on messageRecord(boxName, h)
+	set c to ""
 	tell application "Mail"
-		set c to ""
 		try
 			set c to (content of h) as text
 		end try
-		if (length of c) > 2000 then set c to text 1 thru 2000 of c
-		return my fields({"msg", my esc(boxName), my esc(message id of h), my isoOf(date received of h), my isoOf(date sent of h), my esc(sender of h), my esc(my firstTo(h)), my esc(subject of h), my esc(all headers of h), my esc(c)})
+	end tell
+	-- A delivery notice keeps its machine-readable part (Final-Recipient, Status, Diagnostic-Code) after the quoted
+	-- original, far past the first 2000 characters: send the 1200 characters from there as one more field.
+	set blk to ""
+	set pos to offset of "Final-Recipient:" in c
+	if pos is 0 then set pos to offset of "Reporting-MTA:" in c
+	if pos > 0 then
+		set stopAt to pos + 1199
+		if stopAt > (length of c) then set stopAt to length of c
+		set blk to text pos thru stopAt of c
+	end if
+	if (length of c) > 2000 then set c to text 1 thru 2000 of c
+	tell application "Mail"
+		return my fields({"msg", my esc(boxName), my esc(message id of h), my isoOf(date received of h), my isoOf(date sent of h), my esc(sender of h), my esc(my firstTo(h)), my esc(subject of h), my esc(all headers of h), my esc(c), my esc(blk)})
 	end tell
 end messageRecord
 '''
@@ -357,13 +369,14 @@ def _label(box: str) -> str:
     return "SENT" if box == SENT_BOX else "SPAM" if box == JUNK_BOX else "INBOX"
 
 
-_MSG_FIELDS = 10  # a `msg` record: kind, mailbox, id, received, sent, sender, to, subject, all headers, body
+_MSG_FIELDS = 11  # a `msg` record: kind, mailbox, id, received, sent, sender, to, subject, all headers, body, block
 
 
 def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
     """A MessageMeta from one `msg` record (`messageRecord`): the META_HEADERS of its `all headers`, the first 2000
-    characters of the body with whitespace collapsed as the snippet, and `SENT`, `SPAM` or `INBOX` by its mailbox."""
-    _, box, msgid, received, sent, sender, to, subject, header_text, content = rec
+    characters of the body with whitespace collapsed, then the delivery block (up to 1200 characters from
+    `Final-Recipient:` or `Reporting-MTA:`, collapsed too), as the snippet, and `SENT`, `SPAM` or `INBOX` by its mailbox."""
+    _, box, msgid, received, sent, sender, to, subject, header_text, content, block = rec
     headers = _parse_headers(header_text)
     own = bracket(msgid) or bracket(fallback_id)
     label = _label(box)
@@ -374,7 +387,7 @@ def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
     return MessageMeta(gmail_message_id=_gmail_id(own), thread_id=_root(headers, own), from_addr=sender,
                        to_addr=to, subject=subject, internal_ms=when, labels=(label,),
                        headers={k: headers[k] for k in META_HEADERS if k in headers},
-                       snippet=" ".join(content.split())[:SNIPPET_LENGTH])
+                       snippet=" ".join((" ".join(content.split())[:SNIPPET_LENGTH], " ".join(block.split()))).strip())
 
 
 def _shape(records: list[list[str]], kinds: dict[str, int]) -> list[list[str]]:

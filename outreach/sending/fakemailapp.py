@@ -70,6 +70,15 @@ def _shipped_account() -> AccountConfig:
     return next(a for a in load_config().accounts if a.kind == "mailapp")
 
 
+def _delivery_block(content: str) -> str:
+    """The script's block field: 1200 characters from `Final-Recipient:` (else `Reporting-MTA:`), or nothing."""
+    for marker in ("Final-Recipient:", "Reporting-MTA:"):
+        at = content.find(marker)
+        if at >= 0:
+            return content[at:at + 1200]
+    return ""
+
+
 def _record(*fields: str) -> str:
     return "\t".join(fields)
 
@@ -288,7 +297,7 @@ class FakeMailApp(MailAppClient):
         """The scripts' `messageRecord`."""
         return _record("msg", _esc(box), _esc(s.msgid), local_text(s.received_at), local_text(s.sent_at),
                        _esc(s.sender), _esc(parseaddr(s.to)[1]), _esc(s.subject), _esc(s.all_headers()),
-                       _esc(s.content[:2000]))
+                       _esc(s.content[:2000]), _esc(_delivery_block(s.content)))
 
     # -- internals ----------------------------------------------------------------------------------------------
 

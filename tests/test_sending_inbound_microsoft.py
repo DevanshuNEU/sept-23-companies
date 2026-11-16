@@ -29,6 +29,9 @@ CASES = {
     "o365_recipient_tenant_5_1_10.txt": "founders@acme-fund.example",
     "proofpoint_5_4_1.txt": "mc@acme-tree.example",
     "onprem_exchange_5_1_10.txt": "rn@acme-ins.example",
+    # Hand-built from the older Outlook format: the address in "rejected your message to the following email
+    # addresses", the Status block past character 2,000.
+    "older_outlook_inactive_5_2_1.txt": "dana@example.com",
 }
 
 
@@ -122,6 +125,53 @@ class FixtureTest(MicrosoftBase):
         _, counts = self.read()
         self.assertEqual(counts["bounces"], 0)
         self.assertEqual(self.touch(touch)["state"], "open")
+
+
+class DeepBlockTest(MicrosoftBase):
+    """The machine-readable part sits after the quoted original, far past the first 2,000 characters."""
+
+    def deep(self, status="5.1.1", *, intro="Delivery failed.", extra=""):
+        filler = "> quoted original text that goes on and on. " * 120
+        return (f"{intro}\n\n{filler}\n\n--- delivery-status ---\nReporting-MTA: dns;mx.example.com\n"
+                f"Final-Recipient: rfc822;lee@example.com\nAction: failed\nStatus: {status}\n"
+                f"Diagnostic-Code: smtp;550 {status} Recipient rejected {extra}")
+
+    def notice(self, text):
+        return StatusTest.notice(self, text)
+
+    def test_a_status_past_2000_characters_is_a_hard_bounce_with_its_address(self):
+        text = self.deep()
+        self.assertGreater(text.index("Final-Recipient:"), 4000)
+        found = classify(self.meta_of(self.notice(text)), NEU.address)
+        self.assertEqual((found.kind, found.dsn_class, found.failed_recipient),
+                         ("bounce", "hard", "lee@example.com"))
+
+    def test_a_deep_5xx_with_no_listed_code_is_a_hard_bounce(self):
+        found = classify(self.meta_of(self.notice(self.deep("5.7.64"))), NEU.address)
+        self.assertEqual((found.kind, found.dsn_class), ("bounce", "hard"))
+
+    def test_a_deep_4xx_status_is_a_delay(self):
+        found = classify(self.meta_of(self.notice(self.deep("4.4.7"))), NEU.address)
+        self.assertEqual(found.kind, "delay")
+
+    def test_help_text_naming_a_block_code_does_not_pause_the_account(self):
+        help_text = ("Delivery failed. If you see error 5.7.708 or 5.1.8, or are restricted from sending, "
+                     "contact your admin.")
+        touch, _ = self.sent_from_neu("lee@example.com")
+        stored = self.notice(self.deep(intro=help_text))
+        found = classify(self.meta_of(stored), NEU.address)
+        self.assertEqual((found.kind, found.dsn_class), ("bounce", "hard"))
+        _, counts = self.read()
+        self.assertEqual((counts["bounces"], self.touch(touch)["state"]), (1, "bounced"))
+        self.assertEqual(self.neu_row()["paused"], 0)
+
+    def test_a_block_code_in_the_status_block_still_pauses(self):
+        found = classify(self.meta_of(self.notice(self.deep("5.7.708"))), NEU.address)
+        self.assertEqual(found.dsn_class, "provider_block")
+
+    def test_a_2xx_status_falls_through(self):
+        text = "Your message to a@example.com was relayed. Status: 2.0.0 Remote server returned 450 4.4.7 try later"
+        self.assertEqual(classify(self.meta_of(self.notice(text)), NEU.address).kind, "delay")
 
 
 class StatusTest(MicrosoftBase):

@@ -73,7 +73,9 @@ class StatusTest(SendingBase):
     def test_empty_store_is_a_running_status(self):
         s = self.status()
         self.assertEqual(s["state"], "running")
-        self.assertEqual((s["sentToday"], s["limitToday"], s["rampLevel"], s["nextLimitIfClean"]), (0, 20, 1, 30))
+        # The day's limit sums the sending accounts (account 2 and the Northeastern account, 20 each); the ramp
+        # is the lead account's.
+        self.assertEqual((s["sentToday"], s["limitToday"], s["rampLevel"], s["nextLimitIfClean"]), (0, 40, 1, 30))
         self.assertEqual(s["rampLevels"], [20, 30, 40, 50, 60, 70, 80, 90, 100])
         self.assertEqual(s["window"], {"start": "08:00", "end": "15:00"})
         self.assertEqual(s["signals"], {"bounceRate3d": 0.0, "gmailErrorsToday": 0, "stopRepliesToday": 0})
@@ -106,7 +108,7 @@ class StatusTest(SendingBase):
                                   "ON CONFLICT(account_id, day) DO UPDATE SET send_limit = excluded.send_limit",
                                   (self.general, TODAY, limit, NOW))
                 s = self.status()
-                self.assertEqual((s["rampLevel"], s["nextLimitIfClean"], s["limitToday"]), (level, nxt, limit))
+                self.assertEqual((s["rampLevel"], s["nextLimitIfClean"], s["limitToday"]), (level, nxt, limit + 20))
 
     def test_last_step_down_is_the_newest_warning_day_with_its_reason(self):
         self.conn.execute("INSERT INTO send_day(account_id, day, send_limit, outcome, created_at) VALUES "
@@ -170,11 +172,10 @@ class StatusTest(SendingBase):
              "paused": False, "pauseReason": "", "authState": "unknown", "sentToday": 0, "limit": 0},
             {"address": GENERAL, "lane": "general", "sends": True, "state": "sending", "text": "4 of 20 today",
              "paused": False, "pauseReason": "", "authState": "unknown", "sentToday": 4, "limit": 20},
-            {"address": NEU, "lane": "sponsor", "sends": False, "state": "not_sending_yet",
-             "text": "waits, not sending yet", "paused": False, "pauseReason": "", "authState": "unknown",
-             "sentToday": 0, "limit": 0},
+            {"address": NEU, "lane": "sponsor", "sends": True, "state": "sending", "text": "0 of 20 today",
+             "paused": False, "pauseReason": "", "authState": "unknown", "sentToday": 0, "limit": 20},
         ])
-        self.assertEqual((s["sentToday"], s["limitToday"]), (4, 20))
+        self.assertEqual((s["sentToday"], s["limitToday"]), (4, 40))
 
     def test_the_account_states_are_the_senders_own(self):
         from typing import get_args
@@ -195,7 +196,7 @@ class StatusTest(SendingBase):
         res = self.post("/api/sending/pause", {"revision": 1})
         self.assertEqual(res.status_code, 200, res.text)
         states = {a["address"]: a["state"] for a in res.json()["accounts"]}
-        self.assertEqual(states, {REST: "reading_only", GENERAL: "paused_by_you", NEU: "not_sending_yet"})
+        self.assertEqual(states, {REST: "reading_only", GENERAL: "paused_by_you", NEU: "paused_by_you"})
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sender_account WHERE paused = 1").fetchone()[0], 0)
 
     def test_health_reads_the_same_snapshot(self):

@@ -203,7 +203,13 @@ class Build(TodayCase):
         self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?", (general,))
         self.conn.execute("DELETE FROM daily_list_entry")
         self.conn.execute("DELETE FROM daily_list")
-        self.assertEqual(self.view()["capacity"], 7)
+        self.assertGreater(self.view()["capacity"], 7)  # the Northeastern account still sends
+        from outreach.sending import accounts
+        neu = accounts.sync(self.conn, load_send_config(), NOW)["chicholikar.d@northeastern.edu"].account_id
+        self.conn.execute("UPDATE sender_account SET auth_state = 'app_closed' WHERE account_id = ?", (neu,))
+        self.conn.execute("DELETE FROM daily_list_entry")
+        self.conn.execute("DELETE FROM daily_list")
+        self.assertEqual(self.view()["capacity"], 7)  # every sending account is held (Mail.app is not running)
         self.conn.execute("UPDATE sender_account SET auth_state = 'ok' WHERE account_id = ?", (general,))
         proof_mail = self.conn.execute("SELECT m.message_id FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                                        "WHERE t.account_id = ?", (general,)).fetchone()[0]

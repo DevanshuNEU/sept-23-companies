@@ -444,8 +444,9 @@ class DetailTest(OutboxBase):
         self.assertEqual(d["fromAccount"], {"address": GENERAL, "text": GENERAL})
         self.assertEqual([m["from"] for m in d["thread"]], [GENERAL])
         self.assertEqual(self.detail(fresh)["fromAccount"], {"address": GENERAL, "text": GENERAL})
-        self.assertEqual(self.detail(waits)["fromAccount"],
-                         {"address": None, "text": f"Waits for {NEU}, which does not send yet."})
+        # The sponsor lane goes from the Northeastern account (Phase B; before it, "Waits for ..., which does not
+        # send yet.").
+        self.assertEqual(self.detail(waits)["fromAccount"], {"address": NEU, "text": NEU})
         # The company page's thread reads the same account.
         person = self.conn.execute("SELECT person_id FROM touch WHERE touch_id = ?", (new,)).fetchone()[0]
         page = self.get(f"/api/companies/{cid}").json()

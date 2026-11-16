@@ -4,6 +4,7 @@ from datetime import date
 from outreach.plan.capacity import (companies_today, current_send_limit, email_capacity, lane_quotas,
                                     linkedin_capacity, plan_capacity)
 from outreach.plan.config import default_plan_config
+from outreach.sending.config import load_config as _load_send_config  # the real loader (setUp patches the module's)
 from outreach.ranking.common import canonical_ids
 from outreach.store.timefmt import utcnow
 from outreach.store.writes import log_touch
@@ -141,8 +142,19 @@ class LinkedinCapacityTest(unittest.TestCase):
         self.assertEqual(self.cap(D(2026, 11, 8)).today, 8)
 
 
+def _gmail_only(cfg):
+    """The sending config with the Northeastern account resting: account 2 is the only sending account, as before
+    Phase B. The arithmetic of one account's slots is tested on it; the sums over accounts have their own tests."""
+    from dataclasses import replace
+    return replace(cfg, accounts=tuple(replace(a, sends=False) if a.kind == "mailapp" else a for a in cfg.accounts))
+
+
 class EmailCapacityTest(unittest.TestCase):
     def setUp(self):
+        from unittest import mock
+        patcher = mock.patch("outreach.sending.config.load_config", return_value=_gmail_only(_load_send_config()))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.conn = fresh_store()
         self.company = seed_scored_company(self.conn, "Acme", 5.0, ["level_role"])
         self.n = 0
@@ -209,7 +221,7 @@ class EmailCapacityTest(unittest.TestCase):
         from dataclasses import replace
         from outreach.sending import accounts
         from outreach.sending.config import load_config as load_send_config
-        shipped = load_send_config()
+        shipped = load_send_config()  # the Northeastern account resting (setUp)
         rows = accounts.sync(self.conn, shipped, utcnow())
         rest, general, neu = (rows[a.address].account_id for a in shipped.accounts)
         put = "INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (?, ?, ?, ?)"
@@ -235,9 +247,9 @@ class EmailCapacityTest(unittest.TestCase):
         from dataclasses import replace
         from unittest import mock
         from outreach.sending import accounts
-        from outreach.sending.config import load_config as load_send_config
         from tests import SHIPPED_SEND_CONFIG
-        shipped = load_send_config(SHIPPED_SEND_CONFIG)  # ceilings 40 (Gmail) and 60 (Northeastern)
+        both = _load_send_config(SHIPPED_SEND_CONFIG)  # ceilings 40 (Gmail) and 60 (Northeastern), both send
+        shipped = _gmail_only(both)
         rows = accounts.sync(self.conn, shipped, utcnow())
         rest, general, neu = (rows[a.address].account_id for a in shipped.accounts)
         put = "INSERT INTO send_day(account_id, day, send_limit, created_at) VALUES (?, ?, ?, ?)"
@@ -246,8 +258,6 @@ class EmailCapacityTest(unittest.TestCase):
         with mock.patch("outreach.sending.config.load_config", return_value=shipped):
             self.assertEqual(current_send_limit(self.conn, TODAY, CFG), 40)
             self.assertEqual(email_capacity(self.conn, TODAY, CFG).send_limit, 40)
-        both = replace(shipped, accounts=tuple(replace(a, sends=True) if a.address == shipped.accounts[2].address
-                                               else a for a in shipped.accounts))
         with mock.patch("outreach.sending.config.load_config", return_value=both):
             self.assertEqual(current_send_limit(self.conn, TODAY, CFG), 40 + 15, "no row yet: its ramp start")
 

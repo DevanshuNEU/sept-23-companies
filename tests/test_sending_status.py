@@ -438,6 +438,8 @@ class PerAccountStatusTest(unittest.TestCase):
         self.assertIsNone(sender_gate(self.db, self.cfg, False))
         self.auth(self.two, "signed_out")
         self.assertEqual(self.reasons(), {first: "signed_out", second: "signed_out"})
+        self.assertIsNone(sender_gate(self.db, self.cfg, False))  # the Northeastern account still sends
+        self.auth(self.rows["chicholikar.d@northeastern.edu"].account_id, "app_closed")  # Mail.app is not running
         self.assertEqual(sender_gate(self.db, self.cfg, False), "signed_out")
         self.auth(self.two, "ok")
         self.assertEqual(set(self.reasons(old_sender_loaded=True).values()), {"old_sender_running"})
@@ -445,6 +447,9 @@ class PerAccountStatusTest(unittest.TestCase):
 
 
 REST, GENERAL, NEU = "devanshurajesh@gmail.com", "devanshuchi9@gmail.com", "chicholikar.d@northeastern.edu"
+# The shipped shape before Phase B: account 2 is the only sending account (the Northeastern account rests).
+GMAIL_ONLY = dataclasses.replace(load_config(), accounts=tuple(
+    dataclasses.replace(a, sends=False) if a.address == NEU else a for a in load_config().accounts))
 
 
 class AccountsSnapshotTest(unittest.TestCase):
@@ -486,15 +491,28 @@ class AccountsSnapshotTest(unittest.TestCase):
         self.assertEqual((general.lane, general.sends, general.state, general.sent_today, general.limit),
                          ("general", True, "sending", 4, 20))
         self.assertEqual((rest.lane, rest.sends, rest.state, rest.limit), (None, False, "reading_only", 0))
-        self.assertEqual((neu.lane, neu.sends, neu.state, neu.limit), ("sponsor", False, "not_sending_yet", 0))
+        self.assertEqual((neu.lane, neu.sends, neu.state, neu.limit), ("sponsor", True, "sending", 20))
         self.assertEqual(self.lines(s), {
             REST: f"{REST}: reading replies only",
             GENERAL: f"{GENERAL}: 4 of 20 today",
-            NEU: f"{NEU}: waits, not sending yet",
+            NEU: f"{NEU}: 0 of 20 today",
         })
-        self.assertEqual((s.sent_today, s.limit_today), (4, 20), "the totals are the sending accounts' only")
+        self.assertEqual((s.sent_today, s.limit_today), (4, 40), "the totals are the sending accounts' only")
         for a in s.accounts:
             self.assertEqual((a.paused, a.pause_reason), (False, ""))
+        rested = self.snap(GMAIL_ONLY).accounts[2]
+        self.assertEqual((rested.sends, rested.state, rested.text), (False, "not_sending_yet", "waits, not sending yet"))
+
+    def test_mail_app_not_running_holds_the_northeastern_account(self):
+        self.auth(self.three, "app_closed", "Gmail app_closed: execution error: Mail.app is not running (-600)")
+        s = self.snap()
+        neu = s.accounts[2]
+        self.assertEqual((neu.state, neu.auth_state), ("signed_out", "app_closed"))
+        self.assertEqual(self.lines(s)[NEU], f"{NEU}: waits: Mail.app is not open. Open Mail.app and keep it open")
+        self.assertEqual(s.state, "running", "account 2 still sends")
+        self.auth(self.three, "signed_out", "Gmail auth: Mail.app has no account named Exchange")
+        self.assertEqual(self.lines(self.snap())[NEU],
+                         f"{NEU}: Mail.app has no Exchange account. Sign in to the Exchange account in Mail.app")
 
     def test_totals_are_sums_over_the_sending_accounts(self):
         both = dataclasses.replace(self.cfg, accounts=tuple(
@@ -508,6 +526,7 @@ class AccountsSnapshotTest(unittest.TestCase):
         self.assertEqual(self.lines(s)[NEU], f"{NEU}: 3 of 30 today")
 
     def test_a_signed_out_account_names_its_own_sign_in_command(self):
+        self.cfg = GMAIL_ONLY  # account 2 is the only sending account
         self.auth(self.two, "signed_out", f"no Gmail token; run: python -m outreach.sending auth --account {GENERAL}")
         s = self.snap()
         general = s.accounts[1]
@@ -536,6 +555,7 @@ class AccountsSnapshotTest(unittest.TestCase):
         self.assertEqual(s.state, "running", "account 2 still sends")
 
     def test_pauses_per_account_and_his_pause_on_every_sending_account(self):
+        self.cfg = GMAIL_ONLY  # account 2 is the only sending account
         reason = f"Sending from {GENERAL} is paused because Gmail said the account hit its sending limit."
         self.db.execute("UPDATE sender_account SET paused = 1, pause_kind = 'hard_block', paused_reason = ?, "
                         "paused_at = ? WHERE account_id = ?", (reason, iso(MON), self.two))
@@ -569,7 +589,7 @@ class AccountsSnapshotTest(unittest.TestCase):
         shipped = load_config(SHIPPED_SEND_CONFIG)
         put_day(self.db, MON_DAY, 200, account_id=self.two)
         s = self.snap(shipped)
-        self.assertEqual((s.accounts[1].limit, s.limit_today), (40, 40))
+        self.assertEqual((s.accounts[1].limit, s.limit_today), (40, 40 + 15))  # and the Northeastern account's start
 
     def test_a_weekend_says_no_sending_today(self):
         s = self.snap(now=ny(7, 10))

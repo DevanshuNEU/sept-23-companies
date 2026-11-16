@@ -108,13 +108,14 @@ ramp_step = 3
 ramp_floor = 15
 ramp_ceiling = 40
 
-# Sends through Mail.app on the Northeastern account. Off until Phase B.
+# Sends the sponsor lane through Mail.app on the Northeastern account (the #9 placement test passed, 2026-11-15).
+# Mail.app must stay open with the Exchange account signed in; while it is not, this account waits.
 [[account]]
 address = "chicholikar.d@northeastern.edu"
 kind = "mailapp"
 mailapp_account = "Exchange"
 lane = "sponsor"
-sends = false
+sends = true
 ramp_start = 15
 ramp_step = 3
 ramp_floor = 15

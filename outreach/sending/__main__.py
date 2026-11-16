@@ -1,7 +1,8 @@
 """`python -m outreach.sending <command>`: the new sender from launchd and by hand (#14, Task 14).
 
-- `run [--dry-run]`: one tick (launchd runs it every 2 minutes). With `--dry-run` it reads the store and Gmail, shows
-  what it would do, and writes nothing. Live checkout only.
+- `run [--dry-run]`: one tick (launchd runs it every 2 minutes). With `--dry-run` it reads the store, Gmail and
+  Mail.app, shows what it would do, and writes nothing. Live checkout only. The Northeastern account is read and sent
+  through Mail.app (`MailAppClient`), which must be running with its Exchange account signed in.
 - `status`: the sender's state, today's count, the ramp and why the next email waits, from the store at `OUTREACH_DB`
   (the live store only from the live checkout). No Gmail call.
 - `whoami [--account ADDRESS]`: the address an account's Gmail token signs in as (account 1 without the flag). Live
@@ -32,6 +33,7 @@ from outreach.drafts.checks import load_banned
 from outreach.sending.config import load_config
 from outreach.sending.gmail import TOKEN_FILE, GmailClient, gmail_dir, sign_in_command, token_dir_for
 from outreach.sending.mail import GmailError
+from outreach.sending.mailapp import MailAppClient
 from outreach.sending.notify import mac_notifier
 from outreach.sending.tick import BUSY_LINE, TickDeps, run_tick
 from outreach.store import StoreError, connect, db_path, describe_error
@@ -86,12 +88,15 @@ def _exit_code(conn: sqlite3.Connection, report, dry_run: bool) -> int:
 
 
 def _clients(cfg) -> dict:
-    """One GmailClient per Gmail account that has a token file. An account without one gets no client: the tick
-    counts it signed out (one notice a day naming it), and every other account goes on."""
+    """One GmailClient per Gmail account that has a token file, and one MailAppClient per Mail.app account (it needs
+    no token: Mail.app holds the sign-in, and the client asks Mail.app through AppleScript, live checkout only). A
+    Gmail account without a token gets no client: the tick counts it signed out (one notice a day naming it), and
+    every other account goes on. A Mail.app account whose Mail.app is not running waits the same way."""
     out = {}
     base = gmail_dir()
     for acct in cfg.accounts:
-        if acct.kind != "gmail":
+        if acct.kind == "mailapp":
+            out[acct.address] = MailAppClient(acct, reconcile_after_minutes=cfg.reconcile_after_minutes)
             continue
         folder = token_dir_for(cfg, acct.address, base)
         if os.path.exists(os.path.join(folder, TOKEN_FILE)):

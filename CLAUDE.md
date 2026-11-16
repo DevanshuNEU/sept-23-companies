@@ -60,6 +60,10 @@ person at once, log the old value in `event` and raise a flagged Needs-you item;
 - Several sender accounts (multi-sender plan, #9): each tick the sender reads every Gmail account that has a token and
   sends only from accounts with `sends = true` in the sending config. An account with no sign-in makes every tick
   partial until he signs it in with `python -m outreach.sending auth --account <address>`.
+- The Northeastern account (`chicholikar.d@northeastern.edu`) sends the sponsor lane through Mail.app, not Gmail.
+  Mail.app must stay open on the Mac with the Exchange account signed in; while it is closed that account waits,
+  Gmail keeps sending, and one notice a day says so. The first launchd run raises macOS's "python3 wants to control
+  Mail" prompt, which Devanshu allows once. Claude never runs a Mail.app send or any `osascript` against Mail.app.
 - Send next and Send now are his clicks in the Outbox (#9 outreach fixes ruling). Send next puts an approved email
   first in its account's queue and every rule still holds. Send now goes on the sender's next tick, even outside
   sending hours or on a weekend; every stop still applies (no-go, bounce, reply hold, paused or closed company, the

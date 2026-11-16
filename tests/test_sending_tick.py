@@ -32,7 +32,7 @@ from tests.test_drafts_checks import FIXTURE_BANNED
 from tests.test_sending_precheck import body
 
 # The shipped shape: account 1 (devanshurajesh) rests and is only read, account 2 (devanshuchi9) sends the general
-# lane, account 3 (the Northeastern Mail.app account) does not send and has no client in Phase A.
+# lane, account 3 (the Northeastern Mail.app account) sends the sponsor lane through Mail.app (Phase B).
 SHIPPED = load_config()
 REST, GENERAL, NEU = (a.address for a in SHIPPED.accounts)
 # Most tests here run the one-account shape: account 1 sends every company.
@@ -1285,7 +1285,7 @@ class TransactionTest(Base):
 
 class MultiBase(Base):
     """The shipped shape: account 1 rests (read every tick, never sends), account 2 sends the general lane, the
-    Northeastern account has no client. `self.gmail` is account 1's mailbox (it holds the imported email),
+    Northeastern account sends the sponsor lane but has no client here (see `MailAppBase`). `self.gmail` is account 1's mailbox (it holds the imported email),
     `self.gmail2` account 2's."""
     cfg = SHIPPED
     proven_two = True  # Gmail is shown to keep the marker on account 2 too
@@ -1461,12 +1461,14 @@ class MultiAccountTest(MultiBase):
         self.assertEqual(report.waiting, {"inbound_unread": 1})
         self.assertEqual(self.runs()[-1]["status"], "partial")
 
-    def test_the_northeastern_account_has_no_client_and_sponsor_mail_waits(self):
+    def test_the_northeastern_account_given_no_client_holds_only_its_sponsor_mail(self):
+        # The live sender always builds its MailAppClient (`__main__._clients`); a tick given none reads nothing
+        # there and sends nothing from it, and its sponsor mail waits on its sign-in.
         mid = self.approve()
         self.sponsor(mid)
         report = self.tick()
         self.assertEqual(report.sent, ())
-        self.assertEqual(report.waiting, {"lane_waits": 1})
+        self.assertEqual(report.waiting, {"signed_out": 1})
         self.assertEqual(report.accounts[NEU], "not_read")
         self.assertEqual(self.notices, [])
         self.assertEqual(self.runs()[-1]["status"], "ok")
@@ -1673,14 +1675,10 @@ class TwoSendersTest(MultiBase):
                 self.assertEqual(len(self.gmail.sent) + len(self.gmail2.sent), 1)
 
 
-# Phase B: the Northeastern account sends the sponsor lane through Mail.app, beside account 2 on Gmail.
-NEU_SENDS = _sending(SHIPPED, 2, sends=True)
-
-
 class MailAppBase(MultiBase):
-    """Account 1 rests, account 2 sends the general lane on FakeGmail, the Northeastern account sends the sponsor lane
-    on FakeMailApp (`self.mail`). The Northeastern account starts unproven unless `proven_neu`."""
-    cfg = NEU_SENDS
+    """The shipped shape with every client (Phase B): account 1 rests, account 2 sends the general lane on FakeGmail,
+    the Northeastern account sends the sponsor lane on FakeMailApp (`self.mail`). The Northeastern account starts
+    unproven unless `proven_neu`."""
     proven_neu = False
 
     def setUp(self):
@@ -1816,6 +1814,123 @@ class MailAppHistoryTest(MailAppBase):
         self.tick()
         self.assertEqual(self.mail.fetches, [])  # all 100 are in the window still, and none is fetched again
         self.assertEqual(self.problems, [])
+
+
+class MailAppTickTest(MailAppBase):
+    """The shipped config: account 2 sends the general lane on Gmail and the Northeastern account the sponsor lane
+    through Mail.app (#9 placement test passed, 2026-11-15). Mail.app not running holds only the sponsor lane."""
+    proven_neu = True
+
+    def mailapp_notices(self) -> list[tuple[str, str]]:
+        return [n for n in self.notices if "Mail.app" in n[1]]
+
+    def assert_no_gmail_signal(self) -> None:
+        for kind in ("signed_out", "gmail_limit", "gmail_policy", "provider_block", "hard_block", "bounce_warning"):
+            self.assertEqual(self.db.execute("SELECT COUNT(*) FROM event WHERE entity = 'sender' AND entity_id = ? "
+                                             "AND kind = ?", (self.neu.account_id, kind)).fetchone()[0], 0, kind)
+        self.assertEqual(self.account_of(self.neu.account_id)["paused"], 0)
+        self.assertIsNone(accounts.pause_of(self.db, self.neu.account_id))
+
+    def test_tick_with_gmail_and_mailapp(self):
+        general, sponsor = self.approve(), self.approve_sponsor()
+        report = self.tick()
+        self.assertEqual(sorted(report.sent), sorted([general, sponsor]))
+        self.assertEqual([out.to for out, _, _ in self.gmail2.sent], [self.emails[general]])
+        self.assertEqual([out.to for out, _, _ in self.mail.sent], [self.emails[sponsor]])
+        self.assertEqual(self.touch_of(sponsor)["account_id"], self.neu.account_id)
+        self.assertEqual(report.accounts[NEU], "ok")
+        # Mail.app closed: the sponsor lane holds, Gmail keeps sending, and he is told once a day.
+        self.mail.closed = True
+        general2, sponsor2 = self.approve(), self.approve_sponsor()
+        self.clock.advance(minutes=60)
+        report = self.tick()
+        self.assertEqual(report.sent, (general2,))
+        self.assertEqual(self.message(sponsor2)["state"], "approved")
+        self.assertEqual(report.waiting, {"signed_out": 1})
+        self.assertEqual(report.accounts[NEU], "app_closed")
+        self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "app_closed")
+        self.assertEqual(self.runs()[-1]["status"], "partial")
+        [(title, text)] = self.mailapp_notices()
+        self.assertEqual(title, tick.WAIT_TITLE)
+        self.assertIn(NEU, text)
+        self.assertIn("open", text)
+        self.clock.advance(minutes=60)
+        self.tick()
+        self.assertEqual(len(self.mailapp_notices()), 1)  # one a day
+        self.assert_no_gmail_signal()
+        # Open again: the sponsor lane goes on.
+        self.mail.closed = False
+        self.clock.advance(minutes=60)
+        report = self.tick()
+        self.assertEqual(report.sent, (sponsor2,))
+        self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "ok")
+        self.assertEqual(len(self.mail.sent), 2)
+        self.assertEqual(self.problems, [])
+
+    def test_mail_app_too_slow_to_answer_waits_and_tells_him_once_a_day(self):
+        sponsor = self.approve_sponsor()
+
+        def slow(name):
+            if name == "profile":
+                raise GmailError("timeout", None, "osascript did not finish in 120 seconds")
+        self.mail.probe = slow
+        general = self.approve()
+        report = self.tick()
+        self.assertEqual(report.sent, (general,))
+        self.assertEqual(self.message(sponsor)["state"], "approved")
+        self.assertEqual(len(self.mailapp_notices()), 1)
+        self.clock.advance(minutes=30)
+        self.tick()
+        self.assertEqual(len(self.mailapp_notices()), 1)
+        self.assert_no_gmail_signal()
+
+    def test_no_exchange_account_in_mail_app_says_what_to_do_in_mail_app(self):
+        self.mail.accounts_in_app = set()
+        general = self.approve()
+        self.assertEqual(self.tick().sent, (general,))
+        self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
+        [(_, text)] = self.mailapp_notices()
+        self.assertEqual(text, f"Mail.app has no Exchange account, so nothing is sent from {NEU} and its replies are "
+                               "not read. Add the Exchange account in Mail.app to resume.")
+        self.assertNotIn("outreach.sending auth", text)
+
+    def test_mail_app_closing_mid_send_is_a_send_in_doubt_and_never_a_gmail_signal(self):
+        sponsor = self.approve_sponsor()
+
+        def close_on_send(name):
+            if name == "send":
+                self.mail.closed = True
+        self.mail.probe = close_on_send
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "send_unknown")
+        self.assert_no_gmail_signal()
+        self.assertNotEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
+        # Open again: Sent Items shows it never went, so it goes once (its one retry), never twice.
+        self.mail.probe = None
+        self.mail.closed = False
+        self.clock.advance(minutes=CFG.reconcile_after_minutes + 1)
+        self.tick()
+        self.clock.advance(minutes=60)
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "sent")
+        self.assertEqual(len(self.mail.sent), 1)
+        self.assert_no_gmail_signal()
+
+    def test_a_send_in_doubt_on_mail_app_is_never_settled_or_sent_through_gmail(self):
+        sponsor = self.approve_sponsor()
+        self.mail.fail_next_send(GmailError("timeout", None, "Mail.app did not answer"), accepted=True)
+        self.tick()
+        self.mail.closed = True
+        self.clock.advance(minutes=CFG.reconcile_after_minutes + 1)
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "send_unknown")
+        self.assertNotIn("find_sent", self.gmail.calls + self.gmail2.calls)
+        self.assertEqual((self.gmail.sent, self.gmail2.sent), ([], []))
+        self.mail.closed = False
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "sent")
+        self.assertEqual(len(self.mail.sent), 1)
 
 
 if __name__ == "__main__":

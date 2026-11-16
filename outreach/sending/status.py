@@ -85,7 +85,8 @@ def _stamp(at: datetime) -> str:
     return at.astimezone(timezone.utc).strftime(ISO_FMT)
 
 
-_BAD_AUTH = ("signed_out", "wrong_account")
+# A sign-in that holds an account: signed out, another account's token, or Mail.app not running (as `queue`'s).
+_BAD_AUTH = ("signed_out", "wrong_account", "app_closed")
 
 
 def _gate(conn: sqlite3.Connection, *, ignore_pause: bool = False) -> str | None:
@@ -191,7 +192,15 @@ _NO_TOKEN = "no Gmail token"  # how the tick's auth_error starts for an account 
 
 
 def _sign_in_line(row: accounts.AccountRow, auth_error: str, cfg: SendConfig) -> str:
-    """The line for an account whose sign-in fails, with its own sign-in command (`gmail.sign_in_command`)."""
+    """The line for an account whose sign-in fails, with its own sign-in command (`gmail.sign_in_command`); for a
+    Mail.app account, what to do in Mail.app."""
+    if row.auth_state == "app_closed":
+        return "waits: Mail.app is not open. Open Mail.app and keep it open"
+    if row.cfg.kind == "mailapp":
+        account = row.cfg.mailapp_account
+        what = ("Mail.app holds another address" if row.auth_state == "wrong_account"
+                else f"Mail.app has no {account} account")
+        return f"{what}. Sign in to the {account} account in Mail.app"
     from outreach.sending.gmail import sign_in_command  # standard library only
     command = sign_in_command(cfg, row.cfg.address)
     if row.auth_state == "wrong_account":

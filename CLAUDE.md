@@ -32,6 +32,7 @@ Live means real contacts and real sends.
 | Reader night job (daily 02:30) | live checkout, `python -m outreach.reader night` | `com.devanshu.outreach-reader-night` |
 | Profile judge (daily 06:10, off by default) | live checkout, `python -m outreach.judge run` | `com.devanshu.outreach-judge` |
 | Follow-up drafter (daily 04:30) | live checkout, `python -m outreach.followup_drafter run` | `com.devanshu.outreach-followup-drafter` |
+| First-email drafter (daily 05:00) | live checkout, `python -m outreach.first_drafter run` (tops the Outbox up to 60 first emails waiting, at most 30 a night and 2 a company; he approves each) | `com.devanshu.outreach-first-drafter` |
 | H-1B list build (daily 06:50) | live checkout, `python -m outreach.h1b build` (reads the store read only, sends nothing, writes `h1b/companies.md` whole or not at all) | `com.devanshu.outreach-h1b` |
 
 Live checkout: `~/Desktop/Sept 23 Companies`. The deploy tool renders each job from `launchd/<label>.plist.template`.
@@ -79,7 +80,8 @@ Gmail), `python -m outreach.sending auth` and `auth --account <address>` (write 
 `python -m outreach.sending whoami` and `whoami --account <address>` (read the real token), `python -m outreach.crawl` (every command sends
 real requests), `python -m outreach.reader night` and `eval --run` (they call a model), `python -m outreach.judge run`
 (it reads company pages and calls a model; `--dry-run` runs anywhere), `python -m outreach.followup_drafter run` (it
-calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.sources seed-ats` (it sends real
+calls a model and writes drafts; `--dry-run` runs anywhere), `python -m outreach.first_drafter run` (it calls a model
+and writes first-email drafts; `--dry-run` runs anywhere on a scratch `OUTREACH_DB`), `python -m outreach.sources seed-ats` (it sends real
 requests to every Greenhouse and Ashby board and writes the store; `--dry-run` sends nothing and writes nothing, so it
 runs anywhere on a scratch store), `python -m outreach.research company` (real runs: it calls a model and fetches pages;
 `--dry-run` needs a scratch `OUTREACH_DB`; the MCP tool `save_research` works only here too), `python -m outreach.draft_lab judge` (a real run sends draft text and names to

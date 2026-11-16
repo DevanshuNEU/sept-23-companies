@@ -1,0 +1,25 @@
+# The first-email drafter's settings (#298). Each night it drafts first emails for the people loaded into Knock, at
+# the pace the accounts can send, through his Claude Code seat (claude -p, no API key), and saves each with the MCP
+# tools' own code, so every draft gets the #9 checks. He approves each one in the Outbox; the job never approves or
+# sends.
+
+[drafter]
+# On: `python -m outreach.first_drafter run` drafts. false makes it print "is off" and exit 0, with no call and no
+# write.
+enabled = true
+# The model, through his seat. These are emails in his name, so the strongest writer.
+model = "claude-opus-5-5"
+# People tried in one run, at most (each is one call, two when the first draft has a problem the model can fix).
+max_per_run = 30
+# First emails waiting in the Outbox (drafted plus approved) the run tops up to. With 60 waiting it drafts nobody.
+outbox_target = 60
+# First emails drafted at one company in one run, at most, so one company does not take the night.
+per_company = 2
+
+[run]
+call_timeout_s = 300
+# Failed calls in a row (not a session limit or a login problem) before the run stops.
+max_consecutive_failures = 3
+# Lower-case text in the CLI's own error output that means "the session ran out" or "not signed in": stop cleanly.
+session_limit_patterns = ["usage limit", "session limit", "limit reached", "resets at"]
+auth_patterns = ["not logged in", "please run /login", "authentication", "invalid api key", "oauth token"]

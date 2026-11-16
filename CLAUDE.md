@@ -129,7 +129,9 @@ serves a copy of the old dashboard on :3001. Preview its code, if ever needed, o
 `~/Desktop/DevVault/job-search/outreach/` holds the outreach rulebook used for drafts: `playbook.md`,
 `banned_phrases.txt`, `scripts/lint_draft.sh`, and `voice/authored.jsonl` (messages Devanshu wrote himself).
 Its old company-file flow (`companies/<slug>.md`, versions, `### Mine`, `lint_draft.sh`, paste into Mail.app) is
-retired for cold email (2026-11-16); DevVault's `/outreach` and `/coldmail` now run this repo's skill. Where any
+retired for cold email (2026-11-16). Cold email runs from this repo's `/outreach` (`.claude/commands/outreach.md`), in a
+Claude Code session in the live checkout; DevVault's own `/outreach` and `/coldmail` are the old flow and he keeps
+DevVault as it is, so never use them for email or edit them (#294). Where any
 DevVault doc still says Claude never writes a sendable email or every draft runs `lint_draft.sh`, #9 overrides it: Claude writes one draft per person, the checks #9 lists run inside the
 drafting tools (`save_draft` and `save_followup` in `outreach.mcp`, which read `banned_phrases.txt`), and
 `lint_draft.sh` is not run (it needs DevVault company files).
@@ -196,7 +198,7 @@ deleted.
 
 Plain words, short sentences, no em dashes or en dashes in anything a person reads: emails, docs, UI copy,
 commit messages, PR bodies. Email drafts follow `.claude/skills/cold-email/SKILL.md` (full path
-`~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md`, which DevVault's `/outreach` reads), which carries
+`~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md`, which `/outreach` follows), which carries
 #9's Drafts rules and the MCP steps; if the two ever disagree, #9 wins and the skill gets fixed. Drafts use only facts
 from `mail/me.md` and what Devanshu supplies about the person; me.md's `ASK:` lines are open questions, never facts.
 

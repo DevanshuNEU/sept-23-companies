@@ -165,6 +165,32 @@ def _key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def _split(name: str) -> tuple[str, str]:
+    parts = name.strip().split()
+    return (parts[0], " ".join(parts[1:])) if parts else ("", "")
+
+
+def match_on_record(name: str, people: list) -> tuple[object | None, list[str]]:
+    """(the person on record this name is, the names it could be when that is not certain).
+
+    Apollo's free search masks surnames ("Alec Co***y", #294): a masked name matches a person with the same first
+    name whose surname starts with the visible part and ends with the visible tail. One such person is a match; two
+    or more is never guessed."""
+    exact = [r for r in people if _key(r["name"]) == _key(name)]
+    if exact:
+        return exact[0], []
+    first, last = _split(name)
+    if "*" not in last:
+        return None, []
+    head, _, tail = last.partition("*")
+    head, tail = _key(head), _key(tail.strip("*"))
+    hits = [r for r in people if _key(_split(r["name"])[0]) == _key(first)
+            and _key(_split(r["name"])[1]).startswith(head) and _key(_split(r["name"])[1]).endswith(tail)]
+    if len(hits) == 1:
+        return hits[0], []
+    return None, [r["name"] for r in hits]
+
+
 # ------------------------------------------------------------------------------------------------ the tool
 
 def _posting(ctx: Ctx, ids: list[int], url: str | None) -> dict | None:
@@ -217,9 +243,9 @@ def pick_people(ctx: Ctx, args: PickInput) -> dict:
     city, state = job_place(posting["location"] if posting else None)
     words = team_words(posting["title"] if posting else None)
     states = _states()
-    on_record = {_key(r["name"]): r for r in conn.execute(
-        f"SELECT person_id, name, email FROM person WHERE company_id IN ({marks(ids)})", ids)}
-    statuses = email_status(conn, [r["person_id"] for r in on_record.values()])
+    on_record = conn.execute(
+        f"SELECT person_id, name, email FROM person WHERE company_id IN ({marks(ids)})", ids).fetchall()
+    statuses = email_status(conn, [r["person_id"] for r in on_record])
     no_go_people, _companies = no_go_sets(conn, family.companies)
 
     groups: dict[str, list[tuple]] = {}
@@ -242,7 +268,7 @@ def pick_people(ctx: Ctx, args: PickInput) -> dict:
         if role.executive and band == "over_200":
             skip("an executive at a company over 200 people")
             continue
-        known = on_record.get(_key(c.name))
+        known, maybe = match_on_record(c.name, on_record)
         if known is not None:
             if known["person_id"] in no_go_people:
                 skip("on the no-go list")
@@ -259,7 +285,8 @@ def pick_people(ctx: Ctx, args: PickInput) -> dict:
             else 2
         overlap = len(words & team_words(c.title))
         where = ("in " + city) if place == 0 else ("in " + state) if place == 1 else "in the US"
-        why = f"{GROUP_WORDS[role.group]} {where}" + (f", title shares the job's words" if overlap else "")
+        why = f"{GROUP_WORDS[role.group]} {where}" + (", title shares the job's words" if overlap else "") + (
+            f"; maybe {' or '.join(maybe)} in Knock (Apollo hides the surname): check after the reveal" if maybe else "")
         groups.setdefault(role.group, []).append(((role.sub, place, -overlap, n), c, role, known, why))
 
     for members in groups.values():

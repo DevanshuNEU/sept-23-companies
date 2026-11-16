@@ -5,6 +5,9 @@ an in-memory Mail.app that answers each of the client's scripts the way the scri
 escaping, local dates), so these tests run the client's own code: what it asks Mail.app, how it reads the answer,
 and when a send in doubt counts as sent, missing or neither.
 """
+import re
+import shutil
+import subprocess
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -119,8 +122,10 @@ class SendTest(Base):
     def test_two_in_sent_items_after_the_send_is_in_doubt(self):
         m = outgoing()
         self.mail.add_to_sent(m.to, m.subject, at=START + timedelta(seconds=1))
-        with self.assertRaises(GmailError):
+        with self.assertRaises(GmailError) as caught:
             self.mail.send(m)
+        self.assertEqual(caught.exception.kind, "server")
+        self.assertEqual(len(self.mail.sent), 1)
 
 
 class FindSentTest(Base):
@@ -177,9 +182,11 @@ class FindSentTest(Base):
         hit, _ = self.find(m, claimed)
         self.assertEqual(hit.thread_id, first.thread_id)
 
-    def test_needs_the_address_and_subject(self):
-        with self.assertRaises(ValueError):
-            self.mail.find_sent("<claim1@knock.local>", ms(START), send_returned_ms=ms(START))
+    def test_no_address_or_subject_stays_in_doubt_and_is_never_proof(self):
+        self.clock.advance(hours=5)
+        for to, subject in (("", "Hello"), ("ada@acme.example", ""), ("", "")):
+            self.assertEqual(self.mail.find_sent("<claim1@knock.local>", ms(START), send_returned_ms=ms(START),
+                                                 to=to, subject=subject), (None, False))
 
 
 class HistoryTest(Base):
@@ -213,11 +220,44 @@ class HistoryTest(Base):
         self.mail.deliver_reply(self.first, "ada@acme.example", mailbox="Deleted Items")
         self.assertEqual(len(self.mail.history(self.cursor).added), 2)
 
-    def test_reads_from_ten_minutes_before_the_cursor(self):
+    def test_reads_from_24_hours_before_the_cursor(self):
         cursor = self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")
-        self.mail.deliver_unrelated("old@x.example", "Old", at=self.clock() - timedelta(minutes=11))
+        self.mail.deliver_unrelated("old@x.example", "Old", at=self.clock() - timedelta(hours=25))
+        late = self.mail.deliver_reply(self.first, "ada@acme.example", at=self.clock() - timedelta(hours=3))
         near = self.mail.deliver_unrelated("near@x.example", "Near", at=self.clock() - timedelta(minutes=9))
-        self.assertEqual([a.gmail_message_id for a in self.mail.history(cursor).added], ["mailapp:" + near.rfc_id])
+        page = self.mail.history(cursor)
+        self.assertEqual([a.gmail_message_id for a in page.added],
+                         ["mailapp:" + late.rfc_id, "mailapp:" + near.rfc_id])
+        self.assertEqual(page.history_id, cursor)  # the new cursor is when the read began
+
+    def test_a_mailbox_that_fails_makes_the_read_fail_never_a_silent_skip(self):
+        self.mail.deliver_reply(self.first, "ada@acme.example")
+        self.mail.fail_mailbox("Tasks")
+        with self.assertRaises(GmailError) as caught:
+            self.mail.history(self.cursor)
+        self.assertEqual(caught.exception.kind, "server")
+        self.assertIn("Tasks", caught.exception.detail)
+
+    def test_history_then_message_runs_one_script_however_many_messages(self):
+        replies = [self.mail.deliver_reply(self.first, f"p{i}@acme.example") for i in range(6)]
+        self.mail.scripts.clear()
+        page = self.mail.history(self.cursor)
+        metas = [self.mail.message(a.gmail_message_id) for a in page.added]
+        self.assertEqual(self.mail.scripts, ["history"])
+        self.assertEqual([m.gmail_message_id for m in metas], ["mailapp:" + r.rfc_id for r in replies])
+        self.assertEqual({m.thread_id for m in metas}, {self.first.thread_id})
+        self.assertEqual(metas[0].from_addr, "p0@acme.example")
+
+    def test_a_message_from_the_page_matches_the_slow_read(self):
+        ndr = self.mail.deliver_ndr(self.first)
+        page = self.mail.history(self.cursor)
+        cached = self.mail.message(page.added[0].gmail_message_id)
+        self.clock.advance(days=2)
+        self.mail.history(self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"))  # a later page without it
+        self.mail.scripts.clear()
+        slow = self.mail.message("mailapp:" + ndr.rfc_id)
+        self.assertEqual(self.mail.scripts, ["message"])
+        self.assertEqual(cached, slow)
 
     def test_a_cursor_that_is_not_a_time_is_expired(self):
         for cursor in ("", "123456", "soon"):
@@ -330,7 +370,32 @@ class ScriptTest(Base):
             self.assertTrue(script.startswith(mailapp.COMMON_HANDLERS))
             self.assertEqual(script.count("on esc("), 1)
             self.assertIn("my requireMail()", script)
-            self.assertNotIn("—", script)
+            self.assertNotIn("\u2014", script)
+
+    def test_every_script_compiles(self):
+        """osacompile only compiles (nothing runs, Mail.app is not asked anything); it needs macOS."""
+        if shutil.which("osacompile") is None:
+            self.skipTest("osacompile is macOS only")
+        for script in (mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
+                       mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT):
+            done = subprocess.run(["osacompile", "-o", "/dev/null", "-"], input=script, capture_output=True,
+                                  text=True, encoding="utf-8", timeout=60, check=False)
+            self.assertEqual(done.returncode, 0, f"{script.split('on run')[-1][:80]!r}: {done.stderr}")
+
+    def test_every_loop_walks_a_list_already_read(self):
+        # On the real Mail.app, `repeat with h in (messages of mb whose ...)` re-runs the whose filter for every
+        # property read of `h` (history of 17 messages outlasted 120 s); reading the list into a variable first took
+        # about 3 s. So no script walks an expression: every `repeat with x in` names a variable.
+        for script in (mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
+                       mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT):
+            loops = re.findall(r"repeat with \w+ in (.*)", script)
+            for target in loops:
+                self.assertRegex(target.strip(), r"^\w+$", f"a loop walks an expression: {target!r}")
+
+    def test_profile_reads_the_address_list_before_walking_it(self):
+        # On the real Mail.app, `repeat with a in (email addresses of account ...)` fails (-1700): get it first.
+        self.assertIn("set addrs to (get email addresses of account acctName)", mailapp.PROFILE_SCRIPT)
+        self.assertIn("repeat with a in addrs", mailapp.PROFILE_SCRIPT)
 
     def test_fields_survive_the_escape(self):
         subject = "tab\there\\back\nline end"

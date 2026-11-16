@@ -16,13 +16,17 @@
   claim (subjects are unique per person). A copy still in the Outbox makes the search incomplete; two matches raise
   `SentAmbiguous` (the send stays in doubt and he is told). A hit carries the marker it was searched for.
 - New mail. `history` reads every mailbox of the account but Sent Items, Drafts and Outbox, for messages received
-  after the cursor less 10 minutes. The cursor is a time (UTC, ISO), not a Gmail history id. There are no threads to
-  read (`thread` raises ThreadUnsupported): with no cursor the inbound read takes the last 45 days with `history`.
+  after the cursor less 24 hours, and returns all `message` needs, so the page costs one script. The cursor is a
+  time (UTC, ISO), not a Gmail history id. There are no threads to read (`thread` raises ThreadUnsupported): with no
+  cursor the inbound read takes the last 45 days with `history`.
 
 AppleScript text lives here as constants, each starting with `COMMON_HANDLERS` (the one escape handler every script
 prints its fields through, and the check that Mail.app is running: a script never starts it). Every value reaches a
 script as an argument (`on run argv`), never in its text, so no subject or address can change what a script does.
-Dates come back as Mail.app's local wall-clock time (`«class isot»`) and are read here in the Mac's own zone.
+Every loop walks a list already read into a variable (`set found to (messages of mb whose ...)`, then `repeat with
+h in found`): walking the whose expression itself re-runs the filter for each property read (the real Mail.app took
+over 120 s for 17 messages that way, about 3 s read first). Dates come back as Mail.app's local wall-clock time
+(`«class isot»`) and are read here in the Mac's own zone.
 
 Live checkout only: the client on the real runner (`osascript_runner`) refuses to be built anywhere else. Tests use
 `outreach.sending.fakemailapp.FakeMailApp`, this client with an in-memory Mail.app as its runner.
@@ -58,7 +62,7 @@ SKIPPED_BOXES = (SENT_BOX, DRAFTS_BOX, OUTBOX_BOX)  # never read for new mail
 SEND_TIMEOUT = 60       # seconds: a send, and the Sent Items poll after it, all within this
 READ_TIMEOUT = 120      # seconds: any read
 POLL_SECONDS = 2        # between Sent Items reads after a send
-HISTORY_OVERLAP = timedelta(minutes=10)
+HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); known ids dedup what was read
 SNIPPET_LENGTH = 400    # of the body, whitespace collapsed (the message script returns its first 2000 characters)
 
 # Shared by every script: the check that Mail.app is running (error -600, which the runner reports as
@@ -116,9 +120,21 @@ on firstTo(h)
 		end try
 	end tell
 end firstTo
+
+on messageRecord(boxName, h)
+	tell application "Mail"
+		set c to ""
+		try
+			set c to (content of h) as text
+		end try
+		if (length of c) > 2000 then set c to text 1 thru 2000 of c
+		return my fields({"msg", my esc(boxName), my esc(message id of h), my isoOf(date received of h), my isoOf(date sent of h), my esc(sender of h), my esc(my firstTo(h)), my esc(subject of h), my esc(all headers of h), my esc(c)})
+	end tell
+end messageRecord
 '''
 
 # argv: account name. Prints `missing` when Mail.app has no such account, else one `address <addr>` per address.
+# The address list is read first: walking `email addresses of account ...` directly fails on the real Mail.app (-1700).
 PROFILE_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
@@ -126,10 +142,11 @@ on run argv
 	set out to {}
 	tell application "Mail"
 		if not (exists account acctName) then return "missing"
-		repeat with a in (email addresses of account acctName)
-			set end of out to my fields({"address", my esc(a)})
-		end repeat
+		set addrs to (get email addresses of account acctName)
 	end tell
+	repeat with a in addrs
+		set end of out to my fields({"address", my esc(a)})
+	end repeat
 	return my joinWith(out, linefeed)
 end run
 '''
@@ -180,10 +197,12 @@ on run argv
 	set {acctName, sentName, outName, subj} to {item 1 of argv, item 2 of argv, item 3 of argv, item 4 of argv}
 	set out to {}
 	tell application "Mail"
-		repeat with h in (messages of mailbox sentName of account acctName whose subject is subj)
+		set found to (messages of mailbox sentName of account acctName whose subject is subj)
+		repeat with h in found
 			set end of out to my fields({"sent", my esc(message id of h), my isoOf(date sent of h), my esc(my firstTo(h)), my esc(subject of h), my esc(all headers of h)})
 		end repeat
-		repeat with h in (messages of outbox whose subject is subj)
+		set queued to (messages of outbox whose subject is subj)
+		repeat with h in queued
 			set end of out to my fields({"outbox", my esc(my firstTo(h)), my esc(subject of h)})
 		end repeat
 		try
@@ -200,26 +219,34 @@ end run
 '''
 
 # argv: account name, the local year, month, day and seconds into that day to read from, then the mailbox names to
-# skip. One record per message received after that time: `<mailbox> <id> <date received> <all headers>`.
+# skip. One `msg` record (as `messageRecord`) per message received after that time, everything `message()` needs, so
+# reading the page's messages costs no further script. A mailbox that cannot be read prints `error <mailbox> <text>`
+# and the client fails the whole read (never a silent skip).
 HISTORY_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set acctName to item 1 of argv
-	set since to current date
-	set day of since to 1
-	set year of since to (item 2 of argv) as integer
-	set month of since to (item 3 of argv) as integer
-	set day of since to (item 4 of argv) as integer
-	set time of since to (item 5 of argv) as integer
+	set cutoff to current date
+	set day of cutoff to 1
+	set year of cutoff to (item 2 of argv) as integer
+	set month of cutoff to (item 3 of argv) as integer
+	set day of cutoff to (item 4 of argv) as integer
+	set time of cutoff to (item 5 of argv) as integer
 	set skipNames to items 6 thru -1 of argv
 	set out to {}
 	tell application "Mail"
-		repeat with mb in (every mailbox of account acctName)
+		set boxes to (get every mailbox of account acctName)
+		repeat with mb in boxes
 			set boxName to name of mb
 			if skipNames does not contain boxName then
-				repeat with h in (messages of mb whose date received > since)
-					set end of out to my fields({my esc(boxName), my esc(message id of h), my isoOf(date received of h), my esc(all headers of h)})
-				end repeat
+				try
+					set found to (messages of mb whose date received > cutoff)
+					repeat with h in found
+						set end of out to my messageRecord(boxName, h)
+					end repeat
+				on error errText number errNum
+					set end of out to my fields({"error", my esc(boxName), my esc(errText & " (" & errNum & ")")})
+				end try
 			end if
 		end repeat
 	end tell
@@ -227,24 +254,18 @@ on run argv
 end run
 '''
 
-# argv: account name, Message-ID (no brackets). The first message of the account with that id, as one record:
-# `<mailbox> <id> <date received> <date sent> <sender> <to> <subject> <all headers> <first 2000 characters>`.
+# argv: account name, Message-ID (no brackets). The first message of the account with that id as one `msg` record
+# (`messageRecord`), or nothing. Slow on the real Mail.app (about 30 s: it walks every mailbox), so `message()` uses
+# it only for an id the last history page did not hold.
 MESSAGE_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set {acctName, wanted} to {item 1 of argv, item 2 of argv}
 	tell application "Mail"
-		repeat with mb in (every mailbox of account acctName)
+		set boxes to (get every mailbox of account acctName)
+		repeat with mb in boxes
 			set hits to (messages of mb whose message id is wanted)
-			if (count of hits) > 0 then
-				set h to item 1 of hits
-				set c to ""
-				try
-					set c to (content of h) as text
-				end try
-				if (length of c) > 2000 then set c to text 1 thru 2000 of c
-				return my fields({my esc(name of mb), my esc(message id of h), my isoOf(date received of h), my isoOf(date sent of h), my esc(sender of h), my esc(my firstTo(h)), my esc(subject of h), my esc(all headers of h), my esc(c)})
-			end if
+			if (count of hits) > 0 then return my messageRecord(name of mb, item 1 of hits)
 		end repeat
 	end tell
 	return ""
@@ -334,6 +355,26 @@ def _label(box: str) -> str:
     return "SENT" if box == SENT_BOX else "SPAM" if box == JUNK_BOX else "INBOX"
 
 
+_MSG_FIELDS = 10  # a `msg` record: kind, mailbox, id, received, sent, sender, to, subject, all headers, body
+
+
+def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
+    """A MessageMeta from one `msg` record (`messageRecord`): the META_HEADERS of its `all headers`, the first 400
+    characters of the body with whitespace collapsed as the snippet, and `SENT`, `SPAM` or `INBOX` by its mailbox."""
+    _, box, msgid, received, sent, sender, to, subject, header_text, content = rec
+    headers = _parse_headers(header_text)
+    own = bracket(msgid) or bracket(fallback_id)
+    label = _label(box)
+    dates = (sent, received) if label == "SENT" else (received, sent)
+    when = next((at for at in map(read_local, dates) if at is not None), None)
+    if when is None:
+        raise GmailError("server", None, "Mail.app gave a message without a usable date")
+    return MessageMeta(gmail_message_id=_gmail_id(own), thread_id=_root(headers, own), from_addr=sender,
+                       to_addr=to, subject=subject, internal_ms=when, labels=(label,),
+                       headers={k: headers[k] for k in META_HEADERS if k in headers},
+                       snippet=" ".join(content.split())[:SNIPPET_LENGTH])
+
+
 def _shape(records: list[list[str]], kinds: dict[str, int]) -> list[list[str]]:
     """Each record checked to start with a known kind and to have that kind's field count."""
     for rec in records:
@@ -361,6 +402,7 @@ class MailAppClient(MailClient):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._sleep = sleep
         self.settle_minutes = settle_minutes(reconcile_after_minutes)
+        self._page: dict[str, MessageMeta] = {}  # the last history page's messages, so `message` needs no script
 
     def _records(self, script: str, args: list[str], timeout: float) -> list[list[str]]:
         return parse_records(self._run(script, [str(a) for a in args], timeout))
@@ -446,9 +488,10 @@ class MailAppClient(MailClient):
                   subject: str = "") -> tuple[Sent | None, bool]:
         """The Sent Items rule (module docstring): exactly one message to `to` with exactly `subject` sent at or after
         `not_before_ms` is a hit, carrying `marker`. Two raise SentAmbiguous. A copy in an Outbox, or a match with no
-        date, is (None, False). A miss is proof only as MailClient.find_sent says (after `settle_minutes`)."""
-        if not to or not subject:
-            raise ValueError("a Mail.app Sent Items search needs the address and the subject")
+        date, is (None, False), and so is an empty `to` or `subject` (the address was cleared: nothing to match).
+        A miss is proof only as MailClient.find_sent says (after `settle_minutes`)."""
+        if not (to or "").strip() or not (subject or "").strip():
+            return None, False  # nothing to match on (the address was cleared): in doubt, never proof, never resent
         started_ms = int(self._clock().timestamp() * 1000)
         hits, unsure = self._sent_items(parseaddr(to)[1], subject, not_before_ms, READ_TIMEOUT)
         if len(hits) > 1:
@@ -462,51 +505,45 @@ class MailAppClient(MailClient):
         return None, miss_is_proof(True, started_ms, send_returned_ms, self.settle_minutes)
 
     def history(self, start_history_id: str) -> HistoryPage:
-        """Messages received after the cursor time less 10 minutes, in every mailbox but Sent Items, Drafts and
-        Outbox, oldest first, each once. The new cursor is the time the read began. A cursor that is not a time
-        (empty, or a Gmail history id) is HistoryExpired."""
+        """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`; the inbound read's known ids
+        drop what was already read), in every mailbox but Sent Items, Drafts and Outbox, oldest first, each once. The
+        new cursor is the time the read began. A cursor that is not a time (empty, or a Gmail history id) is
+        HistoryExpired. A mailbox Mail.app could not read fails the whole read (`server`). The page's messages are
+        kept, so `message` serves them without another script."""
         since = _cursor_time(start_history_id)
         read_at = self._now_text()
-        records = self._records(HISTORY_SCRIPT, [self.mailapp_account, *local_parts(since - HISTORY_OVERLAP),
-                                                 *SKIPPED_BOXES], READ_TIMEOUT)
-        if any(len(rec) != 4 for rec in records):
-            raise GmailError("server", None, "Mail.app gave an answer the sender cannot read")
-        rows = sorted(records, key=lambda rec: (read_local(rec[2]) is None, read_local(rec[2]) or 0))
+        records = _shape(self._records(HISTORY_SCRIPT, [self.mailapp_account, *local_parts(since - HISTORY_OVERLAP),
+                                                        *SKIPPED_BOXES], READ_TIMEOUT),
+                         {"msg": _MSG_FIELDS, "error": 3})
+        failed = [rec for rec in records if rec[0] == "error"]
+        if failed:
+            raise GmailError("server", None, f"Mail.app could not read the mailbox {failed[0][1]}: {failed[0][2]}")
+        rows = sorted(records, key=lambda rec: (read_local(rec[3]) is None, read_local(rec[3]) or 0))
         added: list[Added] = []
-        seen: set[str] = set()
-        for box, msgid, _when, headers in rows:
-            own = bracket(msgid)
-            if box in SKIPPED_BOXES or not own or own in seen:
+        page: dict[str, MessageMeta] = {}
+        for rec in rows:
+            if rec[1] in SKIPPED_BOXES or not bare(rec[2]) or _gmail_id(rec[2]) in page:
                 continue
-            seen.add(own)
-            added.append(Added(gmail_message_id=_gmail_id(own), thread_id=_root(_parse_headers(headers), own),
-                               labels=(_label(box),)))
+            meta = _meta(rec)
+            page[meta.gmail_message_id] = meta
+            added.append(Added(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, labels=meta.labels))
+        self._page = page
         return HistoryPage(added=tuple(added), history_id=read_at)
 
     def message(self, gmail_message_id: str) -> MessageMeta:
-        """One message by its `mailapp:<id>`: the META_HEADERS of its `all headers`, the first 400 characters of its
-        body (whitespace collapsed) as the snippet, and `SENT`, `SPAM` or `INBOX` by its mailbox. Not in Mail.app
-        is a 404, as Gmail's for a deleted message."""
+        """One message by its `mailapp:<id>` (`_meta`). One the last history page held is served from it; any
+        other is looked up in every mailbox (slow). Not in Mail.app is a 404, as Gmail's for a deleted message."""
         if not gmail_message_id.startswith(ID_PREFIX) or not bare(gmail_message_id[len(ID_PREFIX):]):
             raise GmailError("bad_request", 404, "not a Mail.app message id")
         wanted = bare(gmail_message_id[len(ID_PREFIX):])
-        records = self._records(MESSAGE_SCRIPT, [self.mailapp_account, wanted], READ_TIMEOUT)
+        cached = self._page.get(_gmail_id(wanted))
+        if cached is not None:
+            return cached
+        records = _shape(self._records(MESSAGE_SCRIPT, [self.mailapp_account, wanted], READ_TIMEOUT),
+                         {"msg": _MSG_FIELDS})
         if not records:
             raise GmailError("bad_request", 404, "the message is not in Mail.app")
-        if len(records[0]) != 9:
-            raise GmailError("server", None, "Mail.app gave an answer the sender cannot read")
-        box, msgid, received, sent, sender, to, subject, header_text, content = records[0]
-        headers = _parse_headers(header_text)
-        own = bracket(msgid) or bracket(wanted)
-        label = _label(box)
-        dates = (sent, received) if label == "SENT" else (received, sent)
-        when = next((ms for ms in map(read_local, dates) if ms is not None), None)
-        if when is None:
-            raise GmailError("server", None, "Mail.app gave a message without a usable date")
-        return MessageMeta(gmail_message_id=_gmail_id(own), thread_id=_root(headers, own), from_addr=sender,
-                           to_addr=to, subject=subject, internal_ms=when, labels=(label,),
-                           headers={k: headers[k] for k in META_HEADERS if k in headers},
-                           snippet=" ".join(content.split())[:SNIPPET_LENGTH])
+        return _meta(records[0], wanted)
 
     def thread(self, thread_id: str) -> list[MessageMeta]:
         raise ThreadUnsupported("Mail.app has no threads to read; read its mailboxes with history instead")

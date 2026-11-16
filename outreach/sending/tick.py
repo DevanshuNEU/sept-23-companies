@@ -563,6 +563,8 @@ class _Tick:
             except GmailError as err:
                 self._partial(f"Sent could not be searched for message {u.message_id} on {row.cfg.address} "
                               f"({scrub(str(err))}); it stays in doubt until a later tick")
+                if err.kind in ("timeout", "app_closed"):
+                    break  # the next search would wait as long again: the rest of this account waits a tick
                 continue
             found[u.message_id] = (hit, complete, u.rfc_id)
         return found

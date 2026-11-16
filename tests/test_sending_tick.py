@@ -21,6 +21,7 @@ from outreach.drafts.checks import load_banned
 from outreach.sending import accounts, claim, proof, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
+from outreach.sending.fakemailapp import FakeMailApp
 from outreach.sending.mail import GmailError, Sent, SentAmbiguous
 from outreach.sending.tick import LOCK_NAME, TickDeps, run_tick
 from outreach.store import connect
@@ -38,6 +39,15 @@ REST, GENERAL, NEU = (a.address for a in SHIPPED.accounts)
 CFG = solo(SHIPPED)
 COUNTS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skipped", "planned", "lapsed", "closed")
 IMPORTED_RFC = "<old.1@devanshu.local>"
+
+
+def doubt(db: sqlite3.Connection, mid: int, rfc: str, at: str) -> None:
+    """Message `mid` claimed with marker `rfc` at `at` and left in doubt, as a send whose answer was lost leaves it."""
+    db.execute("UPDATE message SET state = 'sending', pending_rfc_id = ?, claimed_at = ?, updated_at = ? "
+               "WHERE message_id = ?", (rfc, at, at, mid))
+    db.execute("UPDATE message SET state = 'send_unknown' WHERE message_id = ?", (mid,))
+    append_event(db, entity="message", entity_id=mid, kind="claimed", actor="sender", at=at,
+                 detail={"pending_rfc_id": rfc, "marker": rfc}, idempotency_key=f"claimed:{rfc}")
 
 
 class Base(unittest.TestCase):
@@ -461,6 +471,32 @@ class GateTest(Base):
         self.assertEqual(self.notices, [])
         self.assertEqual(self.db.execute("SELECT count(*) FROM event WHERE kind = 'notified'").fetchone()[0], 0)
         self.assertEqual(self.message(mid)["state"], "send_unknown")
+
+    def doubt(self, mid: int, n: int) -> None:
+        """Message `mid` claimed with marker `<doubt{n}@knock.local>` and left in doubt (as a lost send leaves it)."""
+        doubt(self.db, mid, f"<doubt{n}@knock.local>", iso(self.clock()))
+
+    def search_stops_after(self, kind: str) -> None:
+        first, second = self.approve(), self.approve()
+        self.doubt(first, 1)
+        self.doubt(second, 2)
+        searches = []
+
+        def slow(*args, **kwargs):
+            searches.append(args[0])
+            raise GmailError(kind, None, "Mail.app did not answer")
+        self.gmail.find_sent = slow
+        report = self.tick()
+        self.assertEqual(len(searches), 1)
+        self.assertEqual((self.message(first)["state"], self.message(second)["state"]),
+                         ("send_unknown", "send_unknown"))
+        self.assertTrue(any("Sent could not be searched" in line for line in report.lines))
+
+    def test_a_sent_search_that_times_out_stops_that_accounts_searches_this_tick(self):
+        self.search_stops_after("timeout")
+
+    def test_mail_app_closed_stops_that_accounts_searches_this_tick(self):
+        self.search_stops_after("app_closed")
 
 
 class OldProofTest(Base):
@@ -1507,6 +1543,26 @@ class MultiAccountTest(MultiBase):
         self.assertEqual(report.reconciled["sent"], 1)
         self.assertEqual(self.message(mid)["state"], "sent")
         self.assertEqual(len(self.gmail2.sent), 1)
+
+    def test_a_mailapp_send_in_doubt_with_no_address_never_stops_the_tick(self):
+        mail = FakeMailApp(clock=self.clock, account=SHIPPED.accounts[2], probe=self.probe,
+                           reconcile_after_minutes=CFG.reconcile_after_minutes)
+        self.clients = {**self.clients, NEU: mail}
+        company = seed_company(self.db, "Neu Co")
+        person = seed_email_person(self.db, company, "Ada", "ada@neu-co.example")
+        doubted = seed_message(self.db, person, subject="Your team and the backend role 90", body=body(90))
+        self.db.execute("UPDATE touch SET account_id = ? WHERE person_id = ?", (self.rows[NEU].account_id, person))
+        doubt(self.db, doubted, "<doubt90@knock.local>", iso(self.clock()))
+        self.db.execute("UPDATE person SET email = NULL, channel = 'linkedin', linkedin_reason = 'no_email' "
+                        "WHERE person_id = ?", (person,))  # as mark_email_bounced clears a dead address
+        general = self.approve()
+        self.clock.advance(hours=3)
+        report = self.tick()
+        self.assertIn("find_sent", mail.calls)
+        self.assertEqual(report.sent, (general,))
+        self.assertEqual(len(self.gmail2.sent), 1)
+        self.assertEqual(self.message(doubted)["state"], "send_unknown")
+        self.assertEqual(mail.sent, [])
 
     def test_a_dry_run_over_every_account_writes_and_sends_nothing(self):
         self.approve()

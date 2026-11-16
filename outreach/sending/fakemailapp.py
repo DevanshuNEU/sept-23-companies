@@ -8,7 +8,7 @@ osascript, opens a socket or a file. `FakeMailApp.sent` is the only count of ema
 
 Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.app's Outbox), `deliver_reply`,
 `deliver_auto_reply`, `deliver_ndr` (a Microsoft "Undeliverable" notice), `deliver_unrelated`, `add_to_sent`,
-`add_to_mailbox`, `copy_to`, and `closed` (Mail.app not running: every script fails with `app_closed`).
+`add_to_mailbox`, `copy_to`, `fail_mailbox`, and `closed` (Mail.app not running: every script fails with `app_closed`).
 `probe(method_name)` runs at the start of every client method; `calls` lists them and `scripts` the scripts run.
 """
 from collections.abc import Callable, Mapping, Sequence
@@ -100,6 +100,7 @@ class FakeMailApp(MailAppClient):
         self.scripts: list[str] = []
         self._failures: list[_Failure] = []
         self._slow: list[timedelta | None] = []
+        self._failing_boxes: set[str] = set()
         self._outgoing: Outgoing | None = None
         self._next = 0
 
@@ -111,6 +112,11 @@ class FakeMailApp(MailAppClient):
         took it) and reaches Sent Items (`lands_after` later, waiting in the Outbox until then, or never with
         `in_sent=False`). Calls queue up."""
         self._failures.append(_Failure(error, accepted, in_sent, lands_after))
+
+    def fail_mailbox(self, mailbox: str) -> None:
+        """Mail.app cannot read `mailbox` (as an Exchange Tasks or Notes folder may refuse `messages of`): the history
+        script prints an error record for it, every time from now on."""
+        self._failing_boxes.add(mailbox)
 
     def slow_sent(self, after: timedelta | None) -> None:
         """The next email sent waits in Mail.app's Outbox for `after` before it reaches Sent Items (None: it never
@@ -257,20 +263,32 @@ class FakeMailApp(MailAppClient):
     def _history_script(self, args: list[str]) -> list[str]:
         year, month, day, seconds = (int(a) for a in args[1:5])
         skip = set(args[5:])
-        since = (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
-        return [_record(_esc(box), _esc(s.msgid), local_text(s.received_at), _esc(s.all_headers()))
-                for box in MAILBOXES if box not in skip
-                for s in self._visible(box) if s.received_at.replace(microsecond=0) > since]
+        cutoff = (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
+        out = []
+        for box in MAILBOXES:
+            if box in skip:
+                continue
+            if box in self._failing_boxes:
+                out.append(_record("error", _esc(box), _esc("Mail got an error: Can't get every message. (-1728)")))
+                continue
+            out += [self._message_record(box, s) for s in self._visible(box)
+                    if s.received_at.replace(microsecond=0) > cutoff]
+        return out
 
     def _message_script(self, args: list[str]) -> list[str]:
         wanted = args[1]
         for box in MAILBOXES:
             for s in self._visible(box):
                 if s.msgid == wanted:
-                    return [_record(_esc(box), _esc(s.msgid), local_text(s.received_at), local_text(s.sent_at),
-                                    _esc(s.sender), _esc(parseaddr(s.to)[1]), _esc(s.subject),
-                                    _esc(s.all_headers()), _esc(s.content[:2000]))]
+                    return [self._message_record(box, s)]
         return []
+
+    @staticmethod
+    def _message_record(box: str, s: Stored) -> str:
+        """The scripts' `messageRecord`."""
+        return _record("msg", _esc(box), _esc(s.msgid), local_text(s.received_at), local_text(s.sent_at),
+                       _esc(s.sender), _esc(parseaddr(s.to)[1]), _esc(s.subject), _esc(s.all_headers()),
+                       _esc(s.content[:2000]))
 
     # -- internals ----------------------------------------------------------------------------------------------
 

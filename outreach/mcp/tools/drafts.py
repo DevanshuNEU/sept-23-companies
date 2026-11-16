@@ -39,8 +39,8 @@ from outreach.drafts.followups import (MAX_FOLLOWUPS, company_map, due_followups
 from outreach.mcp.guard import Grant
 from outreach.mcp.tools import PREPARED_BY, Ctx, Input, ToolError, ToolSpec
 from outreach.mcp.tools.people import said_no_ids
-from outreach.mcp.tools.reads import (HOOK_CHARS, MAX_ID, PROJECT_CHARS, UNTRUSTED, Family, PersonInput, company_row, person,
-                                      why_not_email)
+from outreach.mcp.tools.reads import (HOOK_CHARS, MAX_ID, PROJECT_CHARS, UNTRUSTED, URL_CHARS, Family, PersonInput,
+                                      age_days, clip, company_row, person, why_not_email)
 from outreach.plan.config import default_plan_config
 from outreach.plan.drafts import DraftLocked, LinkedinDraft, get_draft, save_linkedin_draft
 from outreach.plan.notecheck import Fact, NoteCheck
@@ -190,6 +190,44 @@ def ground_text(ctx: Ctx, evidence: str, stories: str, p: sqlite3.Row) -> str:
 class BriefInput(PersonInput):
     part: int = Field(1, ge=1, le=2, description="1 (the default): the person, posting, company facts, me.md, what to "
                                                   "avoid, the signature and the limits. 2: his voice files and stories.")
+    posting_url: str | None = Field(None, max_length=500, pattern=r"^https://\S+$",
+                                    description="The job link he pasted: the brief names that posting (#290).")
+    posting_id: int | None = Field(None, ge=1, le=MAX_ID,
+                                   description="A posting id from the company tool: the brief names that posting.")
+
+
+def posting_key(url: str) -> str:
+    """A job link compared loosely: no query or fragment, no trailing slash or /application, host in lower case."""
+    base = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    if base.endswith("/application"):
+        base = base[: -len("/application")]
+    scheme, _, rest = base.partition("://")
+    host, _, path = rest.partition("/")
+    return f"{scheme.lower()}://{host.lower()}/{path}"
+
+
+def pasted_role(ctx: Ctx, args: BriefInput, survivor: int) -> dict | None:
+    """The posting he pasted, as a role to name, when he gave one; it must be an open posting of the person's company."""
+    if args.posting_url is None and args.posting_id is None:
+        return None
+    if args.posting_url is not None and args.posting_id is not None:
+        raise ToolError("bad_input", "Give posting_url or posting_id, not both.", "Send the job link he pasted.")
+    ids = Family(ctx.conn).members(survivor)
+    rows = ctx.conn.execute(f"SELECT posting_id, title, url, posted_on, first_seen_at, closed_at FROM posting "
+                            f"WHERE company_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+    if args.posting_id is not None:
+        found = [r for r in rows if r["posting_id"] == args.posting_id]
+    else:
+        found = [r for r in rows if r["url"] and posting_key(r["url"]) == posting_key(args.posting_url)]
+    live = [r for r in found if r["closed_at"] is None]
+    if not live:
+        what = "closed" if found else "not a posting of this person's company in Knock"
+        raise ToolError("bad_input", f"That posting is {what}.",
+                        "Check the link against the company tool's postings, or leave it out to name the best open "
+                        "one. Nothing was read.")
+    best = max(live, key=lambda r: r["first_seen_at"])
+    return {"posting_id": best["posting_id"], "title": clip(best["title"]), "url": clip(best["url"], URL_CHARS),
+            "age_days": age_days(best["posted_on"], best["first_seen_at"], ctx.today), **UNTRUSTED}
 
 
 def pack_id(pack, stories: str) -> str:
@@ -209,6 +247,9 @@ def draft_brief(ctx: Ctx, args: BriefInput) -> dict:
         raise voice_unreadable(caught) from None
     stories = read_stories()
     one = person(ctx, args)
+    pasted = pasted_role(ctx, args, one["company"]["id"])
+    if pasted is not None:
+        one = {**one, "role_to_name": pasted}
     head = {"brief_id": brief_id(pack, evidence + "\n" + stories, args.person_id), "part": args.part, "parts": 2,
             "pack_id": pack_id(pack, stories)}
     if args.part == 2:
@@ -575,8 +616,8 @@ TOOLS = (
              "files, the me.md evidence and the limits, plus the brief_id that save_draft and save_followup require. "
              "It comes in two parts, both with the same brief_id: part 1 (the default) is the person, posting, "
              "company facts, me.md, what to avoid, the signature and the limits; part 2 is his voice files and "
-             "stories. Read both. Reads only. "
-             "Write from what it returns.", BriefInput, draft_brief),
+             "stories. Read both. Reads only. When he pasted a job link, pass it as posting_url so the brief names "
+             "that posting. Write from what it returns.", BriefInput, draft_brief),
     ToolSpec("check_draft",
              "Run every check save_draft or save_followup would run on a draft, without storing it. Use it to test a "
              "draft, or a set of drafts for a judge run, before saving. Refuses the people save_draft refuses. Reads "

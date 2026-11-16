@@ -215,7 +215,7 @@ class CompanyTest(McpCase):
         cid = seed.company(self.db)
         senior = seed.posting(self.db, cid, "Senior Engineer", first_seen_at="2026-11-09T00:00:00Z")
         seed.decision(self.db, senior, level_tier="senior", level_ok=0, level_basis="Senior")
-        best = seed.posting(self.db, cid, "New Grad Engineer", first_seen_at="2026-10-01T00:00:00Z")
+        best = seed.posting(self.db, cid, "New Grad Engineer", first_seen_at="2026-10-20T00:00:00Z")
         seed.decision(self.db, best, level_tier="new_grad")
         for i in range(6):
             seed.posting(self.db, cid, f"Role {i}")
@@ -351,6 +351,32 @@ class PersonTest(McpCase):
         self.assertIsNone(self.ok("person", {"person_id": pat})["role_to_name"])
         seed.posting(self.db, self.company, "Software Engineer")
         self.assertEqual(self.ok("person", {"person_id": pat})["role_to_name"]["title"], "Software Engineer")
+
+    def test_a_fresh_posting_is_named_before_a_stale_one(self):
+        """#290 (Ataraxis AI): a 136-day-old "open" level role was named over a Software Engineer job posted that day."""
+        pat = seed.person(self.db, self.company)
+        stale = seed.posting(self.db, self.company, "Member of Technical Staff, Pathology",
+                             first_seen_at="2026-06-27T00:00:00Z")
+        seed.decision(self.db, stale, level_tier="open")
+        fresh = seed.posting(self.db, self.company, "Software Engineer", first_seen_at="2026-11-10T09:00:00Z")
+        self.assertEqual(self.ok("person", {"person_id": pat})["role_to_name"]["posting_id"], fresh)
+        self.assertEqual(self.ok("company", {"company_id": self.company})["postings"]["open"][0]["posting_id"], fresh)
+
+    def test_the_real_posted_date_decides_fresh_not_when_knock_first_saw_it(self):
+        pat = seed.person(self.db, self.company)
+        grad = seed.posting(self.db, self.company, "New Grad Engineer", first_seen_at="2026-10-01T00:00:00Z")
+        seed.decision(self.db, grad, level_tier="new_grad")
+        repost = seed.posting(self.db, self.company, "Software Engineer", first_seen_at="2026-11-09T00:00:00Z")
+        self.db.execute("UPDATE posting SET posted_on = '2026-06-01' WHERE posting_id = ?", (repost,))
+        self.assertEqual(self.ok("person", {"person_id": pat})["role_to_name"]["posting_id"], grad)
+
+    def test_a_fresh_senior_role_does_not_jump_a_stale_one_at_his_level(self):
+        pat = seed.person(self.db, self.company)
+        grad = seed.posting(self.db, self.company, "New Grad Engineer", first_seen_at="2026-09-01T00:00:00Z")
+        seed.decision(self.db, grad, level_tier="new_grad")
+        senior = seed.posting(self.db, self.company, "Staff Engineer", first_seen_at="2026-11-09T00:00:00Z")
+        seed.decision(self.db, senior, level_tier="senior", level_ok=0, level_state="uncertain")
+        self.assertEqual(self.ok("person", {"person_id": pat})["role_to_name"]["posting_id"], grad)
 
     def test_unknown_person_is_not_found(self):
         self.assertEqual(self.error("person", {"person_id": 404})["code"], "not_found")

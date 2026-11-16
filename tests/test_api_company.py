@@ -258,6 +258,14 @@ class CompanyPage(ApiCase):
         postings = self.view(cid)["postings"]
         self.assertEqual([p["state"] for p in postings], ["open", "open", "hidden", "closed"])  # open first, newest first
 
+    def test_a_fresh_posting_is_named_before_a_stale_one(self):
+        """#290: the company page and the Outbox name the same posting the MCP's draft_brief does."""
+        cid = s.company(self.conn)
+        stale = s.posting(self.conn, cid, "Member of Technical Staff", first_seen_at="2026-06-27T10:00:00Z")
+        s.decision(self.conn, stale, level_tier="open")
+        fresh = s.posting(self.conn, cid, "Software Engineer", first_seen_at="2026-11-09T10:00:00Z")
+        self.assertEqual(self.view(cid)["role"]["postingId"], fresh)
+
     def test_company_events_are_newest_first_and_carry_the_import_source(self):
         cid = s.company(self.conn)
         s.event(self.conn, cid, "picked", "2026-11-03T10:00:00Z", actor="devanshu", detail={"text": "Picked from Today"})

@@ -251,7 +251,8 @@ class RealToolsTest(unittest.TestCase):
     def test_instructions_state_the_limits_point_at_the_skill_and_use_no_dashes(self):
         text = server.INSTRUCTIONS
         self.assertLessEqual(len(text), 2100)
-        for phrase in ("never approves", "Outbox", ".claude/skills/cold-email/SKILL.md", "data", "refusal",
+        for phrase in ("never approves", "Outbox", "~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md",
+                       "posting_url", "data", "refusal",
                        "log_sent records LinkedIn requests Devanshu says he sent", "only after he says so"):
             self.assertIn(phrase, text)
         self.assertFalse(any(c in text for c in (chr(0x2013), chr(0x2014))))

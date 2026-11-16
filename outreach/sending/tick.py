@@ -9,8 +9,8 @@ The steps, in order. Gmail is called only in steps 2, 4 and 7, and never inside 
    Northeastern one, `MailAppClient`) whose Mail.app is not running is `app_closed`, and one that does not answer in
    time is `unknown`: it waits this tick, with one notice a day that Mail.app must be open, and is never signed out,
    paused or counted against its ramp; every other account goes on. When no account signs in, the tick ends there.
-   Each state is written on the account's own row (`sender_account`; account 1's also on `sender` row 1, as before accounts), in one
-   transaction with `accounts.sync` and step 3.
+   Each state is written on the account's own row (`sender_account`; account 1's also on `sender` row 1, as before
+   accounts), in one transaction with `accounts.sync` and step 3.
 3. Leftover claims (every account): a `sending` row is a tick that died mid-send, so it becomes `send_unknown`.
 4. Gmail reads, per signed-in account with its own client: a Sent scan by marker for each of its unclear sends, its
    new inbound mail, the read back of each of its marked emails sent since the last tick (the first one for its
@@ -625,10 +625,12 @@ class _Tick:
         before = proof.phase(self.conn, account_id)
         checked = proof.verify_marker(self.conn, client, account_id, now=self.now, kind=row.cfg.kind)
         self.counts["verified"] += checked["verified"]
+        # A Mail.app account is proven by Sent Items, never by the marker (`proof`), and its check reads no mailbox.
+        found = "in Sent Items" if row.cfg.kind == "mailapp" else "in Sent with the sender's marker"
         if before == proof.CHECKING and proof.phase(self.conn, account_id) == proof.PROVEN:
-            self._line(f"the first email from {address} is in Sent with the sender's marker, so the rest may follow")
+            self._line(f"the first email from {address} is {found}, so the rest may follow")
         if checked["missing"]:
-            self._line(f"{checked['missing']} sent email(s) from {address} are not in Sent with the sender's marker")
+            self._line(f"{checked['missing']} sent email(s) from {address} are not {found}")
         if checked["errors"]:
             self._partial(f"sent email from {address} could not be read back from Gmail; tried again next tick" +
                           (", and nothing else goes out from it until then" if before == proof.CHECKING else ""))

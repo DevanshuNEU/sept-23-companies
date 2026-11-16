@@ -299,6 +299,49 @@ class HistoryTest(Base):
         self.assertEqual([a.gmail_message_id for a in last.added], ["mailapp:" + s.rfc_id for s in stored[90:]])
         self.assertEqual((last.more, last.history_id), (False, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")))
 
+    def test_a_fetch_that_runs_out_of_time_keeps_what_it_read_and_the_cursor(self):
+        stored = []
+        for i in range(30):
+            stored.append(self.mail.deliver_unrelated(f"p{i}@x.example", f"Note {i}"))
+            self.clock.advance(seconds=1)
+        self.mail.seconds_per_record = 5  # Mail.app is slow today: 80 s buys about 16 records
+        page = self.mail.history(self.cursor)
+        read = [a.gmail_message_id for a in page.added]
+        self.assertTrue(0 < len(read) < 30, len(read))
+        self.assertEqual(read, ["mailapp:" + s.rfc_id for s in stored[:len(read)]])
+        self.assertEqual((page.more, page.history_id), (True, self.cursor))  # left out: the cursor stays
+        self.mail.seconds_per_record = 0
+        rest = self.mail.history(self.cursor, skip_ids={a[len("mailapp:"):] for a in read})
+        self.assertEqual([a.gmail_message_id for a in rest.added], ["mailapp:" + s.rfc_id for s in stored[len(read):]])
+        self.assertEqual((rest.more, rest.history_id), (False, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")))
+
+    def test_the_fetch_is_given_the_time_budget_and_the_record_cap(self):
+        self.mail.deliver_unrelated("news@x.example", "A newsletter")
+        self.mail.history(self.cursor)
+        self.assertEqual(self.mail.fetch_limits[-1], (mailapp.FETCH_BUDGET, mailapp.FETCH_LIMIT))
+        self.assertEqual((mailapp.FETCH_BUDGET, mailapp.FETCH_LIMIT), (80, 40))
+
+    def test_messages_listed_but_never_found_do_not_hold_the_read(self):
+        new = self.mail.deliver_reply(self.first, "ada@acme.example")
+        original = self.mail._list_script
+
+        def with_ghosts(args):  # 45 ids Mail.app lists but never shows again (finished, not cut by the budget)
+            when = mailapp.local_text(self.clock() - timedelta(hours=1))
+            return original(args) + [f"id\t1\tInbox\tghost{i}@x.example\t{when}" for i in range(45)]
+        self.mail._list_script = with_ghosts
+        page = self.mail.history(self.cursor)
+        self.assertEqual([a.gmail_message_id for a in page.added], ["mailapp:" + new.rfc_id])
+        self.assertEqual((page.more, page.history_id), (False, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")))
+
+    def test_two_mailboxes_with_one_name_are_read_separately(self):
+        self.mail.mailboxes.append("Outreach")  # a second "Outreach" (a nested folder of that name)
+        first = self.mail.deliver_reply(self.first, "ada@acme.example", mailbox="Outreach")
+        second = self.mail.add_to_mailbox("Outreach", "bob@acme.example", NEU.address, "Re: hello",
+                                           position=len(self.mail.mailboxes))
+        page = self.mail.history(self.cursor)
+        self.assertEqual(sorted(a.gmail_message_id for a in page.added),
+                         sorted(["mailapp:" + first.rfc_id, "mailapp:" + second.rfc_id]))
+
     def test_nothing_new_fetches_nothing(self):
         done = self.mail.deliver_reply(self.first, "ada@acme.example")
         self.mail.scripts.clear()
@@ -478,6 +521,16 @@ class ScriptTest(Base):
             for target in loops:
                 self.assertRegex(target.strip(), r"^\w+$", f"a loop walks an expression: {target!r}")
 
+    def test_reads_never_query_message_by_message_or_read_a_resolved_list_in_bulk(self):
+        # On the real Mail.app a `whose message id is` query costs about 2 s a message, and a bulk property read on a
+        # list already resolved (`message id of found`) fails (task-B4-live-check.md): each mailbox's window is
+        # resolved once and walked item by item.
+        for script in (mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT):
+            self.assertNotIn("whose message id", script)
+            self.assertNotRegex(script, r"(message id|date received) of found")
+            self.assertIn("repeat with h in found", script)
+        self.assertIn('"more"', mailapp.FETCH_SCRIPT)
+
     def test_profile_reads_the_address_list_before_walking_it(self):
         # On the real Mail.app, `repeat with a in (email addresses of account ...)` fails (-1700): get it first.
         self.assertIn("set addrs to (get email addresses of account acctName)", mailapp.PROFILE_SCRIPT)
@@ -514,7 +567,8 @@ class InboundFallbackTest(Base):
         read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}), cfg=CFG, now=self.clock())
         self.assertTrue(read.complete)
         # Every message fetched is read, so applying it records it and it is never fetched again.
-        self.assertEqual([m.gmail_message_id for m in read.metas], ["mailapp:" + reply.rfc_id, "mailapp:" + news.rfc_id])
+        self.assertEqual([m.gmail_message_id for m in read.metas],
+                         ["mailapp:" + reply.rfc_id, "mailapp:" + news.rfc_id])
         self.assertEqual(read.new_history_id, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.assertEqual(self.mail.calls[1:], ["profile", "thread", "history", "message", "message"])
 

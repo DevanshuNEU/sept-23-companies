@@ -1285,8 +1285,8 @@ class TransactionTest(Base):
 
 class MultiBase(Base):
     """The shipped shape: account 1 rests (read every tick, never sends), account 2 sends the general lane, the
-    Northeastern account sends the sponsor lane but has no client here (see `MailAppBase`). `self.gmail` is account 1's mailbox (it holds the imported email),
-    `self.gmail2` account 2's."""
+    Northeastern account sends the sponsor lane but has no client here (see `MailAppBase`). `self.gmail` is account
+    1's mailbox (it holds the imported email), `self.gmail2` account 2's."""
     cfg = SHIPPED
     proven_two = True  # Gmail is shown to keep the marker on account 2 too
 
@@ -1721,6 +1721,8 @@ class MailAppProofTest(MailAppBase):
         self.assertEqual(detail["stored_rfc_id"], self.message(first)["rfc_message_id"])
         self.assertEqual(self.events("marker_missing"), [])
         self.assertNotIn("message", self.mail.calls)  # no marker read, no slow lookup in every mailbox
+        self.assertIn(f"the first email from {NEU} is in Sent Items, so the rest may follow", report.lines)
+        self.assertFalse(any("marker" in line for line in report.lines))
         self.assertEqual(report.sent, (second,))  # proven in step 4, so the next goes in the same tick
         self.assertEqual(len(self.mail.sent), 2)
         self.assertEqual(self.problems, [])

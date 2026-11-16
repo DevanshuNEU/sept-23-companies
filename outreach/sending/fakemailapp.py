@@ -9,8 +9,10 @@ osascript, opens a socket or a file. `FakeMailApp.sent` is the only count of ema
 Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.app's Outbox), `deliver_reply`,
 `deliver_auto_reply`, `deliver_ndr` (a Microsoft "Undeliverable" notice), `deliver_unrelated`, `add_to_sent`,
 `add_to_mailbox`, `copy_to`, `fail_mailbox`, and `closed` (Mail.app not running: every script fails with `app_closed`).
-`probe(method_name)` runs at the start of every client method; `calls` lists them, `scripts` the scripts run and
-`fetches` the bare Message-IDs each fetch script was asked for.
+`probe(method_name)` runs at the start of every client method; `calls` lists them, `scripts` the scripts run,
+`fetches` the bare Message-IDs each fetch script printed and `fetch_limits` its time budget and record cap.
+`seconds_per_record` makes each record cost a fetch that much of its budget; `mailboxes` is the account's mailbox
+list in order (append a name twice for two mailboxes that share it).
 """
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -49,6 +51,7 @@ class Stored:
     content: str = ""
     replied_to: str | None = None
     leaves_outbox: datetime | None = None
+    position: int | None = None  # its mailbox's place in `mailboxes` (1 up); None is the first one named `box`
 
     @property
     def rfc_id(self) -> str:
@@ -108,7 +111,10 @@ class FakeMailApp(MailAppClient):
         self.sent: list[tuple[Outgoing | None, str, datetime]] = []  # (email, Message-ID, when) for each that went
         self.calls: list[str] = []
         self.scripts: list[str] = []
-        self.fetches: list[list[str]] = []
+        self.mailboxes = list(MAILBOXES)                     # `every mailbox of account`, in order
+        self.fetches: list[list[str]] = []                   # the Message-IDs (bare) each fetch printed
+        self.fetch_limits: list[tuple[int, int]] = []        # each fetch's time budget and most records
+        self.seconds_per_record = 0                          # what one record costs a fetch's time budget
         self._failures: list[_Failure] = []
         self._slow: list[timedelta | None] = []
         self._failing_boxes: set[str] = set()
@@ -167,8 +173,12 @@ class FakeMailApp(MailAppClient):
         return self._inbound(mailbox, from_addr, subject, {}, "", at)
 
     def add_to_mailbox(self, mailbox: str, from_addr: str, to: str, subject: str, *, at: datetime | None = None,
-                       headers: Mapping[str, str] | None = None, content: str = "") -> Stored:
-        return self._inbound(mailbox, from_addr, subject, dict(headers or {}), content, at, to_addr=to)
+                       headers: Mapping[str, str] | None = None, content: str = "",
+                       position: int | None = None) -> Stored:
+        """A message in `mailbox`; `position` names one of two mailboxes that share the name."""
+        stored = self._inbound(mailbox, from_addr, subject, dict(headers or {}), content, at, to_addr=to)
+        stored.position = position
+        return stored
 
     def add_to_sent(self, to: str, subject: str, *, at: datetime | None = None) -> Stored:
         """A message in Sent Items this fake did not send (his own mail, or a decoy). Not counted in `sent`."""
@@ -271,32 +281,58 @@ class FakeMailApp(MailAppClient):
                 for s in self._visible(outbox) if s.subject.casefold() == same]
         return out
 
+    @staticmethod
+    def _cutoff(args: list[str]) -> datetime:
+        year, month, day, seconds = (int(a) for a in args)
+        return (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
+
+    def _window(self, pos: int, cutoff: datetime) -> list[Stored]:
+        """`messages of mb whose date received > cutoff` for the mailbox at `pos`, in Mail.app's order."""
+        name = self.mailboxes[pos - 1]
+        first = self.mailboxes.index(name) + 1
+        return [s for s in self._visible(name) if (s.position or first) == pos
+                and s.received_at.replace(microsecond=0) > cutoff]
+
     def _list_script(self, args: list[str]) -> list[str]:
-        year, month, day, seconds = (int(a) for a in args[1:5])
+        cutoff = self._cutoff(args[1:5])
         skip = set(args[5:])
-        cutoff = (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
         out = []
-        for box in MAILBOXES:
+        for pos, box in enumerate(self.mailboxes, start=1):
             if box in skip:
                 continue
             if box in self._failing_boxes:
-                out.append(_record("error", _esc(box), _esc("Mail got an error: Can't get every message. (-1728)")))
+                out.append(_record("error", str(pos), _esc(box),
+                                   _esc("Mail got an error: Can't get every message. (-1728)")))
                 continue
-            out += [_record("id", _esc(box), _esc(s.msgid), local_text(s.received_at)) for s in self._visible(box)
-                    if s.received_at.replace(microsecond=0) > cutoff]
+            out += [_record("id", str(pos), _esc(box), _esc(s.msgid), local_text(s.received_at))
+                    for s in self._window(pos, cutoff)]
         return out
 
     def _fetch_script(self, args: list[str]) -> list[str]:
-        pairs = list(zip(args[1::2], args[2::2]))
-        self.fetches.append([msgid for _, msgid in pairs])
-        out = []
-        for box, wanted in pairs:
+        cutoff = self._cutoff(args[1:5])
+        budget, most = int(args[5]), int(args[6])
+        self.fetch_limits.append((budget, most))
+        printed: list[str] = []
+        out, k, spent, stopped = [], 7, 0, False
+        while k < len(args) and not stopped:
+            pos, n = int(args[k]), int(args[k + 1])
+            wanted = set(args[k + 2:k + 2 + n])
+            k += 2 + n
+            box = self.mailboxes[pos - 1]
             if box in self._failing_boxes:
-                out.append(_record("error", _esc(box), _esc("Mail got an error: Can't get mailbox. (-1728)")))
+                out.append(_record("error", str(pos), _esc(box), _esc("Mail got an error: Can't get mailbox. (-1728)")))
                 continue
-            hits = [s for s in self._visible(box) if s.msgid == wanted]
-            if hits:
-                out.append(self._message_record(box, hits[0]))
+            for s in self._window(pos, cutoff):
+                if len(printed) >= most or spent > budget:
+                    stopped = True
+                    break
+                if s.msgid in wanted:
+                    out.append(self._message_record(box, s))
+                    printed.append(s.msgid)
+                    spent += self.seconds_per_record
+        self.fetches.append(printed)
+        if stopped:
+            out.append("more")
         return out
 
     def _message_script(self, args: list[str]) -> list[str]:

@@ -18,9 +18,10 @@
 - New mail. `history` reads every mailbox of the account but Sent Items, Drafts and Outbox, for messages received
   after the cursor less 24 hours, in two steps so a busy day never outgrows the 120 second read: it lists each
   message's mailbox, Message-ID and date (cheap), then fetches full records only for the ones the caller has not
-  handled (`skip_ids`), at most 40 a call, oldest first. The page holds every message it names, so `message` costs no
-  further script. The cursor is a time (UTC, ISO), not a Gmail history id, and it moves to the read's start only when
-  nothing was left out. There are no threads to read (`thread` raises ThreadUnsupported): with no cursor the inbound
+  handled (`skip_ids`), at most 40 a call and none started after 80 seconds, oldest first. Neither step queries
+  message by message: each mailbox's window is resolved once and walked. The page holds every message it names, so
+  `message` costs no further script. The cursor is a time (UTC, ISO), not a Gmail history id, and it moves to the
+  read's start only when nothing was left out. There are no threads to read (`thread` raises ThreadUnsupported): with no cursor the inbound
   read takes the last 45 days with `history`.
 
 AppleScript text lives here as constants, each starting with `COMMON_HANDLERS` (the one escape handler every script
@@ -52,7 +53,8 @@ from outreach.store.timefmt import ISO_FMT
 __all__ = ["MailAppClient", "COMMON_HANDLERS", "PROFILE_SCRIPT", "SEND_SCRIPT", "REPLY_SCRIPT", "FIND_SCRIPT",
            "LIST_SCRIPT", "FETCH_SCRIPT", "MESSAGE_SCRIPT", "ID_PREFIX", "SENT_BOX", "DRAFTS_BOX", "OUTBOX_BOX",
            "JUNK_BOX", "SKIPPED_BOXES", "SEND_TIMEOUT", "READ_TIMEOUT", "POLL_SECONDS", "HISTORY_OVERLAP",
-           "FETCH_LIMIT", "SNIPPET_LENGTH", "bracket", "bare", "local_text", "local_parts", "read_local"]
+           "FETCH_LIMIT", "FETCH_BUDGET", "FETCH_ASK", "SNIPPET_LENGTH", "bracket", "bare", "local_text",
+           "local_parts", "read_local"]
 
 ID_PREFIX = "mailapp:"
 # The Exchange account's own mailboxes (the spike, 2026-11-15).
@@ -66,9 +68,12 @@ SEND_TIMEOUT = 60       # seconds: a send, and the Sent Items poll after it, all
 READ_TIMEOUT = 120      # seconds: any read
 POLL_SECONDS = 2        # between Sent Items reads after a send
 HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); known ids dedup what was read
-# Full records fetched by one read, at most (controller ruling for B4): about 0.9 s each plus a `whose` query of about
-# 1 s on the real Mail.app, so 40 stay well inside the 120 s read; the rest wait for the next tick.
+# One fetch prints at most FETCH_LIMIT full records (about 0.9 s each on the real Mail.app) and starts none after
+# FETCH_BUDGET seconds (controller ruling, B4 fix round 1): the real guard against the 120 s read timeout. The ids it
+# is asked about are at most FETCH_ASK, oldest first; what is left waits for the next tick.
 FETCH_LIMIT = 40
+FETCH_BUDGET = 80
+FETCH_ASK = 400
 # Of the body, whitespace collapsed. All 2000 characters the message script returns: a Microsoft notice puts its status
 # code and failed address a long way down, and Gmail's own snippet is a different path (`gmail.py`).
 SNIPPET_LENGTH = 2000
@@ -118,6 +123,20 @@ end joinWith
 on fields(parts)
 	return my joinWith(parts, tab)
 end fields
+
+on cutoffOf(y, mo, d, secs)
+	set cutoff to current date
+	set day of cutoff to 1
+	set year of cutoff to y as integer
+	set month of cutoff to mo as integer
+	set day of cutoff to d as integer
+	set time of cutoff to secs as integer
+	return cutoff
+end cutoffOf
+
+on secondsSince(t)
+	return (current date) - t
+end secondsSince
 
 on firstTo(h)
 	tell application "Mail"
@@ -239,38 +258,31 @@ end run
 '''
 
 # argv: account name, the local year, month, day and seconds into that day to read from, then the mailbox names to
-# skip. The cheap first step of a read: one `id <mailbox> <Message-ID> <date received>` record per message received
-# after that time, from a `whose` query and a bulk read of the two properties of the list it returned (no message is
-# walked one by one). A mailbox that cannot be read prints `error <mailbox> <text>` and the client fails the whole
-# read (never a silent skip).
+# skip. The first step of a read: one `id <position> <mailbox> <Message-ID> <date received>` record per message
+# received after that time. Each mailbox's window is resolved once (`whose`, about 1 s) and walked item by item: a
+# bulk property read of a resolved list fails on the real Mail.app, and a `whose message id is` query per message
+# costs about 2 s each. The position is the mailbox's place in `every mailbox of account` (two mailboxes may share a
+# name). A mailbox that cannot be read prints `error <position> <mailbox> <text>` and the client fails the whole read.
 LIST_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set acctName to item 1 of argv
-	set cutoff to current date
-	set day of cutoff to 1
-	set year of cutoff to (item 2 of argv) as integer
-	set month of cutoff to (item 3 of argv) as integer
-	set day of cutoff to (item 4 of argv) as integer
-	set time of cutoff to (item 5 of argv) as integer
+	set cutoff to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
 	set skipNames to items 6 thru -1 of argv
 	set out to {}
 	tell application "Mail"
 		set boxes to (get every mailbox of account acctName)
-		repeat with mb in boxes
+		repeat with pos from 1 to (count of boxes)
+			set mb to item pos of boxes
 			set boxName to name of mb
 			if skipNames does not contain boxName then
 				try
 					set found to (messages of mb whose date received > cutoff)
-					if (count of found) > 0 then
-						set ids to (message id of found)
-						set dates to (date received of found)
-						repeat with i from 1 to (count of ids)
-							set end of out to my fields({"id", my esc(boxName), my esc(item i of ids), my isoOf(item i of dates)})
-						end repeat
-					end if
+					repeat with h in found
+						set end of out to my fields({"id", pos as text, my esc(boxName), my esc(message id of h), my isoOf(date received of h)})
+					end repeat
 				on error errText number errNum
-					set end of out to my fields({"error", my esc(boxName), my esc(errText & " (" & errNum & ")")})
+					set end of out to my fields({"error", pos as text, my esc(boxName), my esc(errText & " (" & errNum & ")")})
 				end try
 			end if
 		end repeat
@@ -279,27 +291,52 @@ on run argv
 end run
 '''
 
-# argv: account name, then pairs of mailbox name and Message-ID (no brackets), at most FETCH_LIMIT pairs. The second
-# step: one `msg` record (`messageRecord`) per message still there, nothing for one gone since it was listed. A
-# mailbox that cannot be read prints `error <mailbox> <text>`.
+# argv: account name, the window as the list script's (year, month, day, seconds), the time budget in seconds, the
+# most records to print, then for each mailbox that holds wanted ids: its position, how many ids, and the ids (no
+# brackets). The second step: each such mailbox's window is resolved once and walked item by item, and each message
+# whose Message-ID is wanted is printed as one `msg` record (`messageRecord`). It starts no new record once the
+# budget is spent or the most records are printed, and then prints a last `more` record: the ids not printed were
+# left out, not gone. A mailbox that cannot be read prints `error <position> <mailbox> <text>`.
 FETCH_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
+	set started to current date
 	set acctName to item 1 of argv
-	set pairs to ((count of argv) - 1) div 2
+	set cutoff to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
+	set budget to (item 6 of argv) as integer
+	set most to (item 7 of argv) as integer
+	set k to 8
+	set printed to 0
+	set stopped to false
 	set out to {}
 	tell application "Mail"
-		repeat with i from 1 to pairs
-			set boxName to item (2 * i) of argv
-			set wanted to item (2 * i + 1) of argv
+		set boxes to (get every mailbox of account acctName)
+		repeat while k <= (count of argv)
+			set pos to (item k of argv) as integer
+			set n to (item (k + 1) of argv) as integer
+			set wanted to items (k + 2) thru (k + 1 + n) of argv
+			set k to k + 2 + n
+			set mb to item pos of boxes
+			set boxName to name of mb
 			try
-				set hits to (messages of mailbox boxName of account acctName whose message id is wanted)
-				if (count of hits) > 0 then set end of out to my messageRecord(boxName, item 1 of hits)
+				set found to (messages of mb whose date received > cutoff)
+				repeat with h in found
+					if printed >= most or (my secondsSince(started)) > budget then
+						set stopped to true
+						exit repeat
+					end if
+					if wanted contains (message id of h) then
+						set end of out to my messageRecord(boxName, h)
+						set printed to printed + 1
+					end if
+				end repeat
 			on error errText number errNum
-				set end of out to my fields({"error", my esc(boxName), my esc(errText & " (" & errNum & ")")})
+				set end of out to my fields({"error", pos as text, my esc(boxName), my esc(errText & " (" & errNum & ")")})
 			end try
+			if stopped then exit repeat
 		end repeat
 	end tell
+	if stopped then set end of out to "more"
 	return my joinWith(out, linefeed)
 end run
 '''
@@ -427,10 +464,11 @@ def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
 
 
 def _fail_on_error(records: list[list[str]]) -> None:
-    """A read whose script could not read a mailbox fails whole (`server`), naming it: never a silent skip."""
+    """A read whose script could not read a mailbox (`error <position> <mailbox> <text>`) fails whole (`server`),
+    naming it: never a silent skip."""
     failed = [rec for rec in records if rec[0] == "error"]
     if failed:
-        raise GmailError("server", None, f"Mail.app could not read the mailbox {failed[0][1]}: {failed[0][2]}")
+        raise GmailError("server", None, f"Mail.app could not read the mailbox {failed[0][2]}: {failed[0][3]}")
 
 
 def _shape(records: list[list[str]], kinds: dict[str, int]) -> list[list[str]]:
@@ -565,37 +603,47 @@ class MailAppClient(MailClient):
     def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
         """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`), in every mailbox but Sent Items,
         Drafts and Outbox, in two steps: the window's Message-IDs (`LIST_SCRIPT`), then the full records of the ones
-        not in `skip_ids` (bracketed or bare Message-IDs the caller already handled), at most `FETCH_LIMIT`, oldest
-        first, each once (`FETCH_SCRIPT`). With none left out the new cursor is the time the read began (`more`
-        False); else it is the cursor given (`more` True) and the next call fetches the rest. A cursor that is not a
-        time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read fails the whole read
-        (`server`). The page holds every message it names (`held`), so `message` serves them with no script."""
+        not in `skip_ids` (bracketed or bare Message-IDs the caller already handled), oldest first, each once
+        (`FETCH_SCRIPT`: at most `FETCH_LIMIT` records, none started after `FETCH_BUDGET` seconds). An id the fetch
+        stopped before is left out; one it did not find though it read that mailbox through is gone (deleted or moved
+        since the list), so it never holds the read. With none left out the new cursor is the time the read began
+        (`more` False); else it is the cursor given (`more` True) and the next call fetches the rest. A cursor that is
+        not a time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read fails the whole
+        read (`server`). The page holds every message it names (`held`), so `message` serves them with no script."""
         since = _cursor_time(start_history_id)
         read_at = self._now_text()
-        listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *local_parts(since - HISTORY_OVERLAP),
-                                                    *SKIPPED_BOXES], READ_TIMEOUT), {"id": 4, "error": 3})
+        window = local_parts(since - HISTORY_OVERLAP)
+        listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *window, *SKIPPED_BOXES], READ_TIMEOUT),
+                        {"id": 5, "error": 4})
         _fail_on_error(listed)
         skip = {bracket(i) for i in skip_ids} - {""}
-        wanted: dict[str, str] = {}  # Message-ID to the mailbox it is fetched from, oldest first, each once
-        for _, box, msgid, _ in sorted(listed, key=lambda rec: (read_local(rec[3]) is None,
-                                                                        read_local(rec[3]) or 0)):
+        wanted: dict[str, str] = {}  # Message-ID to the position of the mailbox it is fetched from, oldest first
+        for _, pos, box, msgid, _ in sorted(listed, key=lambda rec: (read_local(rec[4]) is None,
+                                                                     read_local(rec[4]) or 0)):
             own = bracket(msgid)
             if box not in SKIPPED_BOXES and own and own not in skip and own not in wanted:
-                wanted[own] = box
-        batch = list(wanted.items())[:FETCH_LIMIT]
+                wanted[own] = pos
+        asked = list(wanted.items())[:FETCH_ASK]
         fetched: dict[str, MessageMeta] = {}
-        if batch:
-            args = [self.mailapp_account]
-            for own, box in batch:
-                args += [box, bare(own)]
-            records = _shape(self._records(FETCH_SCRIPT, args, READ_TIMEOUT), {"msg": _MSG_FIELDS, "error": 3})
+        stopped = False
+        if asked:
+            by_box: dict[str, list[str]] = {}
+            for own, pos in asked:
+                by_box.setdefault(pos, []).append(bare(own))
+            args = [self.mailapp_account, *window, str(FETCH_BUDGET), str(FETCH_LIMIT)]
+            for pos, ids in by_box.items():
+                args += [pos, str(len(ids)), *ids]
+            records = _shape(self._records(FETCH_SCRIPT, args, READ_TIMEOUT),
+                             {"msg": _MSG_FIELDS, "error": 4, "more": 1})
             _fail_on_error(records)
+            stopped = any(rec[0] == "more" for rec in records)
             for rec in records:
-                meta = _meta(rec)
-                fetched.setdefault(meta.gmail_message_id, meta)
-        page = {_gmail_id(own): fetched[_gmail_id(own)] for own, _ in batch if _gmail_id(own) in fetched}
-        self._page = page  # in list order: one gone since it was listed is left out
-        more = len(wanted) > len(batch)
+                if rec[0] == "msg":
+                    meta = _meta(rec)
+                    fetched.setdefault(meta.gmail_message_id, meta)
+        page = {_gmail_id(own): fetched[_gmail_id(own)] for own, _ in asked if _gmail_id(own) in fetched}
+        self._page = page  # oldest first; an id not printed is gone, or left out when the fetch stopped early
+        more = (stopped and len(page) < len(asked)) or len(wanted) > len(asked)
         return HistoryPage(added=tuple(Added(gmail_message_id=m.gmail_message_id, thread_id=m.thread_id,
                                              labels=m.labels) for m in page.values()),
                            history_id=start_history_id if more else read_at, held=True, more=more)

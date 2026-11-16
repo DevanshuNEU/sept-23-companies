@@ -501,7 +501,8 @@ class AccountsSnapshotTest(unittest.TestCase):
         for a in s.accounts:
             self.assertEqual((a.paused, a.pause_reason), (False, ""))
         rested = self.snap(GMAIL_ONLY).accounts[2]
-        self.assertEqual((rested.sends, rested.state, rested.text), (False, "not_sending_yet", "waits, not sending yet"))
+        self.assertEqual((rested.sends, rested.state, rested.text),
+                         (False, "not_sending_yet", "waits, not sending yet"))
 
     def test_mail_app_not_running_holds_the_northeastern_account(self):
         self.auth(self.three, "app_closed", "Gmail app_closed: execution error: Mail.app is not running (-600)")

@@ -1,0 +1,31 @@
+From: <postmaster@acme-ins.example>
+To: <chicholikar.d@northeastern.edu>
+Date: May 14, 2025 at 10:10:03 AM EDT
+Content-Type: multipart/report; report-type=delivery-status; boundary="7b947f5d-26ea-499a-975b-2110d3a14011"
+In-Reply-To: <SJ0PR06MB77901DCC0C2944B97C3A8C0B8496A@SJ0PR06MB7790.namprd06.prod.outlook.com>
+References: <SJ0PR06MB77901DCC0C2944B97C3A8C0B8496A@SJ0PR06MB7790.namprd06.prod.outlook.com>
+Subject: Undeliverable: [EXTERNAL] Software Engineer Intern - Jersey City, NJ
+Auto-Submitted: auto-replied
+
+
+You don't often get email from postmaster@acme-ins.example. Learn why this is important 
+
+Delivery has failed to these recipients or groups:
+rn@acme-ins.example (rn@acme-ins.example) The email address you entered couldn't be found. Please check the recipient's email address and try to resend the message. If the problem continues, please contact your email admin.  
+
+
+
+
+
+
+Diagnostic information for administrators:
+Generating server: NAUSP-WEXC0000.acme-ins.example 
+rn@acme-ins.example Remote Server returned '550 5.1.10 RESOLVER.ADR.RecipientNotFound; Recipient not found by SMTP address lookup'
+
+--- delivery-status ---
+Reporting-MTA: dns;NAUSP-WEXC0000.acme-ins.example
+Final-Recipient: rfc822;rn@acme-ins.example
+Action: failed
+Status: 5.1.10
+Diagnostic-Code: smtp;550 5.1.10 RESOLVER.ADR.RecipientNotFound; Recipient not found by SMTP address lookup
+X-Display-Name: rn@acme-ins.example

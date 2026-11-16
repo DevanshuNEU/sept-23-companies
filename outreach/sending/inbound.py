@@ -321,7 +321,13 @@ def _insert_inbound(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, 
         "INSERT INTO inbound_message(touch_id, gmail_message_id, from_addr, subject, body_text, kind, received_at, "
         "recorded_at, dsn_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(gmail_message_id) DO NOTHING",
         (touch_id, meta.gmail_message_id, meta.from_addr or "", meta.subject or "", meta.snippet or "", found.kind,
-         received, stamp, found.dsn_class)).rowcount == 1
+         received, stamp, _stored_class(found.dsn_class))).rowcount == 1
+
+
+def _stored_class(dsn_class: str | None) -> str | None:
+    """The `inbound_message.dsn_class` the table accepts: a provider block of the account is stored as `limit` (the
+    same meaning: the mail system refused the account, not the address). The CHECK has no `provider_block`."""
+    return "limit" if dsn_class == "provider_block" else dsn_class
 
 
 def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:
@@ -449,10 +455,12 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
 
 
 def _limit_notice(conn: sqlite3.Connection, touch_id: int | None, meta: MessageMeta, received: str, *,
-                  account: accounts.AccountRow, now: datetime, cfg: SendConfig, notify: Notifier) -> None:
-    """Gmail refused to send for the limit of the account whose mailbox holds the notice: a hard block on that
-    account, whatever thread the notice is in."""
-    note_signal(conn, "gmail_limit", at=received, key=f"gmail_limit:dsn:{meta.gmail_message_id}", cfg=cfg,
+                  account: accounts.AccountRow, now: datetime, cfg: SendConfig, notify: Notifier,
+                  kind: str = "gmail_limit") -> None:
+    """The mail system refused the account whose mailbox holds the notice, not the recipient: Gmail's sending limit
+    (`gmail_limit`) or a Microsoft block of the account (`provider_block`). A hard block on that account, whatever
+    thread the notice is in."""
+    note_signal(conn, kind, at=received, key=f"{kind}:dsn:{meta.gmail_message_id}", cfg=cfg,
                 notify=notify, now=now, account=account,
                 detail={"touch_id": touch_id, "gmail_message_id": meta.gmail_message_id, "source": "dsn"})
 
@@ -474,7 +482,8 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, account: accounts
     - a bounce: an `open` touch becomes `bounced`; its unsent messages are stopped (reason `bounced`); its address
       goes on `bounced_address` (source `bounce`, the bounce's Gmail id) and the person on the no-go list (#224);
       then the policy, 3-day bounce rate and hard bounce rate signals. A Gmail limit notice instead raises
-      `gmail_limit` and leaves the touch alone, even when it matches no touch.
+      `gmail_limit`, and a Microsoft block of the account (5.7.708, 5.7.705, 5.1.8, "restricted from sending")
+      raises `provider_block`; both leave the touch alone, even when it matches no touch.
     Matching by thread, failed recipient and sent subject uses only the account's own touches; the reply headers
     match any account's email. A message that writes nothing is remembered in `inbound_seen` under the account's
     key (forgotten after `SEEN_DAYS`), so it is never read again. The account's cursor moves to
@@ -507,13 +516,14 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, account: accounts
                 if unthreaded is None:
                     unthreaded = (tracked_addresses(conn, account_id), tracked_subjects(conn, account_id))
                 touch_id = match_unthreaded(meta, *unthreaded)
-            if found.kind == "bounce" and found.dsn_class == "limit":
+            if found.kind == "bounce" and found.dsn_class in ("limit", "provider_block"):
                 if touch_id is not None:
                     _insert_inbound(conn, touch_id, meta, found, _received(meta), stamp)
                 else:
                     _seen(conn, account_id, meta, "untracked", stamp)
                 _limit_notice(conn, touch_id, meta, _received(meta), account=account, now=now, cfg=cfg,
-                              notify=notify)
+                              notify=notify, kind="provider_block" if found.dsn_class == "provider_block"
+                              else "gmail_limit")
                 counts["limit_notices"] += 1
                 continue
             if touch_id is None or found.kind not in ("human", "auto_reply", "bounce"):

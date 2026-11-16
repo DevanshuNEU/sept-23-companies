@@ -32,12 +32,28 @@ _LIMIT = re.compile(r"reached a limit for sending", re.I)
 _POLICY_WORDS = re.compile(r"unsolicited|spam|policy", re.I)
 _POLICY_WITH_WORDS = re.compile(_CODE.format(r"5\.7\.1"))
 _POLICY_ALWAYS = re.compile(_CODE.format(r"5\.7\.511"))
-# A 4.7.x code is temporary ("try again later", 4.7.28 and 4.7.5xx included): the server keeps trying, so it is a
+# A 4.x.x code is temporary ("try again later", 4.7.28 and 4.7.5xx included): the server keeps trying, so it is a
 # delay notice, never a bounce, unless a permanent 5.x.x code is in the same notice.
-_TEMPORARY = re.compile(_CODE.format(r"4\.7\.\d{1,3}"))
+_TEMPORARY = re.compile(_CODE.format(r"4\.\d{1,3}\.\d{1,3}"))
 _PERMANENT = re.compile(_CODE.format(r"5\.\d{1,3}\.\d{1,3}"))
 _HARD_CODE = re.compile(_CODE.format(r"5\.1\.1|5\.1\.10|5\.4\.1"))
 _HARD_WORDS = re.compile(r"address not found|does not exist", re.I)
+# The provider refused the ACCOUNT, not the recipient: Microsoft's 5.7.708 (traffic from this IP), 5.7.705 (tenant
+# over its limit) and 5.1.8 (bad outbound sender), or the words "restricted from sending". The address is fine.
+_BLOCK = re.compile(_CODE.format(r"5\.7\.708|5\.7\.705|5\.1\.8") + r"|restricted from sending", re.I)
+# A Microsoft Exchange system sender, which is not a postmaster or daemon address.
+_EXCHANGE_FROM = re.compile(r"MicrosoftExchange[0-9a-f]+@", re.I)
+_REPORT = re.compile(r"multipart/report\b[^;]*;[^\n]*report-type\s*=\s*\"?delivery-status", re.I)
+# Where a notice names the address that failed, most reliable first. The text is whitespace-collapsed.
+_ADDR = r"([^\s<>()\"',;]+@[^\s<>()\"',;]+)"
+_FAILED_IN_TEXT = tuple(re.compile(p, re.I) for p in (
+    r"Final-Recipient:\s*rfc822;\s*" + _ADDR + r"(?=[\s.,;]|$)",
+    r"Your message to\s+" + _ADDR + r"\s+couldn't be delivered",
+    _ADDR + r"\s+Remote Server returned",
+    r"<" + _ADDR + r">\.\.\.\s*User unknown",
+    r"had permanent fatal errors\W*<?" + _ADDR + r">?(?=[\s>.,;]|$)",
+))
+_STATUS_LINE = re.compile(r"Status:\s*([245])\.\d{1,3}\.\d{1,3}(?!\d)", re.I)
 
 
 @dataclass(frozen=True)
@@ -48,16 +64,35 @@ class Inbound:
 
 
 def failed_recipients(meta: MessageMeta) -> list[str]:
-    """Every address in `X-Failed-Recipients`, lower case, in order."""
+    """Every address in `X-Failed-Recipients`, lower case, in order; with no such header, the one address the
+    notice's text names (`text_recipient`)."""
     value = meta.headers.get("x-failed-recipients") or ""
-    return [addr.strip().lower() for _, addr in getaddresses([value]) if addr.strip()]
+    found = [addr.strip().lower() for _, addr in getaddresses([value]) if addr.strip()]
+    if found:
+        return found
+    named = text_recipient(meta.snippet or "")
+    return [named] if named else []
+
+
+def text_recipient(text: str) -> str | None:
+    """The failed address a Microsoft or Proofpoint notice names in its text: a `Final-Recipient:` line, "Your
+    message to X couldn't be delivered", "X Remote Server returned", "<X>... User unknown", then the address
+    after "had permanent fatal errors". Lower case; None when none of those is there."""
+    for pattern in _FAILED_IN_TEXT:
+        hit = pattern.search(text)
+        if hit:
+            return hit.group(1).strip(".,;").lower()
+    return None
 
 
 def dsn_class(meta: MessageMeta) -> str:
-    """How a bounce reads, from its snippet: `limit`, `policy`, `hard` or `unknown` (counted as a bounce)."""
+    """How a bounce reads, from its snippet: `limit`, `provider_block`, `policy`, `hard` or `unknown` (counted as a
+    bounce)."""
     text = meta.snippet or ""
     if _LIMIT.search(text):
         return "limit"
+    if _BLOCK.search(text):
+        return "provider_block"
     if _POLICY_ALWAYS.search(text) or (_POLICY_WITH_WORDS.search(text) and _POLICY_WORDS.search(text)):
         return "policy"
     if _HARD_CODE.search(text) or _HARD_WORDS.search(text):
@@ -92,6 +127,12 @@ def _machine_made(meta: MessageMeta) -> bool:
     return h.get("auto-submitted", "no").strip().lower() not in ("no", "") or bool(h.get("x-failed-recipients"))
 
 
+def _is_notice(meta: MessageMeta) -> bool:
+    """Reads as a delivery notice: a bounce subject, or a multipart/report delivery-status body."""
+    return bool(BOUNCE_SUBJ.search(meta.subject or "")
+                or _REPORT.search(meta.headers.get("content-type") or ""))
+
+
 def classify(meta: MessageMeta, account: str) -> Inbound:
     """`ours` (from `account`, any display name or case, or a dotted or `+tag` form of a Gmail address), then a
     bounce or delay notice (a daemon or postmaster sender, or a bounce subject with a machine-made header), then
@@ -100,11 +141,15 @@ def classify(meta: MessageMeta, account: str) -> Inbound:
     if sender and _gmail_key(sender) == _gmail_key(account):
         return Inbound("ours", None, None)
     subject = meta.subject or ""
-    if BOUNCE.search(meta.from_addr or "") or (BOUNCE_SUBJ.search(subject) and _machine_made(meta)):
+    sender_text = meta.from_addr or ""
+    if BOUNCE.search(sender_text) or (_is_notice(meta) and (_machine_made(meta) or _EXCHANGE_FROM.search(sender_text))):
         failed = failed_recipients(meta)
         klass = dsn_class(meta)
         text = meta.snippet or ""
-        temporary = klass != "limit" and _TEMPORARY.search(text) and not _PERMANENT.search(text)
+        # A `Status:` line decides when the notice has one; else any 4.x.x code with no 5.x.x beside it.
+        status = _STATUS_LINE.search(text)
+        temporary = klass not in ("limit", "provider_block") and (
+            status.group(1) == "4" if status else bool(_TEMPORARY.search(text) and not _PERMANENT.search(text)))
         if (DELAY_SUBJ.search(subject) and klass == "unknown") or temporary:
             return Inbound("delay", None, failed[0] if failed else None)
         return Inbound("bounce", klass, failed[0] if failed else None)

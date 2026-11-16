@@ -63,7 +63,9 @@ SEND_TIMEOUT = 60       # seconds: a send, and the Sent Items poll after it, all
 READ_TIMEOUT = 120      # seconds: any read
 POLL_SECONDS = 2        # between Sent Items reads after a send
 HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); known ids dedup what was read
-SNIPPET_LENGTH = 400    # of the body, whitespace collapsed (the message script returns its first 2000 characters)
+# Of the body, whitespace collapsed. All 2000 characters the message script returns: a Microsoft notice puts its status
+# code and failed address a long way down, and Gmail's own snippet is a different path (`gmail.py`).
+SNIPPET_LENGTH = 2000
 
 # Shared by every script: the check that Mail.app is running (error -600, which the runner reports as
 # `app_closed`; `tell application "Mail"` would otherwise start it), the field escape `parse_records` undoes
@@ -359,7 +361,7 @@ _MSG_FIELDS = 10  # a `msg` record: kind, mailbox, id, received, sent, sender, t
 
 
 def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
-    """A MessageMeta from one `msg` record (`messageRecord`): the META_HEADERS of its `all headers`, the first 400
+    """A MessageMeta from one `msg` record (`messageRecord`): the META_HEADERS of its `all headers`, the first 2000
     characters of the body with whitespace collapsed as the snippet, and `SENT`, `SPAM` or `INBOX` by its mailbox."""
     _, box, msgid, received, sent, sender, to, subject, header_text, content = rec
     headers = _parse_headers(header_text)

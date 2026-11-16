@@ -271,7 +271,7 @@ class HistoryTest(Base):
 
 
 class MessageTest(Base):
-    def test_meta_headers_and_a_400_character_snippet(self):
+    def test_meta_headers_and_a_2000_character_snippet(self):
         first = self.mail.send(outgoing())
         ndr = self.mail.deliver_ndr(first)
         meta = self.mail.message("mailapp:" + ndr.rfc_id)
@@ -281,10 +281,16 @@ class MessageTest(Base):
                                                        'boundary="b1"')
         self.assertNotIn("received", meta.headers)
         self.assertIn("Your message to ada@acme.example couldn't be delivered", meta.snippet)
-        self.assertLessEqual(len(meta.snippet), 400)
+        self.assertLessEqual(len(meta.snippet), 2000)
         self.assertEqual((meta.labels, meta.thread_id), (("INBOX",), first.thread_id))
         self.assertEqual(meta.subject, "Undeliverable: Your team and the backend role")
         self.assertEqual(meta.internal_ms, ms(self.clock()))
+
+    def test_the_snippet_keeps_all_2000_characters_the_script_returns(self):
+        first = self.mail.send(outgoing())
+        long = self.mail.deliver_reply(first, "ada@acme.example", content="word " * 600)
+        meta = self.mail.message("mailapp:" + long.rfc_id)
+        self.assertEqual(len(meta.snippet), 1999)  # 2000 characters of body, the last space collapsed away
 
     def test_a_sent_items_message_is_labelled_sent(self):
         first = self.mail.send(outgoing())

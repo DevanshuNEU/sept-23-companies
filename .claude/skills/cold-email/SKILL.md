@@ -268,7 +268,8 @@ Addresses come from the Apollo MCP (#9 ruling of 2026-11-16). `apollo_people_bul
 credits per company, waterfall included, spent without asking him each time; report the credits used and the
 balance at the end. Past 5, stop and tell him how many people are left without an address. Keep only an address
 Apollo marks verified, or one the person publishes on a page you opened (pass that page as `email_source` with
-`basis: published`). A guessed, unverified or catch-all-only address counts as none. Never guess an address and
+`basis: published`). A guessed, unverified or catch-all-only address counts as none. An address on a domain that is not the company's, or a reveal showing another current employer
+(an agency contractor), counts as none too. Never guess an address and
 never build one from a name pattern. No sure address: drop the person with one line ("Jan Witowski: Apollo had no
 verified email, dropped").
 

@@ -220,6 +220,20 @@ class BriefResearchCase(DraftBriefCase):
         self.assertEqual(got["posting"]["title"], "Software Engineer")
         self.assertEqual(got["brief_id"], self.ok("draft_brief", {"person_id": self.pat})["brief_id"])
 
+    def test_a_greenhouse_link_matches_on_any_of_its_hosts(self):
+        """#296 (Robinhood): Knock stored boards.greenhouse.io, he pasted job-boards.greenhouse.io."""
+        pid = seed.posting(self.db, self.acme, "Backend Engineer",
+                           url="https://boards.greenhouse.io/acme/jobs/8385931?t=gh_src=&gh_jid=8385931")
+        for url in ("https://job-boards.greenhouse.io/acme/jobs/8385931",
+                    "https://job-boards.greenhouse.io/acme/jobs/8385931?gh_src=x",
+                    "https://boards.greenhouse.io/acme/jobs/8385931",
+                    "https://job-boards.eu.greenhouse.io/acme/jobs/8385931"):
+            got = self.ok("draft_brief", {"person_id": self.pat, "posting_url": url})
+            self.assertEqual(got["person"]["role_to_name"]["posting_id"], pid, url)
+        self.assertEqual(self.error("draft_brief", {"person_id": self.pat,
+                                                    "posting_url": "https://job-boards.greenhouse.io/other/jobs/8385931"}
+                                    )["code"], "bad_input")
+
     def test_a_pasted_posting_must_be_an_open_one_of_the_persons_company(self):
         other = seed.company(self.db, "Other Co")
         theirs = seed.posting(self.db, other, "Engineer", url="https://jobs.example/other-1")

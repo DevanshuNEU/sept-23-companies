@@ -76,6 +76,18 @@ class PickPeopleCase(McpCase):
         self.assertIn("not an engineering recruiter", reasons["Sal Es"])
         self.assertIn("not on the engineering team", reasons["Pro Duct"])
 
+    def test_pre_sales_and_support_managers_are_never_picked(self):
+        """#296 (Verkada): a Solutions Engineering Manager is pre-sales, not the engineering team."""
+        self.size(900)
+        got = self.pick([cand(t, t) for t in ("Solutions Engineering Manager", "Manager, Sales Engineering",
+                                              "Customer Engineering Manager", "Support Engineering Manager",
+                                              "Field Engineering Manager", "Software Engineering Manager",
+                                              "Senior Software Engineer, Support Systems",
+                                              "Software Engineer, Customer Platform")], max_people=10)
+        self.assertEqual(sorted(self.names(got)), ["Senior Software Engineer, Support Systems",
+                                                   "Software Engineer, Customer Platform", "Software Engineering Manager"])
+        self.assertTrue(all("not on the engineering team" in s["reason"] for s in got["not_picked"]))
+
     def test_people_already_emailed_or_no_go_are_skipped_and_a_linkedin_person_is_kept_with_their_id(self):
         self.size(40)
         sent = seed.person(self.db, self.cid, "Sam Sent", title="Software Engineer")

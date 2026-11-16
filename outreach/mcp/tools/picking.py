@@ -90,14 +90,15 @@ def role_of(title: str) -> Role | str:
         return Role("cto" if cto else "founder", "founder", 0, True)
     if _has(t, "founding engineer", "founding software engineer", "founding member of technical staff"):
         return Role("founding_engineer", "engineer", 0, False)
+    if _has(t, "solutions engineer\\w*", "sales engineer\\w*", "support engineer\\w*", "customer engineer\\w*",
+            "field engineer\\w*", "pre-?sales", "customer success", "technical support"):
+        return "not on the engineering team"  # pre-sales and support, managers included (#296)
     eng = _has(t, "engineering", "engineer", "software", "technical", "developer", "platform", "infrastructure",
                "machine learning", "ml", "ai", "data")
     if _has(t, "chief", "vp", "vice president", "svp", "evp"):
         return Role("manager", "manager", 2, True) if eng else "an executive outside engineering"
     if _has(t, "head", "director", "manager", "lead") and eng:
         return Role("manager", "manager", 0 if _has(t, "manager") else 1, False)
-    if _has(t, "sales engineer", "solutions engineer", "support engineer", "customer engineer", "field engineer"):
-        return "not on the engineering team"
     if _has(t, "engineer", "developer", "programmer", "member of technical staff", "mts", "architect", "scientist"):
         return Role("engineer", "engineer", 0, False)
     return "not on the engineering team"

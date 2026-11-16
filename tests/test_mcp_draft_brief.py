@@ -203,6 +203,34 @@ class BriefResearchCase(DraftBriefCase):
         self.assertTrue(got["text"].startswith("We use Go."))
         self.assertEqual(len(got["text"]), 4000)
 
+    def test_the_posting_he_pasted_is_the_one_named(self):
+        """#290: a pasted job link names that posting, whatever the ranking would pick."""
+        best = seed.posting(self.db, self.acme, "New Grad Engineer", first_seen_at="2026-11-09T00:00:00Z")
+        seed.decision(self.db, best, level_tier="new_grad")
+        pasted = seed.posting(self.db, self.acme, "Software Engineer",
+                              url="https://jobs.ashbyhq.com/acme/6548cc32-aaaa")
+        self.db.execute("INSERT INTO posting_body(posting_id, body) VALUES (?, ?)", (pasted, "Ship the product."))
+        self.assertEqual(self.ok("draft_brief", {"person_id": self.pat})["posting"]["title"], "New Grad Engineer")
+        for url in ("https://jobs.ashbyhq.com/acme/6548cc32-aaaa", "https://jobs.ashbyhq.com/acme/6548cc32-aaaa/",
+                    "https://jobs.ashbyhq.com/acme/6548cc32-aaaa/application?utm_source=x"):
+            got = self.ok("draft_brief", {"person_id": self.pat, "posting_url": url})
+            self.assertEqual((got["posting"]["title"], got["posting"]["text"]), ("Software Engineer", "Ship the product."))
+            self.assertEqual(got["person"]["role_to_name"]["posting_id"], pasted)
+        got = self.ok("draft_brief", {"person_id": self.pat, "posting_id": pasted})
+        self.assertEqual(got["posting"]["title"], "Software Engineer")
+        self.assertEqual(got["brief_id"], self.ok("draft_brief", {"person_id": self.pat})["brief_id"])
+
+    def test_a_pasted_posting_must_be_an_open_one_of_the_persons_company(self):
+        other = seed.company(self.db, "Other Co")
+        theirs = seed.posting(self.db, other, "Engineer", url="https://jobs.example/other-1")
+        closed = seed.posting(self.db, self.acme, "Engineer", url="https://jobs.example/acme-closed",
+                              closed_at="2026-11-02T00:00:00Z")
+        for bad in ({"posting_id": theirs}, {"posting_url": "https://jobs.example/other-1"}, {"posting_id": closed},
+                    {"posting_url": "https://jobs.example/nowhere"}, {"posting_id": 99999}):
+            self.assertEqual(self.error("draft_brief", {"person_id": self.pat, **bad})["code"], "bad_input", bad)
+        both = {"posting_id": closed, "posting_url": "https://jobs.example/acme-closed"}
+        self.assertEqual(self.error("draft_brief", {"person_id": self.pat, **both})["code"], "bad_input")
+
     def test_posting_and_company_facts_are_marked_untrusted(self):
         self.fact()
         pid = seed.posting(self.db, self.acme, "Backend Engineer")

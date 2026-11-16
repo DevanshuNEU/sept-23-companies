@@ -17,6 +17,7 @@ from outreach.api.queries import people as people_queries
 from outreach.api.queries.people import scope
 from outreach.drafts.followups import company_map, company_reply_held, held_survivors, resolve_company
 from outreach.rules.decide import row_level_state
+from outreach.drafts.fresh import stale_rank
 from outreach.sending import calendar
 from outreach.sending.config import load_config
 from outreach.store.timefmt import ISO_FMT
@@ -304,9 +305,9 @@ def company_view(conn: sqlite3.Connection, company_id: int, now: str) -> Company
     domain = best["domain"]["value"] if "domain" in best else None
     mx = conn.execute("SELECT status FROM mx_check WHERE domain = ?", (domain,)).fetchone() if domain else None
 
-    postings, role = rank_postings(posting_rows, decisions, read_ids, conn)
     cfg = load_config()
     today = calendar.ny_date(datetime.strptime(now, ISO_FMT).replace(tzinfo=timezone.utc), cfg)
+    postings, role = rank_postings(posting_rows, decisions, read_ids, conn, today)
     picked_on = picked_dates[0] if picked_dates else None
 
     # A person on a merged duplicate is judged against the survivor's pause and the family's hold.
@@ -424,8 +425,10 @@ def _board(boards) -> CompanyBoard | None:
     )
 
 
-def rank_postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[list[dict], dict | None]:
-    """Every posting as a row with its state, and the open one to name (best level first)."""
+def rank_postings(posting_rows, decisions: dict, read_ids: set, conn,
+                  today: date | None = None) -> tuple[list[dict], dict | None]:
+    """Every posting as a row with its state, and the open one to name: with `today`, a fresh one before a stale one
+    (#290, the MCP's rule), then the best level. Without it (the LinkedIn list), the best level alone."""
     explain = load_explain() if read_ids else None
     out = []
     for p in posting_rows:
@@ -452,7 +455,8 @@ def rank_postings(posting_rows, decisions: dict, read_ids: set, conn) -> tuple[l
     out.sort(key=lambda x: x["row"]["first_seen_at"], reverse=True)  # newest first, then a stable sort by state
     candidates = sorted(
         (x for x in out if x["state"] == "open"),
-        key=lambda x: (0 if x["decision"] is not None and x["decision"]["level_ok"] else 1, TIER_RANK[x["tier"]],
+        key=lambda x: (stale_rank(x["row"]["posted_on"], x["row"]["first_seen_at"], x["tier"], today) if today else 0,
+                       0 if x["decision"] is not None and x["decision"]["level_ok"] else 1, TIER_RANK[x["tier"]],
                        0 if x["start"] else 1),
     )
     role = candidates[0] if candidates else None

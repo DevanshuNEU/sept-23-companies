@@ -14,15 +14,25 @@ The rules come from issue #9 (Drafts, Sending: Content and Follow-ups); where th
 **Where to run.** The `outreach` tools work only in the live checkout, `~/Desktop/Sept 23 Companies`, where the
 server is registered (`python -m outreach.mcp --print-registration` prints the command). From a worktree they
 refuse; say so and stop, never work around it. A refusal from any tool is information to relay, not a wall to
-get past.
+get past. This file's full path is `~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md`; a session
+started anywhere else (DevVault's `/outreach`) reads it there.
+
+**From a job link** (`/outreach <job link or company>`, #9 ruling of 2026-11-16): he gives a job or a company and
+nothing else. Check Knock (`contact_check`), let `pick_people` choose who from an Apollo search, get each address from Apollo (see "Sending lanes and
+finding people"), drop anyone without a sure address, `intake` the rest, then steps 2 to 10 for each, and report
+who is in the Outbox and who was dropped and why. His giving the link is his yes to research that company and to
+spend Apollo credits within the budget; do not stop to ask. Do not show him drafts, versions or a pick: he reviews
+and edits every email in the Outbox, and his Approve click there is his sign-off.
 
 ## Steps
 
 Every email is built in this order: the posting, the company, the person, where he fits, the body, the subject last.
 The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the one he chose).
 
-1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only if he gave
-   one (used exactly as given, never guessed). Set `role_kind` from the title: engineer, manager (engineering
+1. **Inputs.** Per person: name, company, title, the pasted LinkedIn text, and an email address only when it is
+   sure: he gave it, Apollo returned it verified, or the person publishes it on a page you opened (used exactly as
+   given, never guessed, never built from a name pattern). No sure address means no email: drop the person with
+   one line saying so. Set `role_kind` from the title: engineer, manager (engineering
    manager, tech lead, head of, VP), founder (founder, CEO, CTO at a small startup), recruiter (recruiter, talent,
    sourcer, people). An alum is still one of these. Find the company with `company`: he picks it on Jobs, from any
    board, so any company in Knock will do. Its `company_id` is the one he gives, or `contact_check` finds it by name
@@ -34,7 +44,8 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    `why_not` says whether you may draft at all. `company` lists the open postings. Note the city for `tz`. Done
    when you hold one exact role title (with req ID when the posting shows one), or know none is open, which makes
    the ask a referral for future new-grad roles. If `can_draft_email` is false, report `why_not` and move on.
-3. **Brief.** Call `draft_brief` for the person (part 1). Part 2 (`part` 2: his voice files and stories) is the same
+3. **Brief.** Call `draft_brief` for the person (part 1). When he gave a job link, pass it as `posting_url` so the
+   brief names that posting (a link Knock does not hold is refused: say so and go on without it). Part 2 (`part` 2: his voice files and stories) is the same
    for every person: read it once in a session, and again only when part 1's `pack_id` differs from the one you read.
    The `brief_id` to save with is the person's, from part 1. Write from what the two parts return, nothing else: `person` (with the
    facts `save_research` stored for them, under `sources`), `voice` (his DevVault voice files, the Posture section
@@ -51,7 +62,8 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
    owning the role works on. Facts are stored and stay fresh for 14 days, so a company is researched once, not per
    person. When `research_needed` is true there are none. Before any research (the company's or its people's), tell
    Devanshu which company you will research and its site (from the people's email domain, the board or the posting),
-   say so if another company shares the name, and wait for his yes. Then, in the live checkout, run
+   say so if another company shares the name, and wait for his yes. A job link or company he gave to `/outreach` is
+   that yes already; ask only when another company shares the name and the site does not settle which. Then, in the live checkout, run
    `uv run python -m outreach.research company <company_id>` (GPT researches it once and code keeps only facts whose
    quote is on the page), or research the web yourself and call `save_research` with the `company_id`. A fact
    `save_research` returns under `rejected` was not stored and is never used. Done when
@@ -95,9 +107,10 @@ The lab behind it is `docs/research/2026-11-09-drafting-lab.md` (version 5, the 
     cannot be emailed (no address, no-go, said no, company closed, already emailed) is refused and nothing is
     stored; report it. A draft he has saved or approved is refused; never write over it. Done when `blocks` is
     empty.
-11. **Report.** One line per person: name, company, role kind, the first line's fact, project used, word count,
-    warnings left. Then any questions for him. Point him to the new app's Outbox to review and approve. For a batch,
-    finish every person first.
+11. **Report.** One line per person in the Outbox: name, company, role kind, the posting named, the first line's
+    fact, project used, word count, warnings left. Then one line per person dropped and why (no sure address, a
+    `stop` route, a refusal). Then the Apollo credits used and the balance, and any questions for him. Point him to
+    the Outbox to review, edit and approve. For a batch, finish every person first.
 
 Other tools you may use: `flag_review` raises a Needs-you item for a company; `mark_no_go` suggests a person goes on
 the no-go list (a reply that says no or stop) and only raises a Needs-you item he confirms; `record_research` stores
@@ -246,8 +259,22 @@ The sender picks the account, never this skill. A company with H-1B approvals on
 yes, goes from the Northeastern account. Every other company goes from the Gmail account. Do not name or choose an
 account in a draft.
 
-When you find or enrich people with the Apollo MCP, search first (it is free). Reveal an email (1 credit) only after
-Devanshu says yes. Keep only verified emails. Never guess an address.
+**Who** is decided by code, not by you: search Apollo first (free; people at the company's domain, with the
+fields `pick_people` takes), then call `pick_people` with the company, the job link and the results (and Apollo's
+employee count when Knock has no size). It returns the picks in #9's reach out order with why, and the reason for
+everyone left out. Do not pick around it; if its order looks wrong, say so to Devanshu.
+
+Addresses come from the Apollo MCP (#9 ruling of 2026-11-16). `apollo_people_bulk_match` for the picked people only; for anyone it returns without an email, the waterfall search once. Budget: up to 5
+credits per company, waterfall included, spent without asking him each time; report the credits used and the
+balance at the end. Past 5, stop and tell him how many people are left without an address. Keep only an address
+Apollo marks verified, or one the person publishes on a page you opened (pass that page as `email_source` with
+`basis: published`). A guessed, unverified or catch-all-only address counts as none. Never guess an address and
+never build one from a name pattern. No sure address: drop the person with one line ("Jan Witowski: Apollo had no
+verified email, dropped").
+
+H-1B and LCA findings: whatever you learn about the company's sponsorship (USCIS or DOL filings, `h1b_history`, a
+careers page) is saved to Knock with `save_research` (the page and its words), so the job board and the sender see
+it. It is never written into an email.
 
 ## Follow-ups
 

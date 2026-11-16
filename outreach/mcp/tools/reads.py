@@ -18,6 +18,7 @@ from outreach.drafts.followups import company_map, due_followups, held_survivors
 from outreach.mcp.tools import Ctx, Input, ToolError, ToolSpec
 from outreach.ranking.scores import latest_version, ranked_list
 from outreach.rules.decide import row_level_state
+from outreach.drafts.fresh import real_date, stale_rank
 
 __all__ = ["TOOLS"]
 
@@ -60,8 +61,7 @@ def capped(text: str, limit: int) -> dict:
 
 
 def age_days(posted_on: str | None, first_seen_at: str, today: date) -> int:
-    seen = date.fromisoformat(posted_on or first_seen_at[:10])
-    return max(0, (today - seen).days)
+    return max(0, (today - real_date(posted_on, first_seen_at)).days)
 
 
 def marks(ids) -> str:
@@ -103,7 +103,8 @@ def posting_state(d: sqlite3.Row | None) -> str:
 
 
 def open_postings(conn: sqlite3.Connection, ids: list[int], today: date) -> tuple[int, list[dict]]:
-    """(every posting of the family, the ones not closed best first: open state, level fit, tier, start, newest)."""
+    """(every posting of the family, the ones not closed best first: open state, fresh before stale (#290), level fit,
+    tier, start, newest)."""
     rows = conn.execute(f"SELECT posting_id, title, url, posted_on, first_seen_at, closed_at FROM posting "
                         f"WHERE company_id IN ({marks(ids)})", ids).fetchall()
     live = [r for r in rows if r["closed_at"] is None]
@@ -121,7 +122,9 @@ def open_postings(conn: sqlite3.Connection, ids: list[int], today: date) -> tupl
             "age_days": age_days(r["posted_on"], r["first_seen_at"], today), "state": posting_state(d),
             "level_tier": d["level_tier"] if d else "not_stated", "sponsorship": d["sponsorship"] if d else "silent",
             "provisional": bool(d["provisional"]) if d else True, **UNTRUSTED,
-            "_key": (STATE_RANK[posting_state(d)], 0 if d is not None and d["level_ok"] else 1,
+            "_key": (STATE_RANK[posting_state(d)],
+                     stale_rank(r["posted_on"], r["first_seen_at"], d["level_tier"] if d else "not_stated", today),
+                     0 if d is not None and d["level_ok"] else 1,
                      TIER_RANK[d["level_tier"] if d else "not_stated"], 0 if d is not None and d["start_2027"] else 1),
         })
     out.sort(key=lambda p: p.pop("_key"))  # stable: newest first within a key

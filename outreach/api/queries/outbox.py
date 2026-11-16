@@ -425,7 +425,8 @@ class _Outbox:
         decisions = {r["posting_id"]: r for r in self.conn.execute(
             f"SELECT d.* FROM posting_decision d JOIN posting p ON p.posting_id = d.posting_id "
             f"WHERE p.company_id IN ({marks})", family)}
-        return role_to_name(rank_postings(postings, decisions, set(), self.conn)[1])  # no flags: no reader calls
+        today = cal.ny_date(moment(self.now), self.cfg)
+        return role_to_name(rank_postings(postings, decisions, set(), self.conn, today)[1])  # no flags: no reader calls
 
 
 def outbox_view(conn: sqlite3.Connection, now: str, cfg: SendConfig, *, old_sender_loaded: bool) -> OutboxView:

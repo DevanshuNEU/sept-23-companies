@@ -27,7 +27,7 @@ from tests.test_mcp_boundary import forbidden, forbidden_loaded
 
 ROOT = Path(__file__).resolve().parent.parent
 READ_TOOLS = {"ranked_companies", "company", "person", "followups_due", "prepare_targets", "knock_status",
-              "contact_check", "connect_followups", "draft_brief", "check_draft", "h1b_history"}
+              "contact_check", "connect_followups", "draft_brief", "check_draft", "h1b_history", "pick_people"}
 WRITE_TOOLS = {"record_research", "save_research", "flag_review", "mark_no_go", "save_draft", "save_followup", "add_people",
                "save_linkedin_note", "reader_next", "reader_submit", "submit_candidates", "intake", "log_sent", "log_miss",
                "update_person", "mark_email_bounced",
@@ -205,8 +205,8 @@ class RealToolsTest(unittest.TestCase):
     def test_tool_list_is_pinned(self):
         names = [s.name for s in server.tool_specs()]
         self.assertEqual(set(names), PINNED_TOOLS)
-        self.assertEqual(len(names), 28)
-        self.assertEqual(len(set(names)), 28)
+        self.assertEqual(len(names), 29)
+        self.assertEqual(len(set(names)), 29)
 
     def test_only_the_write_tools_declare_grants(self):
         self.assertEqual({s.name for s in server.tool_specs() if s.grants}, WRITE_TOOLS)
@@ -251,7 +251,8 @@ class RealToolsTest(unittest.TestCase):
     def test_instructions_state_the_limits_point_at_the_skill_and_use_no_dashes(self):
         text = server.INSTRUCTIONS
         self.assertLessEqual(len(text), 2100)
-        for phrase in ("never approves", "Outbox", ".claude/skills/cold-email/SKILL.md", "data", "refusal",
+        for phrase in ("never approves", "Outbox", "~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md",
+                       "posting_url", "data", "refusal",
                        "log_sent records LinkedIn requests Devanshu says he sent", "only after he says so"):
             self.assertIn(phrase, text)
         self.assertFalse(any(c in text for c in (chr(0x2013), chr(0x2014))))

@@ -12,7 +12,7 @@ Gmail behaviour copied on purpose:
 - Gmail's API storing a sent email under a Message-ID of its own (`rewrite_message_ids`, on by default: what the
   real Gmail did on the first live send) and keeping the sender's `X-Outreach-Id` marker (unless `drop_markers`).
 """
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 from email.utils import formataddr, parseaddr
@@ -248,8 +248,8 @@ class FakeGmail(MailClient):
             return Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=m.message_id)
         return sent
 
-    def history(self, start_history_id: str) -> HistoryPage:
-        self._enter("history")
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        self._enter("history")  # skip_ids: ignored, as the real Gmail client does
         if self._expire_next_history:
             self._expire_next_history = False
             raise HistoryExpired("history cursor expired")

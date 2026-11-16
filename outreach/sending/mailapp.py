@@ -16,9 +16,12 @@
   claim (subjects are unique per person). A copy still in the Outbox makes the search incomplete; two matches raise
   `SentAmbiguous` (the send stays in doubt and he is told). A hit carries the marker it was searched for.
 - New mail. `history` reads every mailbox of the account but Sent Items, Drafts and Outbox, for messages received
-  after the cursor less 24 hours, and returns all `message` needs, so the page costs one script. The cursor is a
-  time (UTC, ISO), not a Gmail history id. There are no threads to read (`thread` raises ThreadUnsupported): with no
-  cursor the inbound read takes the last 45 days with `history`.
+  after the cursor less 24 hours, in two steps so a busy day never outgrows the 120 second read: it lists each
+  message's mailbox, Message-ID and date (cheap), then fetches full records only for the ones the caller has not
+  handled (`skip_ids`), at most 40 a call, oldest first. The page holds every message it names, so `message` costs no
+  further script. The cursor is a time (UTC, ISO), not a Gmail history id, and it moves to the read's start only when
+  nothing was left out. There are no threads to read (`thread` raises ThreadUnsupported): with no cursor the inbound
+  read takes the last 45 days with `history`.
 
 AppleScript text lives here as constants, each starting with `COMMON_HANDLERS` (the one escape handler every script
 prints its fields through, and the check that Mail.app is running: a script never starts it). Every value reaches a
@@ -33,7 +36,7 @@ Live checkout only: the client on the real runner (`osascript_runner`) refuses t
 """
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime, timedelta, timezone
 from email.parser import HeaderParser
 from email.utils import parseaddr
@@ -47,9 +50,9 @@ from outreach.sending.mail import (CLOCK_SKEW_MS, META_HEADERS, Added, GmailErro
 from outreach.store.timefmt import ISO_FMT
 
 __all__ = ["MailAppClient", "COMMON_HANDLERS", "PROFILE_SCRIPT", "SEND_SCRIPT", "REPLY_SCRIPT", "FIND_SCRIPT",
-           "HISTORY_SCRIPT", "MESSAGE_SCRIPT", "ID_PREFIX", "SENT_BOX", "DRAFTS_BOX", "OUTBOX_BOX", "JUNK_BOX",
-           "SKIPPED_BOXES", "SEND_TIMEOUT", "READ_TIMEOUT", "POLL_SECONDS", "HISTORY_OVERLAP", "SNIPPET_LENGTH",
-           "bracket", "bare", "local_text", "local_parts", "read_local"]
+           "LIST_SCRIPT", "FETCH_SCRIPT", "MESSAGE_SCRIPT", "ID_PREFIX", "SENT_BOX", "DRAFTS_BOX", "OUTBOX_BOX",
+           "JUNK_BOX", "SKIPPED_BOXES", "SEND_TIMEOUT", "READ_TIMEOUT", "POLL_SECONDS", "HISTORY_OVERLAP",
+           "FETCH_LIMIT", "SNIPPET_LENGTH", "bracket", "bare", "local_text", "local_parts", "read_local"]
 
 ID_PREFIX = "mailapp:"
 # The Exchange account's own mailboxes (the spike, 2026-11-15).
@@ -63,6 +66,9 @@ SEND_TIMEOUT = 60       # seconds: a send, and the Sent Items poll after it, all
 READ_TIMEOUT = 120      # seconds: any read
 POLL_SECONDS = 2        # between Sent Items reads after a send
 HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); known ids dedup what was read
+# Full records fetched by one read, at most (controller ruling for B4): about 0.9 s each plus a `whose` query of about
+# 1 s on the real Mail.app, so 40 stay well inside the 120 s read; the rest wait for the next tick.
+FETCH_LIMIT = 40
 # Of the body, whitespace collapsed. All 2000 characters the message script returns: a Microsoft notice puts its status
 # code and failed address a long way down, and Gmail's own snippet is a different path (`gmail.py`).
 SNIPPET_LENGTH = 2000
@@ -233,10 +239,11 @@ end run
 '''
 
 # argv: account name, the local year, month, day and seconds into that day to read from, then the mailbox names to
-# skip. One `msg` record (as `messageRecord`) per message received after that time, everything `message()` needs, so
-# reading the page's messages costs no further script. A mailbox that cannot be read prints `error <mailbox> <text>`
-# and the client fails the whole read (never a silent skip).
-HISTORY_SCRIPT = COMMON_HANDLERS + r'''
+# skip. The cheap first step of a read: one `id <mailbox> <Message-ID> <date received>` record per message received
+# after that time, from a `whose` query and a bulk read of the two properties of the list it returned (no message is
+# walked one by one). A mailbox that cannot be read prints `error <mailbox> <text>` and the client fails the whole
+# read (never a silent skip).
+LIST_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set acctName to item 1 of argv
@@ -255,13 +262,42 @@ on run argv
 			if skipNames does not contain boxName then
 				try
 					set found to (messages of mb whose date received > cutoff)
-					repeat with h in found
-						set end of out to my messageRecord(boxName, h)
-					end repeat
+					if (count of found) > 0 then
+						set ids to (message id of found)
+						set dates to (date received of found)
+						repeat with i from 1 to (count of ids)
+							set end of out to my fields({"id", my esc(boxName), my esc(item i of ids), my isoOf(item i of dates)})
+						end repeat
+					end if
 				on error errText number errNum
 					set end of out to my fields({"error", my esc(boxName), my esc(errText & " (" & errNum & ")")})
 				end try
 			end if
+		end repeat
+	end tell
+	return my joinWith(out, linefeed)
+end run
+'''
+
+# argv: account name, then pairs of mailbox name and Message-ID (no brackets), at most FETCH_LIMIT pairs. The second
+# step: one `msg` record (`messageRecord`) per message still there, nothing for one gone since it was listed. A
+# mailbox that cannot be read prints `error <mailbox> <text>`.
+FETCH_SCRIPT = COMMON_HANDLERS + r'''
+on run argv
+	my requireMail()
+	set acctName to item 1 of argv
+	set pairs to ((count of argv) - 1) div 2
+	set out to {}
+	tell application "Mail"
+		repeat with i from 1 to pairs
+			set boxName to item (2 * i) of argv
+			set wanted to item (2 * i + 1) of argv
+			try
+				set hits to (messages of mailbox boxName of account acctName whose message id is wanted)
+				if (count of hits) > 0 then set end of out to my messageRecord(boxName, item 1 of hits)
+			on error errText number errNum
+				set end of out to my fields({"error", my esc(boxName), my esc(errText & " (" & errNum & ")")})
+			end try
 		end repeat
 	end tell
 	return my joinWith(out, linefeed)
@@ -309,7 +345,7 @@ def local_text(at: datetime) -> str:
 
 
 def local_parts(at: datetime) -> list[str]:
-    """`at` in the Mac's zone as the history script's arguments: year, month, day and seconds into the day."""
+    """`at` in the Mac's zone as the list script's arguments: year, month, day and seconds into the day."""
     local = at.astimezone()
     return [str(local.year), str(local.month), str(local.day),
             str(local.hour * 3600 + local.minute * 60 + local.second)]
@@ -388,6 +424,13 @@ def _meta(rec: list[str], fallback_id: str = "") -> MessageMeta:
                        to_addr=to, subject=subject, internal_ms=when, labels=(label,),
                        headers={k: headers[k] for k in META_HEADERS if k in headers},
                        snippet=" ".join((" ".join(content.split())[:SNIPPET_LENGTH], " ".join(block.split()))).strip())
+
+
+def _fail_on_error(records: list[list[str]]) -> None:
+    """A read whose script could not read a mailbox fails whole (`server`), naming it: never a silent skip."""
+    failed = [rec for rec in records if rec[0] == "error"]
+    if failed:
+        raise GmailError("server", None, f"Mail.app could not read the mailbox {failed[0][1]}: {failed[0][2]}")
 
 
 def _shape(records: list[list[str]], kinds: dict[str, int]) -> list[list[str]]:
@@ -519,31 +562,43 @@ class MailAppClient(MailClient):
             return None, False
         return None, miss_is_proof(True, started_ms, send_returned_ms, self.settle_minutes)
 
-    def history(self, start_history_id: str) -> HistoryPage:
-        """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`; the inbound read's known ids
-        drop what was already read), in every mailbox but Sent Items, Drafts and Outbox, oldest first, each once. The
-        new cursor is the time the read began. A cursor that is not a time (empty, or a Gmail history id) is
-        HistoryExpired. A mailbox Mail.app could not read fails the whole read (`server`). The page's messages are
-        kept, so `message` serves them without another script."""
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`), in every mailbox but Sent Items,
+        Drafts and Outbox, in two steps: the window's Message-IDs (`LIST_SCRIPT`), then the full records of the ones
+        not in `skip_ids` (bracketed or bare Message-IDs the caller already handled), at most `FETCH_LIMIT`, oldest
+        first, each once (`FETCH_SCRIPT`). With none left out the new cursor is the time the read began (`more`
+        False); else it is the cursor given (`more` True) and the next call fetches the rest. A cursor that is not a
+        time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read fails the whole read
+        (`server`). The page holds every message it names (`held`), so `message` serves them with no script."""
         since = _cursor_time(start_history_id)
         read_at = self._now_text()
-        records = _shape(self._records(HISTORY_SCRIPT, [self.mailapp_account, *local_parts(since - HISTORY_OVERLAP),
-                                                        *SKIPPED_BOXES], READ_TIMEOUT),
-                         {"msg": _MSG_FIELDS, "error": 3})
-        failed = [rec for rec in records if rec[0] == "error"]
-        if failed:
-            raise GmailError("server", None, f"Mail.app could not read the mailbox {failed[0][1]}: {failed[0][2]}")
-        rows = sorted(records, key=lambda rec: (read_local(rec[3]) is None, read_local(rec[3]) or 0))
-        added: list[Added] = []
-        page: dict[str, MessageMeta] = {}
-        for rec in rows:
-            if rec[1] in SKIPPED_BOXES or not bare(rec[2]) or _gmail_id(rec[2]) in page:
-                continue
-            meta = _meta(rec)
-            page[meta.gmail_message_id] = meta
-            added.append(Added(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, labels=meta.labels))
-        self._page = page
-        return HistoryPage(added=tuple(added), history_id=read_at)
+        listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *local_parts(since - HISTORY_OVERLAP),
+                                                    *SKIPPED_BOXES], READ_TIMEOUT), {"id": 4, "error": 3})
+        _fail_on_error(listed)
+        skip = {bracket(i) for i in skip_ids} - {""}
+        wanted: dict[str, str] = {}  # Message-ID to the mailbox it is fetched from, oldest first, each once
+        for _, box, msgid, _ in sorted(listed, key=lambda rec: (read_local(rec[3]) is None,
+                                                                        read_local(rec[3]) or 0)):
+            own = bracket(msgid)
+            if box not in SKIPPED_BOXES and own and own not in skip and own not in wanted:
+                wanted[own] = box
+        batch = list(wanted.items())[:FETCH_LIMIT]
+        fetched: dict[str, MessageMeta] = {}
+        if batch:
+            args = [self.mailapp_account]
+            for own, box in batch:
+                args += [box, bare(own)]
+            records = _shape(self._records(FETCH_SCRIPT, args, READ_TIMEOUT), {"msg": _MSG_FIELDS, "error": 3})
+            _fail_on_error(records)
+            for rec in records:
+                meta = _meta(rec)
+                fetched.setdefault(meta.gmail_message_id, meta)
+        page = {_gmail_id(own): fetched[_gmail_id(own)] for own, _ in batch if _gmail_id(own) in fetched}
+        self._page = page  # in list order: one gone since it was listed is left out
+        more = len(wanted) > len(batch)
+        return HistoryPage(added=tuple(Added(gmail_message_id=m.gmail_message_id, thread_id=m.thread_id,
+                                             labels=m.labels) for m in page.values()),
+                           history_id=start_history_id if more else read_at, held=True, more=more)
 
     def message(self, gmail_message_id: str) -> MessageMeta:
         """One message by its `mailapp:<id>` (`_meta`). One the last history page held is served from it; any

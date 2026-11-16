@@ -675,8 +675,8 @@ class ReadTest(Base):
         self.backlog(sent)
         real = self.gmail.history
 
-        def without_record_ids(start):
-            page = real(start)
+        def without_record_ids(start, **kwargs):
+            page = real(start, **kwargs)
             return dataclasses.replace(page, added=tuple(dataclasses.replace(a, history_id=None) for a in page.added))
         self.gmail.history = without_record_ids
         reads = 0

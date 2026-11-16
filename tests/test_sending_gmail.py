@@ -796,6 +796,10 @@ class HistoryTest(NoNetwork):
                          [("g1", "th1", ("INBOX",), "101"), ("g2", "th2", ("SENT",), "104")])
         self.assertEqual(page.history_id, "106")
         self.assertEqual(len(t.requests), 2)
+        again = client.history("100", skip_ids=frozenset({"<g1@x.example>", "g1"}))  # Gmail ignores them
+        self.assertEqual(again, page)
+        self.assertEqual(len(t.requests), 4)
+        self.assertEqual(t.requests[2:], t.requests[:2])
 
     def test_endless_history_falls_back_to_reading_threads(self):
         def endless(method, path, body, query):

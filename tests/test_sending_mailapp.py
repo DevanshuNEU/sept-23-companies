@@ -238,12 +238,12 @@ class HistoryTest(Base):
         self.assertEqual(caught.exception.kind, "server")
         self.assertIn("Tasks", caught.exception.detail)
 
-    def test_history_then_message_runs_one_script_however_many_messages(self):
+    def test_history_then_message_runs_two_scripts_however_many_messages(self):
         replies = [self.mail.deliver_reply(self.first, f"p{i}@acme.example") for i in range(6)]
         self.mail.scripts.clear()
         page = self.mail.history(self.cursor)
         metas = [self.mail.message(a.gmail_message_id) for a in page.added]
-        self.assertEqual(self.mail.scripts, ["history"])
+        self.assertEqual(self.mail.scripts, ["list", "fetch"])  # the ids first, then the full records
         self.assertEqual([m.gmail_message_id for m in metas], ["mailapp:" + r.rfc_id for r in replies])
         self.assertEqual({m.thread_id for m in metas}, {self.first.thread_id})
         self.assertEqual(metas[0].from_addr, "p0@acme.example")
@@ -268,6 +268,70 @@ class HistoryTest(Base):
         reply = self.mail.deliver_reply(self.first, "ada@acme.example")
         self.mail.copy_to(reply, "Outreach")
         self.assertEqual(len(self.mail.history(self.cursor).added), 1)
+
+    def test_a_page_holds_every_message_it_names(self):
+        self.mail.deliver_unrelated("news@x.example", "A newsletter")
+        page = self.mail.history(self.cursor)
+        self.assertEqual((page.held, page.more), (True, False))
+
+    def test_ids_already_handled_are_listed_but_never_fetched(self):
+        done = self.mail.deliver_reply(self.first, "ada@acme.example")
+        self.clock.advance(minutes=1)
+        new = self.mail.deliver_reply(self.first, "bob@acme.example")
+        page = self.mail.history(self.cursor, skip_ids={done.rfc_id})
+        self.assertEqual([a.gmail_message_id for a in page.added], ["mailapp:" + new.rfc_id])
+        self.assertEqual(self.mail.fetches, [[new.msgid]])
+        page = self.mail.history(self.cursor, skip_ids={done.msgid, f" <{new.msgid}> "})  # bare or bracketed
+        self.assertEqual((page.added, len(self.mail.fetches)), ((), 1))  # nothing left to fetch
+
+    def test_at_most_40_full_records_a_read_oldest_first_and_the_cursor_waits_for_the_rest(self):
+        stored = []
+        for i in range(100):
+            stored.append(self.mail.deliver_unrelated(f"p{i}@x.example", f"Note {i}"))
+            self.clock.advance(seconds=1)
+        page = self.mail.history(self.cursor)
+        self.assertEqual(len(self.mail.fetches[-1]), mailapp.FETCH_LIMIT)
+        self.assertEqual(mailapp.FETCH_LIMIT, 40)
+        self.assertEqual([a.gmail_message_id for a in page.added], ["mailapp:" + s.rfc_id for s in stored[:40]])
+        self.assertEqual((page.more, page.history_id), (True, self.cursor))  # left out: the cursor stays
+        handled = {s.rfc_id for s in stored[:90]}
+        last = self.mail.history(self.cursor, skip_ids=handled)
+        self.assertEqual([a.gmail_message_id for a in last.added], ["mailapp:" + s.rfc_id for s in stored[90:]])
+        self.assertEqual((last.more, last.history_id), (False, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")))
+
+    def test_nothing_new_fetches_nothing(self):
+        done = self.mail.deliver_reply(self.first, "ada@acme.example")
+        self.mail.scripts.clear()
+        page = self.mail.history(self.cursor, skip_ids={done.rfc_id})
+        self.assertEqual((page.added, page.more), ((), False))
+        self.assertEqual(self.mail.scripts, ["list"])
+
+    def test_a_message_gone_between_the_list_and_the_fetch_is_left_out(self):
+        gone = self.mail.deliver_reply(self.first, "ada@acme.example")
+        kept = self.mail.deliver_reply(self.first, "bob@acme.example")
+        original = self.mail._list_script
+
+        def then_delete(args):
+            out = original(args)
+            self.mail.store.remove(gone)
+            return out
+        self.mail._list_script = then_delete
+        page = self.mail.history(self.cursor)
+        self.assertEqual([a.gmail_message_id for a in page.added], ["mailapp:" + kept.rfc_id])
+        self.assertFalse(page.more)
+
+    def test_a_mailbox_that_fails_in_the_fetch_fails_the_read(self):
+        self.mail.deliver_reply(self.first, "ada@acme.example", mailbox="Outreach")
+        original = self.mail._list_script
+
+        def then_fail(args):
+            out = original(args)
+            self.mail.fail_mailbox("Outreach")
+            return out
+        self.mail._list_script = then_fail
+        with self.assertRaises(GmailError) as caught:
+            self.mail.history(self.cursor)
+        self.assertIn("Outreach", caught.exception.detail)
 
 
 class MessageTest(Base):
@@ -367,7 +431,7 @@ class ScriptTest(Base):
         m = outgoing(subject='Say "hi" end tell', body='do shell script "rm -rf ~"')
         self.mail.send(m)
         scripts = {mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
-                   mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT}
+                   mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT, mailapp.MESSAGE_SCRIPT}
         for script, args, _ in self.runs:
             self.assertIn(script, scripts)
             self.assertNotIn("rm -rf", script)
@@ -377,16 +441,18 @@ class ScriptTest(Base):
     def test_sends_wait_60_seconds_and_reads_120(self):
         self.mail.send(outgoing())
         self.mail.profile()
+        self.mail.deliver_unrelated("news@x.example", "A newsletter")
         self.mail.history("2026-11-02T14:00:00Z")
         timeouts = {script: timeout for script, _, timeout in self.runs}
         self.assertEqual(timeouts[mailapp.SEND_SCRIPT], 60)
         self.assertLessEqual(timeouts[mailapp.FIND_SCRIPT], 60)  # the poll after a send is within the send's 60
         self.assertEqual(timeouts[mailapp.PROFILE_SCRIPT], 120)
-        self.assertEqual(timeouts[mailapp.HISTORY_SCRIPT], 120)
+        self.assertEqual(timeouts[mailapp.LIST_SCRIPT], 120)
+        self.assertEqual(timeouts[mailapp.FETCH_SCRIPT], 120)
 
     def test_every_script_checks_mail_app_is_running_and_shares_one_escape(self):
         for script in (mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
-                       mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT):
+                       mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT, mailapp.MESSAGE_SCRIPT):
             self.assertTrue(script.startswith(mailapp.COMMON_HANDLERS))
             self.assertEqual(script.count("on esc("), 1)
             self.assertIn("my requireMail()", script)
@@ -397,7 +463,7 @@ class ScriptTest(Base):
         if shutil.which("osacompile") is None:
             self.skipTest("osacompile is macOS only")
         for script in (mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
-                       mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT):
+                       mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT, mailapp.MESSAGE_SCRIPT):
             done = subprocess.run(["osacompile", "-o", "/dev/null", "-"], input=script, capture_output=True,
                                   text=True, encoding="utf-8", timeout=60, check=False)
             self.assertEqual(done.returncode, 0, f"{script.split('on run')[-1][:80]!r}: {done.stderr}")
@@ -407,7 +473,7 @@ class ScriptTest(Base):
         # property read of `h` (history of 17 messages outlasted 120 s); reading the list into a variable first took
         # about 3 s. So no script walks an expression: every `repeat with x in` names a variable.
         for script in (mailapp.PROFILE_SCRIPT, mailapp.SEND_SCRIPT, mailapp.REPLY_SCRIPT, mailapp.FIND_SCRIPT,
-                       mailapp.HISTORY_SCRIPT, mailapp.MESSAGE_SCRIPT):
+                       mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT, mailapp.MESSAGE_SCRIPT):
             loops = re.findall(r"repeat with \w+ in (.*)", script)
             for target in loops:
                 self.assertRegex(target.strip(), r"^\w+$", f"a loop walks an expression: {target!r}")
@@ -437,18 +503,20 @@ class InboundFallbackTest(Base):
         return inbound.Snapshot(account_id=3, threads=threads, subjects={}, known=frozenset(), history_id=history_id,
                                 recent_threads=tuple(threads))
 
-    def test_no_cursor_reads_the_tracked_threads_of_the_last_45_days(self):
+    def test_no_cursor_reads_the_last_45_days(self):
         first = self.mail.send(outgoing())
         self.clock.advance(days=3)
         reply = self.mail.deliver_reply(first, "ada@acme.example")
-        self.mail.deliver_unrelated("news@x.example", "A newsletter")  # not in a tracked thread
+        self.clock.advance(seconds=1)
+        news = self.mail.deliver_unrelated("news@x.example", "A newsletter")  # not in a tracked thread
         self.mail.deliver_reply(first, "ada@acme.example", at=self.clock() - timedelta(days=50))  # too old
         self.clock.advance(minutes=1)
         read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}), cfg=CFG, now=self.clock())
         self.assertTrue(read.complete)
-        self.assertEqual([m.gmail_message_id for m in read.metas], ["mailapp:" + reply.rfc_id])
+        # Every message fetched is read, so applying it records it and it is never fetched again.
+        self.assertEqual([m.gmail_message_id for m in read.metas], ["mailapp:" + reply.rfc_id, "mailapp:" + news.rfc_id])
         self.assertEqual(read.new_history_id, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"))
-        self.assertEqual(self.mail.calls[-4:-1], ["profile", "thread", "history"])  # then one message read
+        self.assertEqual(self.mail.calls[1:], ["profile", "thread", "history", "message", "message"])
 
     def test_a_failed_45_day_read_is_incomplete_and_keeps_no_cursor(self):
         first = self.mail.send(outgoing())
@@ -458,6 +526,38 @@ class InboundFallbackTest(Base):
                 self.mail.closed = True
         self.mail.probe = close_on_history
         read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}), cfg=CFG, now=self.clock())
+        self.assertEqual((read.complete, read.new_history_id), (False, None))
+
+
+class InboundSkipTest(Base):
+    """The inbound read gives the client every Message-ID it already handled, so Mail.app fetches only the rest, and a
+    read the client left part of is incomplete with the cursor where it was."""
+
+    def setUp(self):
+        super().setUp()
+        self.first = self.mail.send(outgoing())
+        self.cursor = self.mail.profile().history_id
+        self.clock.advance(minutes=30)
+
+    def snap(self, known=frozenset()) -> inbound.Snapshot:
+        return inbound.Snapshot(account_id=3, threads={self.first.thread_id: 1}, subjects={}, known=frozenset(known),
+                                history_id=self.cursor, recent_threads=(self.first.thread_id,))
+
+    def test_known_mail_is_skipped_by_its_message_id(self):
+        done = self.mail.deliver_reply(self.first, "ada@acme.example")
+        new = self.mail.deliver_unrelated("news@x.example", "A newsletter")
+        read = inbound.read_mailbox(self.mail, self.snap({"mailapp:" + done.rfc_id, "gmail-1"}), cfg=CFG,
+                                    now=self.clock())
+        self.assertEqual(self.mail.fetches, [[new.msgid]])
+        self.assertEqual([m.gmail_message_id for m in read.metas], ["mailapp:" + new.rfc_id])  # read, though untracked
+        self.assertTrue(read.complete)
+
+    def test_a_read_left_part_way_is_incomplete_and_keeps_the_cursor(self):
+        for i in range(45):
+            self.mail.deliver_unrelated(f"p{i}@x.example", f"Note {i}")
+            self.clock.advance(seconds=1)
+        read = inbound.read_mailbox(self.mail, self.snap(), cfg=CFG, now=self.clock())
+        self.assertEqual(len(read.metas), 40)
         self.assertEqual((read.complete, read.new_history_id), (False, None))
 
 

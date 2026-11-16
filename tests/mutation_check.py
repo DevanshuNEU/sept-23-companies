@@ -845,7 +845,7 @@ MUTATIONS = [
      "                pass\n        return queue.gate_accounts(found, gates, first)",
      "test_the_first_email_goes_out_alone_and_the_rest_wait"),
     (SENDING / "tick.py", "send marker: the tick never reads the first email back, so the rest never go",
-     "        checked = proof.verify_marker(self.conn, client, account_id, now=self.now)",
+     "        checked = proof.verify_marker(self.conn, client, account_id, now=self.now, kind=row.cfg.kind)",
      '        checked = {"verified": 0, "missing": 0, "errors": 0}',
      "test_a_verified_first_email_releases_the_rest"),
     (SENDING / "tick.py", "send marker: a stopped sender raises no notice",

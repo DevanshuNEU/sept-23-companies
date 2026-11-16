@@ -9,7 +9,7 @@ Errors: every client method may raise `GmailError`, whose `kind` says what went 
 that passes a raw body by mistake still cannot log a token.
 """
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from email.utils import getaddresses
 from typing import Literal, Protocol, runtime_checkable
@@ -99,8 +99,14 @@ class Added:
 
 @dataclass(frozen=True)
 class HistoryPage:
+    """New messages and the cursor to move to. `held`: the client already holds every message on the page (Mail.app
+    fetched their full records), so `message` costs nothing for any of them and the reader reads them all, so each is
+    recorded and never fetched again. `more`: the client left messages out (a busy window), so the read is not
+    complete and `history_id` is the cursor it was given; the next call returns the rest."""
     added: tuple[Added, ...]
     history_id: str
+    held: bool = False
+    more: bool = False
 
 
 class HistoryExpired(Exception):
@@ -282,8 +288,10 @@ class MailClient(Protocol):
         back; Gmail storing another Message-ID than the one set is normal and is not an error."""
         ...
 
-    def history(self, start_history_id: str) -> HistoryPage:
-        """Messages added after `start_history_id`. Raises HistoryExpired for an empty, old or unknown cursor."""
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        """Messages added after `start_history_id`. Raises HistoryExpired for an empty, old or unknown cursor.
+        `skip_ids` are the bracketed Message-IDs the caller already handled: Mail.app lists its window by Message-ID
+        and fetches only the others (`MailAppClient.history`); Gmail ignores them."""
         ...
 
     def message(self, gmail_message_id: str) -> MessageMeta:

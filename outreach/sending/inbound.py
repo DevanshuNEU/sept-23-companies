@@ -32,6 +32,7 @@ from outreach.sending.claim import PLACEHOLDER_DOMAIN
 from outreach.sending.classify import Inbound, classify, match_unthreaded
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import stop_touch_messages
+from outreach.sending.mailapp import ID_PREFIX as MAILAPP_PREFIX
 from outreach.sending.mail import (GmailError, HistoryExpired, MailClient, MessageMeta, ThreadUnsupported,
                                    normalise_message_id)
 from outreach.sending.notify import Notifier
@@ -206,11 +207,21 @@ def read_inbound(conn: sqlite3.Connection, client: MailClient, account: accounts
     return read_mailbox(client, snapshot(conn, account.account_id, now=now, cfg=cfg), cfg=cfg, now=now)
 
 
+def _skip_ids(known: set[str]) -> frozenset[str]:
+    """The Message-IDs, bracketed, of the account's mail already handled, for a client that lists its mailbox by
+    Message-ID and fetches only the others (Mail.app, whose message ids are `mailapp:<Message-ID>`): every known id
+    (inbound mail stored, mail read and left alone in `inbound_seen`, its own sent mail). Gmail ignores them."""
+    return frozenset(normalise_message_id(k[len(MAILAPP_PREFIX):]) for k in known if k.startswith(MAILAPP_PREFIX))
+
+
 def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: datetime) -> InboundRead:
     """Read new mail from Gmail. No store access: run it with no transaction open.
 
-    With a cursor: `history`, then `message` for each new id, the tracked threads' first and then INBOX mail in
-    other threads (only to catch a bounce Gmail did not thread), at most `inbound_meta_cap` in all. With no cursor,
+    With a cursor: `history` (given every Message-ID already handled, `_skip_ids`), then `message` for each new id,
+    the tracked threads' first and then INBOX mail in other threads (only to catch a bounce Gmail did not thread), at
+    most `inbound_meta_cap` in all; from a page the client already holds (`HistoryPage.held`: Mail.app fetched each
+    record) every new message is read, so applying it records it and it is never fetched again. A page that left
+    messages out (`HistoryPage.more`) ends the read incomplete with the cursor where it was. With no cursor,
     or one Gmail calls expired: `profile` first (its history id becomes the cursor), then `thread` for each recent
     tracked thread; a client with no threads (Mail.app: ThreadUnsupported) is read with `history` from
     `rethread_days` ago instead, and of that, the messages in a recent tracked thread (`_read_recent`). A failed
@@ -221,13 +232,13 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     metas: list[MessageMeta] = []
     if snap.history_id:
         try:
-            page = client.history(snap.history_id)
+            page = client.history(snap.history_id, skip_ids=_skip_ids(known))
         except HistoryExpired:
             page = None
         except GmailError:
             return InboundRead([], None, False, snap.account_id)
         if page is not None:
-            tracked, others = [], []
+            tracked, others, rest = [], [], []
             for added in page.added:
                 if added.gmail_message_id in known:
                     continue
@@ -236,7 +247,9 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                     tracked.append(added.gmail_message_id)
                 elif "INBOX" in added.labels:
                     others.append(added.gmail_message_id)
-            wanted = tracked + others
+                elif page.held:
+                    rest.append(added.gmail_message_id)
+            wanted = tracked + others + rest
             done: set[str] = set()
             for gmail_id in wanted[:cfg.inbound_meta_cap]:
                 try:
@@ -246,6 +259,8 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                         break
                 done.add(gmail_id)
             if len(done) == len(wanted):
+                if page.more:  # the client left messages out: the cursor stays and the next read takes the rest
+                    return InboundRead(metas, None, False, snap.account_id)
                 return InboundRead(metas, page.history_id, True, snap.account_id)
             return InboundRead(metas, _read_through(page.added, set(wanted) - done), False, snap.account_id)
     try:
@@ -273,16 +288,18 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
 def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: list[MessageMeta], cursor: str, *,
                  cfg: SendConfig, now: datetime) -> InboundRead:
     """The no-cursor read for a client with no threads: `history` from `rethread_days` ago (a Mail.app cursor is a
-    time), then `message` for each new message in a recent tracked thread, as the thread read would have taken.
-    A failed call ends it incomplete with no new cursor; a message gone since (404) is skipped."""
+    time), then `message` for each new message in a recent tracked thread, as the thread read would have taken, or
+    for every new message of a page the client already holds (so each is recorded and never fetched again). A
+    failed call, or a page that left messages out, ends it incomplete with no new cursor; a message gone since (404)
+    is skipped."""
     since = (now.astimezone(timezone.utc) - timedelta(days=cfg.rethread_days)).strftime(ISO_FMT)
     try:
-        page = client.history(since)
+        page = client.history(since, skip_ids=_skip_ids(known))
     except (GmailError, HistoryExpired):
         return InboundRead(metas, None, False, snap.account_id)
     recent = set(snap.recent_threads)
     for added in page.added:
-        if added.gmail_message_id in known or added.thread_id not in recent:
+        if added.gmail_message_id in known or (added.thread_id not in recent and not page.held):
             continue
         known.add(added.gmail_message_id)
         try:
@@ -290,6 +307,8 @@ def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: lis
         except GmailError as err:
             if not _gone(err):
                 return InboundRead(metas, None, False, snap.account_id)
+    if page.more:
+        return InboundRead(metas, None, False, snap.account_id)
     return InboundRead(metas, cursor or None, True, snap.account_id)
 
 

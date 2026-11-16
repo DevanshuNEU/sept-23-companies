@@ -1784,5 +1784,39 @@ class MailAppProofTest(MailAppBase):
         self.assertEqual(self.phase(), proof.MISSING)
 
 
+class MailAppHistoryTest(MailAppBase):
+    """A busy day in Mail.app: the read lists the window's ids, then fetches at most 40 full records a tick, oldest
+    first, skipping every one the store already handled. Until all are read the account waits and its cursor stays."""
+    proven_neu = True
+
+    def cursor(self) -> str:
+        return self.account_of(self.neu.account_id)["history_id"]
+
+    def test_100_messages_are_read_over_3_ticks_40_at_most_and_then_none_is_fetched(self):
+        self.tick()  # no cursor yet: the first read takes one
+        start = self.cursor()
+        self.assertTrue(start)
+        for i in range(100):
+            self.mail.deliver_unrelated(f"n{i}@news.example", f"Newsletter {i}")
+            self.clock.advance(seconds=1)
+        self.clock.advance(minutes=2)
+        self.mail.fetches.clear()
+        for n in range(3):
+            report = self.tick()
+            self.clock.advance(minutes=2)
+            if n < 2:
+                self.assertEqual(self.cursor(), start)  # some were left out: the cursor waits
+                self.assertTrue(any(f"{NEU} was not fully read" in line for line in report.lines))
+        self.assertEqual([len(ids) for ids in self.mail.fetches], [40, 40, 20])
+        self.assertNotEqual(self.cursor(), start)
+        seen = self.db.execute("SELECT COUNT(*) FROM inbound_seen WHERE gmail_message_id LIKE ?",
+                               (f"{self.neu.account_id}:mailapp:%",)).fetchone()[0]
+        self.assertEqual(seen, 100)
+        self.mail.fetches.clear()
+        self.tick()
+        self.assertEqual(self.mail.fetches, [])  # all 100 are in the window still, and none is fetched again
+        self.assertEqual(self.problems, [])
+
+
 if __name__ == "__main__":
     unittest.main()

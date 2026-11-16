@@ -34,7 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email import policy as email_policy
@@ -421,7 +421,8 @@ class GmailClient(MailClient):
         return Sent(gmail_message_id=gid, thread_id=thread, rfc_message_id=kept,
                     marker=normalise_message_id(stored.get(MARKER_HEADER.lower())))
 
-    def history(self, start_history_id: str) -> HistoryPage:
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        # `skip_ids` is for a client that lists by Message-ID (Mail.app); Gmail's history names only new messages.
         if not start_history_id:
             raise HistoryExpired("no history cursor")
         added: list[Added] = []

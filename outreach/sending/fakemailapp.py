@@ -9,9 +9,10 @@ osascript, opens a socket or a file. `FakeMailApp.sent` is the only count of ema
 Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.app's Outbox), `deliver_reply`,
 `deliver_auto_reply`, `deliver_ndr` (a Microsoft "Undeliverable" notice), `deliver_unrelated`, `add_to_sent`,
 `add_to_mailbox`, `copy_to`, `fail_mailbox`, and `closed` (Mail.app not running: every script fails with `app_closed`).
-`probe(method_name)` runs at the start of every client method; `calls` lists them and `scripts` the scripts run.
+`probe(method_name)` runs at the start of every client method; `calls` lists them, `scripts` the scripts run and
+`fetches` the bare Message-IDs each fetch script was asked for.
 """
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
@@ -19,8 +20,8 @@ from email.utils import parseaddr
 from outreach.sending.applescript import escape_field
 from outreach.sending.config import AccountConfig
 from outreach.sending.mail import GmailError, HistoryPage, MessageMeta, Outgoing, Profile, Sent
-from outreach.sending.mailapp import (FIND_SCRIPT, HISTORY_SCRIPT, MESSAGE_SCRIPT, PROFILE_SCRIPT, REPLY_SCRIPT,
-                                      SEND_SCRIPT, MailAppClient, local_text)
+from outreach.sending.mailapp import (FETCH_SCRIPT, FIND_SCRIPT, LIST_SCRIPT, MESSAGE_SCRIPT, PROFILE_SCRIPT,
+                                      REPLY_SCRIPT, SEND_SCRIPT, MailAppClient, local_text)
 
 __all__ = ["FakeMailApp", "Stored", "MAILBOXES", "NDR_FROM"]
 
@@ -30,7 +31,7 @@ MAILBOXES = ("Inbox", "Junk Email", "Deleted Items", "Outbox", "Drafts", "Sent I
 NDR_FROM = "Microsoft Outlook <MicrosoftExchange329e71ec88ae4615bbc36ab6ce41109e@northeastern.edu>"
 _FOREVER = datetime.max.replace(tzinfo=timezone.utc)
 _NAMES = {PROFILE_SCRIPT: "profile", SEND_SCRIPT: "send", REPLY_SCRIPT: "reply", FIND_SCRIPT: "find",
-          HISTORY_SCRIPT: "history", MESSAGE_SCRIPT: "message"}
+          LIST_SCRIPT: "list", FETCH_SCRIPT: "fetch", MESSAGE_SCRIPT: "message"}
 
 
 @dataclass
@@ -107,6 +108,7 @@ class FakeMailApp(MailAppClient):
         self.sent: list[tuple[Outgoing | None, str, datetime]] = []  # (email, Message-ID, when) for each that went
         self.calls: list[str] = []
         self.scripts: list[str] = []
+        self.fetches: list[list[str]] = []
         self._failures: list[_Failure] = []
         self._slow: list[timedelta | None] = []
         self._failing_boxes: set[str] = set()
@@ -207,9 +209,9 @@ class FakeMailApp(MailAppClient):
         self._enter("find_sent")
         return super().find_sent(marker, not_before_ms, send_returned_ms=send_returned_ms, to=to, subject=subject)
 
-    def history(self, start_history_id: str) -> HistoryPage:
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
         self._enter("history")
-        return super().history(start_history_id)
+        return super().history(start_history_id, skip_ids=skip_ids)
 
     def message(self, gmail_message_id: str) -> MessageMeta:
         self._enter("message")
@@ -269,7 +271,7 @@ class FakeMailApp(MailAppClient):
                 for s in self._visible(outbox) if s.subject.casefold() == same]
         return out
 
-    def _history_script(self, args: list[str]) -> list[str]:
+    def _list_script(self, args: list[str]) -> list[str]:
         year, month, day, seconds = (int(a) for a in args[1:5])
         skip = set(args[5:])
         cutoff = (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
@@ -280,8 +282,21 @@ class FakeMailApp(MailAppClient):
             if box in self._failing_boxes:
                 out.append(_record("error", _esc(box), _esc("Mail got an error: Can't get every message. (-1728)")))
                 continue
-            out += [self._message_record(box, s) for s in self._visible(box)
+            out += [_record("id", _esc(box), _esc(s.msgid), local_text(s.received_at)) for s in self._visible(box)
                     if s.received_at.replace(microsecond=0) > cutoff]
+        return out
+
+    def _fetch_script(self, args: list[str]) -> list[str]:
+        pairs = list(zip(args[1::2], args[2::2]))
+        self.fetches.append([msgid for _, msgid in pairs])
+        out = []
+        for box, wanted in pairs:
+            if box in self._failing_boxes:
+                out.append(_record("error", _esc(box), _esc("Mail got an error: Can't get mailbox. (-1728)")))
+                continue
+            hits = [s for s in self._visible(box) if s.msgid == wanted]
+            if hits:
+                out.append(self._message_record(box, hits[0]))
         return out
 
     def _message_script(self, args: list[str]) -> list[str]:

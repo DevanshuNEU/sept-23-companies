@@ -92,6 +92,28 @@ class PickPeopleCase(McpCase):
         self.assertIn("already emailed", reasons["Sam Sent"])
         self.assertIn("no-go", reasons["Nora Nogo"])
 
+    def test_a_masked_apollo_name_is_matched_to_the_person_on_record(self):
+        """#294: Apollo's free search hides surnames ("Alec Co***y"); Knock's Alec Condry must still be found."""
+        self.size(900)
+        alec = seed.person(self.db, self.cid, "Alec Condry", channel="linkedin", title="Software Engineer")
+        sent = seed.person(self.db, self.cid, "Vanshika Jain", title="Software Engineer")
+        seed.send_first(self.db, seed.touch(self.db, sent))
+        got = self.pick([cand("Alec Co***y", "Software Engineer"), cand("Vanshika Ja***n", "Software Engineer"),
+                         cand("Alec Ba***r", "Software Engineer"), cand("Ann Liu", "Software Engineer")])
+        by = {p["name"]: p for p in got["picked"]}
+        self.assertEqual(by["Alec Co***y"]["person_id"], alec)
+        self.assertIsNone(by["Alec Ba***r"]["person_id"])
+        self.assertIsNone(by["Ann Liu"]["person_id"])
+        self.assertIn("already emailed", {s["name"]: s["reason"] for s in got["not_picked"]}["Vanshika Ja***n"])
+
+    def test_two_masked_names_that_could_be_one_person_on_record_are_not_guessed(self):
+        self.size(900)
+        seed.person(self.db, self.cid, "Alec Condry", channel="linkedin", title="Software Engineer")
+        seed.person(self.db, self.cid, "Alec Cowdry", channel="linkedin", title="Software Engineer")
+        got = self.pick([cand("Alec Co***y", "Software Engineer")])
+        self.assertIsNone(got["picked"][0]["person_id"])
+        self.assertIn("maybe", got["picked"][0]["why"])
+
     def test_at_most_max_people_and_the_rest_say_why(self):
         self.size(900)
         got = self.pick([cand(f"Eng {i}", "Software Engineer") for i in range(7)], max_people=2)

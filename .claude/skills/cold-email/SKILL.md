@@ -14,11 +14,11 @@ The rules come from issue #9 (Drafts, Sending: Content and Follow-ups); where th
 **Where to run.** The `outreach` tools work only in the live checkout, `~/Desktop/Sept 23 Companies`, where the
 server is registered (`python -m outreach.mcp --print-registration` prints the command). From a worktree they
 refuse; say so and stop, never work around it. A refusal from any tool is information to relay, not a wall to
-get past. This file's full path is `~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md`; a session
-started anywhere else (DevVault's `/outreach`) reads it there.
+get past. This file's full path is `~/Desktop/Sept 23 Companies/.claude/skills/cold-email/SKILL.md`.
 
-**From a job link** (`/outreach <job link or company>`, #9 ruling of 2026-11-16): he gives a job or a company and
-nothing else. Check Knock (`contact_check`), let `pick_people` choose who from an Apollo search, get each address from Apollo (see "Sending lanes and
+**From a job link** (`/outreach <job link or company>`, #9 ruling of 2026-11-16; the command is
+`.claude/commands/outreach.md` in this repo, run from a session in the live checkout, never DevVault's own
+`/outreach`, which is the old flow): he gives a job or a company and nothing else. Check Knock (`contact_check`), let `pick_people` choose who from an Apollo search, get each address from Apollo (see "Sending lanes and
 finding people"), drop anyone without a sure address, `intake` the rest, then steps 2 to 10 for each, and report
 who is in the Outbox and who was dropped and why. His giving the link is his yes to research that company and to
 spend Apollo credits within the budget; do not stop to ask. Do not show him drafts, versions or a pick: he reviews

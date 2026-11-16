@@ -21,7 +21,7 @@ from outreach.drafts.checks import load_banned
 from outreach.sending import accounts, claim, proof, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
-from outreach.sending.mail import GmailError, Sent
+from outreach.sending.mail import GmailError, Sent, SentAmbiguous
 from outreach.sending.tick import LOCK_NAME, TickDeps, run_tick
 from outreach.store import connect
 from outreach.store.writes import append_event
@@ -418,6 +418,49 @@ class GateTest(Base):
         self.tick()
         self.assertEqual(self.message(mid)["state"], "sent")
         self.assertEqual(len(self.gmail.sent), 1)
+
+    def test_the_sent_search_names_the_address_and_subject(self):
+        mid = self.approve()
+        self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"), accepted=True)
+        self.tick()
+        searches = []
+        real = self.gmail.find_sent
+
+        def spy(*args, **kwargs):
+            searches.append(kwargs)
+            return real(*args, **kwargs)
+        self.gmail.find_sent = spy
+        self.clock.advance(minutes=11)
+        self.tick()
+        self.assertEqual((searches[0]["to"], searches[0]["subject"]),
+                         (self.emails[mid], self.message(mid)["subject"]))
+        self.assertEqual(self.message(mid)["state"], "sent")
+
+    def test_two_matches_in_sent_stay_in_doubt_and_tell_him_once_a_day(self):
+        mid = self.approve()
+        self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"))
+        self.tick()
+        for _ in range(2):
+            self.clock.advance(minutes=11)
+            self.hooks["find_sent"] = lambda: (_ for _ in ()).throw(SentAmbiguous("two emails match"))
+            report = self.tick()
+            self.assertEqual(self.message(mid)["state"], "send_unknown")
+            self.assertEqual(self.runs()[-1]["status"], "partial")
+            self.assertTrue(any("more than one email in Sent" in line for line in report.lines))
+        self.assertEqual(len(self.notices), 1)
+        self.assertIn(f"message {mid}", self.notices[0][1])
+        self.assertEqual(self.gmail.sent, [])
+
+    def test_a_dry_run_with_two_matches_writes_no_notice(self):
+        mid = self.approve()
+        self.gmail.fail_next_send(GmailError("timeout", None, "the call timed out"))
+        self.tick()
+        self.clock.advance(minutes=11)
+        self.hooks["find_sent"] = lambda: (_ for _ in ()).throw(SentAmbiguous("two emails match"))
+        self.tick(dry_run=True)
+        self.assertEqual(self.notices, [])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM event WHERE kind = 'notified'").fetchone()[0], 0)
+        self.assertEqual(self.message(mid)["state"], "send_unknown")
 
 
 class OldProofTest(Base):

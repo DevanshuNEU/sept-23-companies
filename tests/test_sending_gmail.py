@@ -658,7 +658,9 @@ class FindSentTest(NoNetwork):
         return super().client(handler, token, now_ms=self.CLAIM + 30 * self.MIN if now_ms is None else now_ms)
 
     def find(self, client, rfc="<a1@gmail.com>"):
-        return client.find_sent(rfc, self.CLAIM, send_returned_ms=self.CLAIM)
+        # Every listed message has this To and Subject: Gmail takes them and ignores them (the marker decides).
+        return client.find_sent(rfc, self.CLAIM, send_returned_ms=self.CLAIM, to="founder@sendwell.example",
+                                subject="Backend role at Sendwell")
 
     def test_find_sent_returns_the_exact_marker_with_gmails_message_id(self):
         folder = SentFolder([("g3", "<n2@gmail.com>", self.CLAIM + 3), ("g2", "<a1@gmail.com>", self.CLAIM + 1),

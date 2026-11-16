@@ -282,10 +282,11 @@ class FakeGmail(MailClient):
             raise GmailError("bad_request", 404, "Requested entity was not found.")
         return [self._messages[mid] for mid in self._threads[thread_id]]
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent): the
-        marker matches, never the Message-ID. Like the real client it reads each listed message's headers in turn,
-        and a failed read fails the scan."""
+        marker matches, never the Message-ID, To or Subject (`to` and `subject` are ignored). Like the real client it
+        reads each listed message's headers in turn, and a failed read fails the scan."""
         self._enter("find_sent")
         now = self.clock()
         visible = [(i, meta) for i, meta in enumerate(self.sent_box)

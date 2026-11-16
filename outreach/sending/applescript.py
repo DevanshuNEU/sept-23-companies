@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 
 from outreach.sending.mail import GmailError, scrub
 
-__all__ = ["Runner", "osascript_runner", "parse_records", "unescape_field"]
+__all__ = ["Runner", "osascript_runner", "parse_records", "unescape_field", "escape_field"]
 
 Runner = Callable[[str, Sequence[str], float], str]
 
@@ -22,18 +22,21 @@ _NOT_RUNNING = "(-600)"
 
 
 def osascript_runner(script: str, args: Sequence[str], timeout: float) -> str:
-    """Run `script` with `osascript -` (script on stdin, `args` reach `on run argv`) and return stdout as is.
+    """Run `script` with `osascript -` (script on stdin, `args` reach `on run argv`) and return stdout as is. Text
+    is UTF-8 both ways whatever the locale: subjects are matched exactly, so their decoding must not vary.
 
     Raises GmailError: `timeout` when the call outlasts `timeout`, `app_closed` when Mail.app is not running
     (error -600), `server` for any other failure. The detail is scrubbed and at most 300 characters.
     """
     try:
         done = subprocess.run(["osascript", "-", *args], input=script, capture_output=True, text=True,
-                              timeout=timeout, check=False)
+                              encoding="utf-8", timeout=timeout, check=False)
     except subprocess.TimeoutExpired as e:
         raise GmailError("timeout", detail=f"osascript took longer than {timeout:g} seconds") from e
     except OSError as e:
         raise GmailError("server", detail=f"osascript did not start: {e}") from e
+    except UnicodeError as e:
+        raise GmailError("server", detail="osascript answered with text that is not UTF-8") from e
     if done.returncode != 0:
         stderr = done.stderr or ""
         if _NOT_RUNNING in stderr:
@@ -43,6 +46,13 @@ def osascript_runner(script: str, args: Sequence[str], timeout: float) -> str:
 
 
 _UNESCAPE = {"t": "\t", "n": "\n", "\\": "\\"}
+
+
+def escape_field(value: str) -> str:
+    """What the scripts' `esc` handler does (`mailapp.COMMON_HANDLERS`): backslash first, then tab, then each line
+    break (CR LF, CR, LF) as `\\n`. `unescape_field` undoes it. For fakes that answer as the scripts do."""
+    out = value.replace("\\", "\\\\").replace("\t", "\\t")
+    return out.replace("\r\n", "\\n").replace("\r", "\\n").replace("\n", "\\n")
 
 
 def unescape_field(field: str) -> str:

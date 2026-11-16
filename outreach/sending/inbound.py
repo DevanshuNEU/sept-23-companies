@@ -3,8 +3,8 @@
 Two steps, so Gmail is never called inside a transaction:
 1. `read_inbound` reads the store once (`snapshot`), then Gmail with no store access at all: new messages after
    the account's history cursor, or, with no usable cursor, every thread of its touches sent in the last 45 days
-   (taking the profile's history id first, so nothing that arrives during the read is missed). An incomplete read
-   keeps the old cursor.
+   (taking the profile's history id first, so nothing that arrives during the read is missed; Mail.app, which has
+   no threads, reads its mailboxes from 45 days back instead). An incomplete read keeps the old cursor.
 2. `apply_inbound` classifies each message and writes it in one transaction.
 
 A missed reply or bounce would send the next follow-up to someone who already answered, so: a read that fails is
@@ -32,7 +32,8 @@ from outreach.sending.claim import PLACEHOLDER_DOMAIN
 from outreach.sending.classify import Inbound, classify, match_unthreaded
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import stop_touch_messages
-from outreach.sending.mail import GmailError, HistoryExpired, MailClient, MessageMeta, normalise_message_id
+from outreach.sending.mail import (GmailError, HistoryExpired, MailClient, MessageMeta, ThreadUnsupported,
+                                   normalise_message_id)
 from outreach.sending.notify import Notifier
 from outreach.sending.ramp import note_signal
 from outreach.store.atomic import atomic
@@ -211,9 +212,11 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     With a cursor: `history`, then `message` for each new id, the tracked threads' first and then INBOX mail in
     other threads (only to catch a bounce Gmail did not thread), at most `inbound_meta_cap` in all. With no cursor,
     or one Gmail calls expired: `profile` first (its history id becomes the cursor), then `thread` for each recent
-    tracked thread. A failed call, or the cap, ends the read incomplete: what was read is kept and applied, and the
-    cursor moves only to the last history record whose messages were all read (it stays put when that is none, or
-    when the client gives no record ids), so the next tick reads the rest and every tick makes progress."""
+    tracked thread; a client with no threads (Mail.app: ThreadUnsupported) is read with `history` from
+    `rethread_days` ago instead, and of that, the messages in a recent tracked thread (`_read_recent`). A failed
+    call, or the cap, ends the read incomplete: what was read is kept and applied, and the cursor moves only to the
+    last history record whose messages were all read (it stays put when that is none, or when the client gives no
+    record ids), so the next tick reads the rest and every tick makes progress."""
     known = set(snap.known)
     metas: list[MessageMeta] = []
     if snap.history_id:
@@ -253,6 +256,8 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     for thread_id in snap.recent_threads:
         try:
             thread = client.thread(thread_id)
+        except ThreadUnsupported:
+            return _read_recent(client, snap, known, metas, cursor, cfg=cfg, now=now)
         except GmailError as err:
             if _gone(err):
                 continue
@@ -263,6 +268,29 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                 known.add(meta.gmail_message_id)
                 metas.append(meta)
     return InboundRead(metas, (cursor or None) if complete else None, complete, snap.account_id)
+
+
+def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: list[MessageMeta], cursor: str, *,
+                 cfg: SendConfig, now: datetime) -> InboundRead:
+    """The no-cursor read for a client with no threads: `history` from `rethread_days` ago (a Mail.app cursor is a
+    time), then `message` for each new message in a recent tracked thread, as the thread read would have taken.
+    A failed call ends it incomplete with no new cursor; a message gone since (404) is skipped."""
+    since = (now.astimezone(timezone.utc) - timedelta(days=cfg.rethread_days)).strftime(ISO_FMT)
+    try:
+        page = client.history(since)
+    except (GmailError, HistoryExpired):
+        return InboundRead(metas, None, False, snap.account_id)
+    recent = set(snap.recent_threads)
+    for added in page.added:
+        if added.gmail_message_id in known or added.thread_id not in recent:
+            continue
+        known.add(added.gmail_message_id)
+        try:
+            metas.append(client.message(added.gmail_message_id))
+        except GmailError as err:
+            if not _gone(err):
+                return InboundRead(metas, None, False, snap.account_id)
+    return InboundRead(metas, cursor or None, True, snap.account_id)
 
 
 # -- applying it ------------------------------------------------------------------------------------------------

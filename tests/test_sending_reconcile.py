@@ -82,8 +82,8 @@ class Base(unittest.TestCase):
             return claim.reconcile(self.db, found, 1, now=iso(self.clock()), cfg=CFG, rng=self.rng)
 
     def scan(self) -> dict:
-        return {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
-                               u.rfc_id)
+        return {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms,
+                                                     to=u.to, subject=u.subject), u.rfc_id)
                 for u in claim.unclear(self.db, 1)}
 
 
@@ -509,8 +509,9 @@ class PerAccountTest(Base):
         self.assertEqual([u.message_id for u in claim.unclear(self.db, self.two.account_id)], [two])
         self.clock.advance(minutes=MULTI.reconcile_after_minutes + 1)
         # Account 1's client scans only account 1's row; a miss there settles nothing on account 2.
-        found = {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
-                                u.rfc_id) for u in claim.unclear(self.db, self.one.account_id)}
+        found = {u.message_id: (*self.gmail.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms,
+                                                      to=u.to, subject=u.subject), u.rfc_id)
+                 for u in claim.unclear(self.db, self.one.account_id)}
         self.assertEqual(set(found), {one})
         forged = {**found, two: (None, True, self.message(two)["pending_rfc_id"])}  # a scan by the wrong client
         with transaction(self.db):
@@ -520,7 +521,8 @@ class PerAccountTest(Base):
         self.assertEqual(self.message(one)["state"], "failed")
         self.assertEqual(self.message(two)["state"], "send_unknown")  # left for its own client
         found2 = {u.message_id: (*self.gmail2.find_sent(u.rfc_id, u.not_before_ms,
-                                                         send_returned_ms=u.send_returned_ms), u.rfc_id)
+                                                         send_returned_ms=u.send_returned_ms, to=u.to,
+                                                         subject=u.subject), u.rfc_id)
                   for u in claim.unclear(self.db, self.two.account_id)}
         with transaction(self.db):
             counts = claim.reconcile(self.db, found2, self.two.account_id, now=iso(self.clock()), cfg=MULTI,

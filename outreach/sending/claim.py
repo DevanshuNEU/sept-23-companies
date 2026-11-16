@@ -525,7 +525,8 @@ class Unclear:
     `send_returned_ms`. `marked` is False for a claim made before the sender set the marker (its `claimed` event has
     none): a scan by marker can never find that email, so it is never scanned or failed. `stored` is set for an
     email the sender before the marker recorded as taken and stored under another Message-ID (event `send_unknown`
-    with error kind `message_id_rewritten`): it went out, and these are the ids Gmail kept."""
+    with error kind `message_id_rewritten`): it went out, and these are the ids Gmail kept. `to` and `subject` are
+    the person's address and the message's subject, which a Mail.app search matches on (it cannot carry a marker)."""
     message_id: int
     rfc_id: str
     claimed_at: str
@@ -533,6 +534,8 @@ class Unclear:
     send_returned_ms: int
     stored: Sent | None = None
     marked: bool = True
+    to: str = ""
+    subject: str = ""
 
 
 def _stored(event: sqlite3.Row | None) -> Sent | None:
@@ -564,8 +567,9 @@ def unclear(conn: sqlite3.Connection, account_id: int) -> list[Unclear]:
     """Every `send_unknown` message of this account (its touch's account; none is account 1), oldest claim first.
     Only this account's client may scan Sent for them. Read only."""
     out = []
-    for row in conn.execute("SELECT m.message_id, m.pending_rfc_id, m.claimed_at, m.updated_at FROM message m "
-                            "JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'send_unknown' "
+    for row in conn.execute("SELECT m.message_id, m.pending_rfc_id, m.claimed_at, m.updated_at, m.subject, "
+                            "p.email FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                            "LEFT JOIN person p ON p.person_id = t.person_id WHERE m.state = 'send_unknown' "
                             "AND COALESCE(t.account_id, 1) = ? ORDER BY m.claimed_at, m.message_id",
                             (account_id,)).fetchall():
         event = _unknown_event(conn, row["pending_rfc_id"])
@@ -574,7 +578,8 @@ def unclear(conn: sqlite3.Connection, account_id: int) -> list[Unclear]:
         out.append(Unclear(message_id=row["message_id"], rfc_id=row["pending_rfc_id"], claimed_at=row["claimed_at"],
                            not_before_ms=_ms(row["claimed_at"]) - CLAIM_MARGIN_MS,
                            send_returned_ms=max(_ms(returned), _ms(row["claimed_at"])), stored=_stored(event),
-                           marked=_marked(conn, row["pending_rfc_id"])))
+                           marked=_marked(conn, row["pending_rfc_id"]), to=row["email"] or "",
+                           subject=row["subject"] or ""))
     return out
 
 

@@ -74,7 +74,7 @@ from pathlib import Path
 from outreach.sending import calendar as cal
 from outreach.sending import accounts, claim, followups, inbound, proof, queue, ramp, signals
 from outreach.sending.config import SendConfig
-from outreach.sending.mail import GmailError, MailClient, scrub
+from outreach.sending.mail import GmailError, MailClient, SentAmbiguous, scrub
 from outreach.sending.notify import Notifier, notify_once
 from outreach.sending.precheck import LIST_MISSING, precheck
 from outreach.sending.proof import PROOF_SQL  # noqa: F401 (the proof's one query; status and tests read it here)
@@ -247,6 +247,7 @@ class _Tick:
         self.waiting: dict[str, int] = {}
         self.counts = Counter()
         self.unread: set[int] = set()  # the accounts whose inbound mail this tick did not fully read or apply
+        self.ambiguous: list[tuple[str, int, str]] = []  # (address, message id, to): sends in doubt Sent shows twice
 
     # -- the frame ----------------------------------------------------------------------------------------------
 
@@ -541,7 +542,8 @@ class _Tick:
         return found, reads
 
     def _scan_sent(self, client: MailClient, row: accounts.AccountRow) -> dict:
-        """A Sent scan by marker for each of this account's sends in doubt, with its own client."""
+        """A Sent scan for each of this account's sends in doubt, with its own client: by marker on Gmail, by address
+        and subject on Mail.app. One that Sent shows twice stays in doubt and is told to him in step 5."""
         found = {}
         for u in claim.unclear(self.conn, row.account_id):
             if u.stored is not None:
@@ -551,7 +553,13 @@ class _Tick:
                               "show whether it went out; it stays in doubt and is never sent again")
                 continue
             try:
-                hit, complete = client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms)
+                hit, complete = client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms,
+                                                 to=u.to, subject=u.subject)
+            except SentAmbiguous:
+                self._partial(f"message {u.message_id} matches more than one email in Sent on {row.cfg.address}; it "
+                              "stays in doubt and is never sent again")
+                self.ambiguous.append((row.cfg.address, u.message_id, u.to))
+                continue
             except GmailError as err:
                 self._partial(f"Sent could not be searched for message {u.message_id} on {row.cfg.address} "
                               f"({scrub(str(err))}); it stays in doubt until a later tick")
@@ -605,6 +613,11 @@ class _Tick:
             notify_once(conn, self.notify, "reconcile_errors", self.today, "Outreach sender needs a look",
                         f"{n} email(s) in doubt could not be settled against Sent. Nothing is resent; check the "
                         "sender's log.", at=stamp)
+        for address, message_id, to in self.ambiguous:
+            notify_once(conn, self.notify, "sent_ambiguous", self.today, "Outreach sender needs a look",
+                        f"The email of message {message_id} to {to} matches more than one email in Sent on "
+                        f"{address}, so it is not known which is this one. Nothing is resent; it stays in doubt "
+                        "until you look.", at=stamp, account_id=self.rows[address].account_id)
         self.counts["requeued"] = claim.requeue_failed(conn, now=stamp, cfg=cfg)
         self.reconciled = {**self.reconciled, "requeued": self.counts["requeued"], "leftover": self.counts["leftover"]}
         applied = Counter()

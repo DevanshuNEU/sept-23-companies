@@ -29,6 +29,10 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(kw["input"], "tell app")
         self.assertEqual(kw["timeout"], 5)
 
+    def test_output_is_read_as_utf8_whatever_the_locale(self):
+        _, m = self.run_with(completed("ok\n"))
+        self.assertEqual(m.call_args[1]["encoding"], "utf-8")
+
     def test_timeout_maps_to_timeout(self):
         err, _ = self.run_with(subprocess.TimeoutExpired("osascript", 5))
         self.assertIsInstance(err, GmailError)
@@ -58,6 +62,12 @@ class RecordsTest(unittest.TestCase):
     def test_fields_unescaped(self):
         out = "a\\tb\tc\\nd\te\\\\f\n\nx\ty\n"
         self.assertEqual(applescript.parse_records(out), [["a\tb", "c\nd", "e\\f"], ["x", "y"]])
+
+    def test_escape_is_what_unescape_undoes(self):
+        for text in ("plain", "a\tb", "x\\ty", "one\ntwo", "cr\r\nlf", "\\\\n", ""):
+            escaped = applescript.escape_field(text)
+            self.assertFalse({"\t", "\n", "\r"} & set(escaped))
+            self.assertEqual(applescript.unescape_field(escaped), text.replace("\r\n", "\n").replace("\r", "\n"))
 
     def test_backslash_before_t_is_not_a_tab(self):
         self.assertEqual(applescript.unescape_field("\\\\t"), "\\t")

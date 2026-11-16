@@ -15,7 +15,8 @@ from email.utils import getaddresses
 from typing import Literal, Protocol, runtime_checkable
 
 __all__ = [
-    "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "GmailError", "KINDS",
+    "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "ThreadUnsupported",
+    "SentAmbiguous", "GmailError", "KINDS",
     "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "MARKER_HEADER", "ORIGINAL_ID_HEADER",
     "check_outgoing", "normalise_message_id", "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches",
     "miss_is_proof",
@@ -106,6 +107,11 @@ class HistoryExpired(Exception):
     """The history cursor is empty, too old or unknown: read the tracked threads once, then take a new cursor."""
 
 
+class ThreadUnsupported(Exception):
+    """The client has no threads to read (Mail.app). With no usable cursor, read its mailboxes with `history` from
+    `rethread_days` ago instead (`inbound.read_mailbox`)."""
+
+
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
                    "timeout", "app_closed"})
 
@@ -156,6 +162,15 @@ class GmailError(Exception):
     @property
     def retryable(self) -> bool:
         return self.kind in RETRYABLE
+
+
+class SentAmbiguous(GmailError):
+    """More than one email in Sent matches a send in doubt (Mail.app: the same address and subject after the claim).
+    Nothing can tell which is this send, so it stays in doubt and is never sent again; the tick tells him. A
+    GmailError of kind `server`, so any caller that keeps a send in doubt on a failed search does the same here."""
+
+    def __init__(self, detail: str = ""):
+        super().__init__("server", None, detail)
 
 
 def classify_http(status: int, body: str) -> str:
@@ -278,10 +293,14 @@ class MailClient(Protocol):
         """Every message in the thread, oldest first."""
         ...
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Look in Sent for the message whose `X-Outreach-Id` is exactly `marker` (or, failing that, whose
         `X-Google-Original-Message-ID` is: the marker is the Message-ID the sender set), never by Message-ID, To or
         Subject. A hit carries that marker and the Message-ID Gmail stored the message under.
+
+        `to` and `subject` are the send's recipient and subject. Gmail ignores them. Mail.app cannot carry the
+        marker, so it matches by them instead (`MailAppClient.find_sent`) and raises SentAmbiguous for two matches.
 
         `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned. After a crash
         with no record of that, pass the time the stale `sending` row was first found (recorded when it moves to

@@ -464,12 +464,13 @@ class GmailClient(MailClient):
                          query={"format": "metadata", "metadataHeaders": READ_HEADERS})
         return [_meta(m) for m in res.get("messages", []) or []]
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Page Sent (Trash and Spam included) newest first and read each message's marker (`X-Outreach-Id`); match
-        it exactly, never by Message-ID (Gmail replaces the one the sender sets), To or Subject. The rules for when
-        a miss is proof are MailClient.find_sent's. Gmail does not promise the listing order, so a page is read to
-        its end and judged by its last dated message. Ten pages of 50 that never reach the claim time make an
-        incomplete scan.
+        it exactly, never by Message-ID (Gmail replaces the one the sender sets), To or Subject (`to` and `subject`
+        are ignored). The rules for when a miss is proof are MailClient.find_sent's. Gmail does not promise the
+        listing order, so a page is read to its end and judged by its last dated message. Ten pages of 50 that never
+        reach the claim time make an incomplete scan.
         """
         wanted = normalise_message_id(marker)
         started_ms = int(self._clock().timestamp() * 1000)

@@ -397,7 +397,7 @@ class ClassifyHttpTest(unittest.TestCase):
 
     def test_only_a_bad_request_is_the_message_own_fault(self):
         kinds = {"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                 "timeout"}
+                 "timeout", "app_closed"}
         self.assertEqual(kinds - RETRYABLE, {"bad_request"})
         self.assertLessEqual(RETRYABLE, kinds)
 

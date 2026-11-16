@@ -3,8 +3,9 @@
 Two steps, so Gmail is never called inside a transaction:
 1. `read_inbound` reads the store once (`snapshot`), then Gmail with no store access at all: new messages after
    the account's history cursor, or, with no usable cursor, every thread of its touches sent in the last 45 days
-   (taking the profile's history id first, so nothing that arrives during the read is missed). An incomplete read
-   keeps the old cursor.
+   (taking the profile's history id first, so nothing that arrives during the read is missed; Mail.app, which has
+   no threads, reads its mailboxes from an hour before its earliest of those sends instead, in slices of at most 3
+   days). An incomplete read keeps the old cursor, but for a Mail.app slice behind now, which keeps its end.
 2. `apply_inbound` classifies each message and writes it in one transaction.
 
 A missed reply or bounce would send the next follow-up to someone who already answered, so: a read that fails is
@@ -32,7 +33,9 @@ from outreach.sending.claim import PLACEHOLDER_DOMAIN
 from outreach.sending.classify import Inbound, classify, match_unthreaded
 from outreach.sending.config import SendConfig
 from outreach.sending.followups import stop_touch_messages
-from outreach.sending.mail import GmailError, HistoryExpired, MailClient, MessageMeta, normalise_message_id
+from outreach.sending.mailapp import ID_PREFIX as MAILAPP_PREFIX
+from outreach.sending.mail import (GmailError, HistoryExpired, MailClient, MessageMeta, ThreadUnsupported,
+                                   normalise_message_id)
 from outreach.sending.notify import Notifier
 from outreach.sending.ramp import note_signal
 from outreach.store.atomic import atomic
@@ -136,13 +139,15 @@ def known_ids(conn: sqlite3.Connection, account_id: int) -> set[str]:
 class Snapshot:
     """What a read of one account's mailbox needs, read from the store before any Gmail call. `recent_threads` are
     the threads of its touches first sent within `rethread_days`, newest first: what a read with no usable cursor
-    goes through."""
+    goes through. `earliest_send` is the earliest first send of those touches (UTC text), or None: where a read with
+    no cursor and no threads (Mail.app) starts."""
     account_id: int
     threads: Mapping[str, int]
     subjects: Mapping[str, int]
     known: frozenset[str]
     history_id: str
     recent_threads: tuple[str, ...]
+    earliest_send: str | None = None
 
 
 def _cursor(conn: sqlite3.Connection, account_id: int) -> str:
@@ -158,16 +163,20 @@ def _cursor(conn: sqlite3.Connection, account_id: int) -> str:
 def snapshot(conn: sqlite3.Connection, account_id: int, *, now: datetime, cfg: SendConfig) -> Snapshot:
     """Read only."""
     since = (now.astimezone(timezone.utc) - timedelta(days=cfg.rethread_days)).strftime(ISO_FMT)
-    recent = tuple(row[0] for row in conn.execute(
-        "SELECT t.gmail_thread_id FROM touch t WHERE t.gmail_thread_id IS NOT NULL AND t.gmail_thread_id <> '' "
-        f"AND t.first_sent_at >= ? AND {_ON_ACCOUNT} ORDER BY t.first_sent_at DESC, t.touch_id DESC",
-        (since, account_id)))
+    rows = conn.execute(
+        "SELECT t.gmail_thread_id, t.first_sent_at FROM touch t WHERE t.gmail_thread_id IS NOT NULL "
+        f"AND t.gmail_thread_id <> '' AND t.first_sent_at >= ? AND {_ON_ACCOUNT} "
+        "ORDER BY t.first_sent_at DESC, t.touch_id DESC", (since, account_id)).fetchall()
     return Snapshot(account_id=account_id, threads=tracked_threads(conn, account_id),
                     subjects=tracked_subjects(conn, account_id), known=frozenset(known_ids(conn, account_id)),
-                    history_id=_cursor(conn, account_id), recent_threads=recent)
+                    history_id=_cursor(conn, account_id), recent_threads=tuple(row[0] for row in rows),
+                    earliest_send=rows[-1][1] if rows else None)
 
 
 # -- reading Gmail ----------------------------------------------------------------------------------------------
+
+# A Mail.app first read starts this long before the account's earliest first send (controller ruling, B4 fix 2).
+FIRST_READ_LEAD = timedelta(hours=1)
 
 @dataclass(frozen=True)
 class InboundRead:
@@ -205,26 +214,39 @@ def read_inbound(conn: sqlite3.Connection, client: MailClient, account: accounts
     return read_mailbox(client, snapshot(conn, account.account_id, now=now, cfg=cfg), cfg=cfg, now=now)
 
 
+def _skip_ids(known: set[str]) -> frozenset[str]:
+    """The Message-IDs, bracketed, of the account's mail already handled, for a client that lists its mailbox by
+    Message-ID and fetches only the others (Mail.app, whose message ids are `mailapp:<Message-ID>`): every known id
+    (inbound mail stored, mail read and left alone in `inbound_seen`, its own sent mail). Gmail ignores them."""
+    return frozenset(normalise_message_id(k[len(MAILAPP_PREFIX):]) for k in known if k.startswith(MAILAPP_PREFIX))
+
+
 def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: datetime) -> InboundRead:
     """Read new mail from Gmail. No store access: run it with no transaction open.
 
-    With a cursor: `history`, then `message` for each new id, the tracked threads' first and then INBOX mail in
-    other threads (only to catch a bounce Gmail did not thread), at most `inbound_meta_cap` in all. With no cursor,
+    With a cursor: `history` (given every Message-ID already handled, `_skip_ids`), then `message` for each new id,
+    the tracked threads' first and then INBOX mail in other threads (only to catch a bounce Gmail did not thread), at
+    most `inbound_meta_cap` in all; from a page the client already holds (`HistoryPage.held`: Mail.app fetched each
+    record) every new message is read, so applying it records it and it is never fetched again. A page not fully
+    read (`HistoryPage.more`: messages left out, or a Mail.app slice that ends before now) ends the read incomplete
+    with the page's cursor (where it was, or the slice's end). With no cursor,
     or one Gmail calls expired: `profile` first (its history id becomes the cursor), then `thread` for each recent
-    tracked thread. A failed call, or the cap, ends the read incomplete: what was read is kept and applied, and the
-    cursor moves only to the last history record whose messages were all read (it stays put when that is none, or
-    when the client gives no record ids), so the next tick reads the rest and every tick makes progress."""
+    tracked thread; a client with no threads (Mail.app: ThreadUnsupported) is read with `history` from
+    an hour before its earliest first send of the last `rethread_days` instead (`_read_recent`). A failed
+    call, or the cap, ends the read incomplete: what was read is kept and applied, and the cursor moves only to the
+    last history record whose messages were all read (it stays put when that is none, or when the client gives no
+    record ids), so the next tick reads the rest and every tick makes progress."""
     known = set(snap.known)
     metas: list[MessageMeta] = []
     if snap.history_id:
         try:
-            page = client.history(snap.history_id)
+            page = client.history(snap.history_id, skip_ids=_skip_ids(known))
         except HistoryExpired:
             page = None
         except GmailError:
             return InboundRead([], None, False, snap.account_id)
         if page is not None:
-            tracked, others = [], []
+            tracked, others, rest = [], [], []
             for added in page.added:
                 if added.gmail_message_id in known:
                     continue
@@ -233,7 +255,9 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                     tracked.append(added.gmail_message_id)
                 elif "INBOX" in added.labels:
                     others.append(added.gmail_message_id)
-            wanted = tracked + others
+                elif page.held:
+                    rest.append(added.gmail_message_id)
+            wanted = tracked + others + rest
             done: set[str] = set()
             for gmail_id in wanted[:cfg.inbound_meta_cap]:
                 try:
@@ -243,6 +267,8 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                         break
                 done.add(gmail_id)
             if len(done) == len(wanted):
+                if page.more:  # not all read (left out, or a slice behind now): the next read goes on from here
+                    return InboundRead(metas, page.history_id or None, False, snap.account_id)
                 return InboundRead(metas, page.history_id, True, snap.account_id)
             return InboundRead(metas, _read_through(page.added, set(wanted) - done), False, snap.account_id)
     try:
@@ -253,6 +279,8 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     for thread_id in snap.recent_threads:
         try:
             thread = client.thread(thread_id)
+        except ThreadUnsupported:
+            return _read_recent(client, snap, known, metas, cursor, cfg=cfg, now=now)
         except GmailError as err:
             if _gone(err):
                 continue
@@ -263,6 +291,37 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                 known.add(meta.gmail_message_id)
                 metas.append(meta)
     return InboundRead(metas, (cursor or None) if complete else None, complete, snap.account_id)
+
+
+def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: list[MessageMeta], cursor: str, *,
+                 cfg: SendConfig, now: datetime) -> InboundRead:
+    """The no-cursor read for a client with no threads (Mail.app, whose cursor is a time): `history` from an hour
+    before the account's earliest first send of the last `rethread_days` (never a scan of all of them: a 45-day list
+    outlasts the real Mail.app's read), then `message` for each new message in a recent tracked thread, as the thread
+    read would have taken, or for every new message of a page the client already holds (so each is recorded and
+    never fetched again). A failed call ends it incomplete with no new cursor; a page that is behind now or left
+    messages out ends it incomplete with the page's cursor, so the next read goes on from there; a message gone
+    since (404) is skipped. With no send to start from, the cursor is `cursor` (the profile's: now)."""
+    if snap.earliest_send is None:
+        return InboundRead(metas, cursor or None, True, snap.account_id)
+    since = (datetime.fromisoformat(snap.earliest_send) - FIRST_READ_LEAD).astimezone(timezone.utc).strftime(ISO_FMT)
+    try:
+        page = client.history(since, skip_ids=_skip_ids(known))
+    except (GmailError, HistoryExpired):
+        return InboundRead(metas, None, False, snap.account_id)
+    recent = set(snap.recent_threads)
+    for added in page.added:
+        if added.gmail_message_id in known or (added.thread_id not in recent and not page.held):
+            continue
+        known.add(added.gmail_message_id)
+        try:
+            metas.append(client.message(added.gmail_message_id))
+        except GmailError as err:
+            if not _gone(err):
+                return InboundRead(metas, None, False, snap.account_id)
+    if page.more:
+        return InboundRead(metas, page.history_id or None, False, snap.account_id)
+    return InboundRead(metas, page.history_id or cursor or None, True, snap.account_id)
 
 
 # -- applying it ------------------------------------------------------------------------------------------------
@@ -293,7 +352,13 @@ def _insert_inbound(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, 
         "INSERT INTO inbound_message(touch_id, gmail_message_id, from_addr, subject, body_text, kind, received_at, "
         "recorded_at, dsn_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(gmail_message_id) DO NOTHING",
         (touch_id, meta.gmail_message_id, meta.from_addr or "", meta.subject or "", meta.snippet or "", found.kind,
-         received, stamp, found.dsn_class)).rowcount == 1
+         received, stamp, _stored_class(found.dsn_class))).rowcount == 1
+
+
+def _stored_class(dsn_class: str | None) -> str | None:
+    """The `inbound_message.dsn_class` the table accepts: a provider block of the account is stored as `limit` (the
+    same meaning: the mail system refused the account, not the address). The CHECK has no `provider_block`."""
+    return "limit" if dsn_class == "provider_block" else dsn_class
 
 
 def _company_of(conn: sqlite3.Connection, touch_id: int) -> int:
@@ -421,10 +486,12 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
 
 
 def _limit_notice(conn: sqlite3.Connection, touch_id: int | None, meta: MessageMeta, received: str, *,
-                  account: accounts.AccountRow, now: datetime, cfg: SendConfig, notify: Notifier) -> None:
-    """Gmail refused to send for the limit of the account whose mailbox holds the notice: a hard block on that
-    account, whatever thread the notice is in."""
-    note_signal(conn, "gmail_limit", at=received, key=f"gmail_limit:dsn:{meta.gmail_message_id}", cfg=cfg,
+                  account: accounts.AccountRow, now: datetime, cfg: SendConfig, notify: Notifier,
+                  kind: str = "gmail_limit") -> None:
+    """The mail system refused the account whose mailbox holds the notice, not the recipient: Gmail's sending limit
+    (`gmail_limit`) or a Microsoft block of the account (`provider_block`). A hard block on that account, whatever
+    thread the notice is in."""
+    note_signal(conn, kind, at=received, key=f"{kind}:dsn:{meta.gmail_message_id}", cfg=cfg,
                 notify=notify, now=now, account=account,
                 detail={"touch_id": touch_id, "gmail_message_id": meta.gmail_message_id, "source": "dsn"})
 
@@ -446,7 +513,8 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, account: accounts
     - a bounce: an `open` touch becomes `bounced`; its unsent messages are stopped (reason `bounced`); its address
       goes on `bounced_address` (source `bounce`, the bounce's Gmail id) and the person on the no-go list (#224);
       then the policy, 3-day bounce rate and hard bounce rate signals. A Gmail limit notice instead raises
-      `gmail_limit` and leaves the touch alone, even when it matches no touch.
+      `gmail_limit`, and a Microsoft block of the account (5.7.708, 5.7.705, 5.1.8, "restricted from sending")
+      raises `provider_block`; both leave the touch alone, even when it matches no touch.
     Matching by thread, failed recipient and sent subject uses only the account's own touches; the reply headers
     match any account's email. A message that writes nothing is remembered in `inbound_seen` under the account's
     key (forgotten after `SEEN_DAYS`), so it is never read again. The account's cursor moves to
@@ -479,13 +547,14 @@ def apply_inbound(conn: sqlite3.Connection, read: InboundRead, account: accounts
                 if unthreaded is None:
                     unthreaded = (tracked_addresses(conn, account_id), tracked_subjects(conn, account_id))
                 touch_id = match_unthreaded(meta, *unthreaded)
-            if found.kind == "bounce" and found.dsn_class == "limit":
+            if found.kind == "bounce" and found.dsn_class in ("limit", "provider_block"):
                 if touch_id is not None:
                     _insert_inbound(conn, touch_id, meta, found, _received(meta), stamp)
                 else:
                     _seen(conn, account_id, meta, "untracked", stamp)
                 _limit_notice(conn, touch_id, meta, _received(meta), account=account, now=now, cfg=cfg,
-                              notify=notify)
+                              notify=notify, kind="provider_block" if found.dsn_class == "provider_block"
+                              else "gmail_limit")
                 counts["limit_notices"] += 1
                 continue
             if touch_id is None or found.kind not in ("human", "auto_reply", "bounce"):

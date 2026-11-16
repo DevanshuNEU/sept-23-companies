@@ -26,6 +26,14 @@ After that claim the phase follows that email:
 Every marked email sent is read back once (`verify_marker`), the first one for the proof and every later one to
 keep checking: one that comes back without its marker stops sending the same way. The read back also records the
 Message-ID Gmail stored, when the send could not read it, so follow-ups and replies match on Gmail's own id.
+
+A Mail.app account (Phase B) cannot put the marker on an email, so its proof is the email found in Sent Items by
+the find_sent rule (exactly one message to that address with that exact subject, sent at or after the claim, with a
+Message-ID): `MailAppClient.send` returns only such a hit, and a send in doubt becomes `sent` only from one
+(`find_sent`, then `reconcile`). So `verify_marker(kind="mailapp")` reads nothing: each sent email the account
+recorded from a Sent Items hit (a `mailapp:` id and one Message-ID) appends `marker_verified` with source
+`sent_items`; one recorded without them appends `marker_missing`, as on Gmail. No marker is read and `message` is
+never called on a Sent Items id (that lookup walks every mailbox, about 30 seconds on the real Mail.app).
 `claim.claim` asks `may_claim` inside its own transaction, so no caller can claim a second email while unproven.
 Read only, except `verify_marker`, which reads Gmail with no transaction open and then writes once.
 
@@ -41,6 +49,7 @@ from datetime import datetime, timezone
 
 from outreach.drafts.followups import canonical_company
 from outreach.sending.mail import MESSAGE_ID, GmailError, MailClient, normalise_message_id
+from outreach.sending.mailapp import ID_PREFIX as MAILAPP_PREFIX
 from outreach.store.atomic import atomic
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
@@ -145,8 +154,19 @@ def _stored_id(conn: sqlite3.Connection, row: sqlite3.Row, stored: str, stamp: s
                      (stored, stamp, row["touch_id"], row["rfc_message_id"]))
 
 
+def _from_sent_items(row: sqlite3.Row, detail: dict) -> tuple[str, dict, str]:
+    """A Mail.app account's read back, from the store alone: the email was recorded `sent` from its Sent Items hit
+    when its id is `mailapp:<Message-ID>` and its Message-ID is one; else the marker cannot be shown (`no_ids`)."""
+    gmail_id = row["gmail_message_id"] or ""
+    stored = normalise_message_id(row["rfc_message_id"])
+    if gmail_id.startswith(MAILAPP_PREFIX) and MESSAGE_ID.fullmatch(stored) \
+            and normalise_message_id(gmail_id[len(MAILAPP_PREFIX):]) == stored:
+        return "marker_verified", {**detail, "source": "sent_items", "stored_rfc_id": stored}, stored
+    return "marker_missing", {**detail, "source": "sent_items", "reason": "no_ids"}, ""
+
+
 def verify_marker(conn: sqlite3.Connection, client: MailClient, account_id: int, *, now: datetime,
-                  limit: int = 5) -> dict[str, int]:
+                  limit: int = 5, kind: str = "gmail") -> dict[str, int]:
     """Read each marked email this account recorded `sent` back from Gmail by its Gmail id, once, with no transaction
     open, then write once. `client` is that account's own: only its mail is read. While unproven that is the one first
     email (phase `checking`); once proven, every later one. The `SENT` label and an `X-Outreach-Id` equal
@@ -154,7 +174,8 @@ def verify_marker(conn: sqlite3.Connection, client: MailClient, account_id: int,
     Anything else Gmail answers (no marker, another one, no `SENT` label, a 404) appends `marker_missing`, which stops
     this account for good. Either way the Message-ID Gmail stored is recorded when it differs from the one the send
     recorded. Any other Gmail error writes nothing and ends the round; the next tick tries again. Nothing is read in
-    any other phase. Returns counts."""
+    any other phase. A Mail.app account (`kind="mailapp"`) is checked from the store alone (`_from_sent_items`, see
+    the module text): `client` is never called. Returns counts."""
     if conn.in_transaction:
         raise RuntimeError("verify_marker calls Gmail, so it runs with no transaction open")
     counts = {"verified": 0, "missing": 0, "errors": 0}
@@ -166,6 +187,9 @@ def verify_marker(conn: sqlite3.Connection, client: MailClient, account_id: int,
         detail = {"gmail_message_id": row["gmail_message_id"], "marker": row["marker"]}
         if not claimed or not row["gmail_message_id"]:
             results.append((row, "marker_missing", {**detail, "reason": "no_ids"}, ""))
+            continue
+        if kind == "mailapp":
+            results.append((row, *_from_sent_items(row, detail)))
             continue
         try:
             meta = client.message(row["gmail_message_id"])

@@ -221,7 +221,7 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual((two.kind, two.lane, two.sends), ("gmail", "general", True))
         self.assertEqual((two.ramp_start, two.ramp_step, two.ramp_floor, two.ramp_ceiling), (15, 3, 15, 40))
         self.assertEqual((three.kind, three.lane, three.sends, three.mailapp_account),
-                         ("mailapp", "sponsor", False, "Exchange"))
+                         ("mailapp", "sponsor", True, "Exchange"))  # the #9 placement test passed (2026-11-15)
         self.assertEqual((three.ramp_start, three.ramp_step, three.ramp_floor, three.ramp_ceiling), (15, 3, 15, 60))
         self.assertIsNone(one.mailapp_account)
         self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
@@ -262,7 +262,9 @@ class SendConfigTest(unittest.TestCase):
     def test_lane_account_skips_non_sending(self):
         cfg = load_config(SHIPPED_SEND_CONFIG)
         self.assertEqual(cfg.lane_account("general").address, "devanshuchi9@gmail.com")
-        self.assertIsNone(cfg.lane_account("sponsor"))  # the Northeastern block does not send until Phase B
+        self.assertEqual(cfg.lane_account("sponsor").address, "chicholikar.d@northeastern.edu")  # Phase B
+        rested = load_config(blocks_text(block("a@example.com", lane="sponsor", sends=False)))
+        self.assertIsNone(rested.lane_account("sponsor"))  # an account that does not send serves no lane
 
     def test_window_and_holidays(self):
         cfg = load_config(SHIPPED_SEND_CONFIG)

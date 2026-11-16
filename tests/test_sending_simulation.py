@@ -5,14 +5,19 @@ weeks are simulated once for the whole module (about 20 seconds) and every test 
 """
 import dataclasses
 import json
+import shutil
+import time
 import unittest
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from outreach.sending import calendar as cal
 from outreach.sending.config import load_config
+from outreach.sending.fakemailapp import FakeMailApp
 from tests import SHIPPED_SEND_CONFIG
-from outreach.sending.simulate import TWO_WEEKS, Event, Scenario, format_table, ny, simulate
+from outreach.sending.simulate import (TWO_WEEKS, Event, Scenario, SendRecord, SimResult, _Run, format_table, ny,
+                                       simulate)
 
 # Built for one follow-up at 7 business days (the 4-follow-up schedule is tested in test_sending_followups) and with no
 # breaks, since its bounces and limits sit at fixed positions in the day. Gaps are the shipped spread pacing (the scratch
@@ -294,6 +299,131 @@ class EverySendingAccountTest(unittest.TestCase):
         for s in result.sends:
             companies[s.company].add(s.account)
         self.assertTrue(all(len(a) == 1 for a in companies.values()))
+
+
+# The shipped accounts and ramps (the scratch config's differ), with CFG's pacing and no follow-ups in the two weeks.
+SHIPPED_CFG = dataclasses.replace(load_config(SHIPPED_SEND_CONFIG), followup_business_days=(7,), break_chance=0.0001,
+                                  spread_gap_minutes=(2, 45))
+NEU = "chicholikar.d@northeastern.edu"
+GENERAL = "devanshuchi9@gmail.com"
+
+
+class _MailAppRun(_Run):
+    """The simulator's own run with the Northeastern account on a FakeMailApp, as the shipped config has it. The
+    simulator builds Gmail fakes only, so this adds the Mail.app one beside them and reads its sends, which the fake
+    records as (email, Message-ID, when). Day 3 at 07:00 the next Mail.app email is made slow to reach Sent Items."""
+
+    def __init__(self, scenario: Scenario, seed: int, cfg):
+        super().__init__(scenario, seed, cfg)
+        account = next(a for a in cfg.accounts if a.kind == "mailapp")
+        self.mail = FakeMailApp(clock=self.clock, account=account, reconcile_after_minutes=cfg.reconcile_after_minutes)
+        self.fakes[account.address] = self.mail  # the tick's `clients` is this same dict
+        self.senders.append(account.address)
+        self.armed = False
+
+    def apply_due(self) -> None:
+        if not self.armed and self.clock() >= ny(D[3], "07:00"):
+            self.armed = True
+            self.mail.slow_sent(timedelta(minutes=10))  # past the client's 60 second poll: a send in doubt
+        super().apply_due()
+
+    def send_records(self):
+        self.senders.remove(NEU)  # the parent reads Gmail's (email, Sent, when) records only
+        try:
+            gmail = super().send_records()
+        finally:
+            self.senders.append(NEU)
+        mail = []
+        for n, (outgoing, rfc_id, at) in enumerate(self.mail.sent):
+            info = self.by_email[outgoing.to]
+            mail.append(SendRecord(at=at, company=info.company, person=info.key, role_kind=info.role_kind, seq=0,
+                                   message_id=rfc_id, in_reply_to=outgoing.in_reply_to, thread_id="", to=outgoing.to,
+                                   zone=info.zone, marker=outgoing.marker, account=NEU))
+        return tuple(sorted(gmail + tuple(mail), key=lambda r: r.at))
+
+
+def two_accounts_two_weeks() -> SimResult:
+    """Ten business days, both accounts clean: 30 first emails approved a day for each lane (a company has one
+    person, and every other company sponsors), so each account always has more ready mail than its limit."""
+    scenario = Scenario(start=D[1], days=10, companies=600, people_per_company=1,
+                        zones=("America/New_York", "America/Chicago", "America/Los_Angeles"),
+                        events=tuple(Event(ny(D[n], "07:00"), "approve", {"count": 60}) for n in range(1, 11)),
+                        sponsors=frozenset(range(0, 600, 2)))
+    began = time.monotonic()
+    run = _MailAppRun(scenario, 7, SHIPPED_CFG)
+    try:
+        run.seed()
+        run.run()
+        return SimResult(scenario=scenario, cfg=run.cfg, days=run.day_rows(), sends=run.send_records(), conn=run.conn,
+                         fake=run.fake, people=run.people, notices=run.notices, folder=run.folder, ticks=run.ticks,
+                         seconds=time.monotonic() - began, account_days=run.account_days()), run.mail
+    except BaseException:
+        run.conn.close()
+        shutil.rmtree(run.folder, ignore_errors=True)
+        raise
+
+
+class TwoAccountsTwoWeeksTest(unittest.TestCase):
+    """Phase B: account 2 (devanshuchi9, Gmail, general lane) and the Northeastern account (Mail.app, sponsor lane)
+    each ramp from 15 by 3 a clean day, to their ceilings 40 and 60, over ten business days."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.r, cls.mail = two_accounts_two_weeks()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.r.close()
+
+    def test_each_account_sends_its_ramp_and_reaches_its_limit_on_day_ten(self):
+        general, neu = self.r.account_days[GENERAL], self.r.account_days[NEU]
+        self.assertEqual([d.start_limit for d in general], [15, 18, 21, 24, 27, 30, 33, 36, 39, 40])
+        self.assertEqual([d.start_limit for d in neu], [15, 18, 21, 24, 27, 30, 33, 36, 39, 42])
+        self.assertEqual((general[-1].start_limit, general[-1].effective_limit), (40, 40), "15 + 3 * 9 = 42, ceiling 40")
+        self.assertEqual((neu[-1].start_limit, neu[-1].effective_limit), (42, 42), "15 + 3 * 9 = 42, ceiling 60")
+        for address, rows in ((GENERAL, general), (NEU, neu)):
+            for n, row in enumerate(rows, start=1):
+                self.assertEqual(row.outcome, "clean", f"{address} day {n}")
+                self.assertEqual(row.sent, row.effective_limit, f"{address} day {n} sent its limit")
+        self.assertEqual(self.r.notices, [])
+
+    def test_no_company_gets_two_accounts(self):
+        rows = self.r.conn.execute(
+            "SELECT p.company_id AS company, COUNT(DISTINCT t.account_id) AS accounts, COUNT(*) AS touches "
+            "FROM touch t JOIN person p ON p.person_id = t.person_id WHERE t.account_id IS NOT NULL "
+            "GROUP BY p.company_id").fetchall()
+        self.assertEqual(sum(r["touches"] for r in rows), len(self.r.sends))
+        self.assertTrue(all(r["accounts"] == 1 for r in rows))
+        for s in self.r.sends:  # the lane picks the account: even companies sponsor
+            self.assertEqual(s.account, NEU if s.company % 2 == 0 else GENERAL, s)
+
+    def test_no_send_outside_the_window_or_off_a_business_day(self):
+        self.assertEqual({s.account for s in self.r.sends}, {GENERAL, NEU})
+        for s in self.r.sends:
+            local = s.at.astimezone(ZoneInfo(s.zone))
+            self.assertTrue(cal.is_business_day(local.date(), SHIPPED_CFG), f"{s.person} on {local}")
+            self.assertTrue(SHIPPED_CFG.window_start <= local.time() <= SHIPPED_CFG.window_end,
+                            f"{s.person} at {local}")
+
+    def test_a_mail_app_timeout_on_day_three_is_settled_from_sent_items_and_sent_once(self):
+        doubt = self.r.conn.execute("SELECT entity_id FROM event WHERE kind = 'send_unknown' AND entity = 'message'"
+                                    ).fetchall()
+        self.assertEqual(len(doubt), 1, "exactly one send was in doubt")
+        message = self.r.conn.execute(
+            "SELECT m.state, m.sent_at, p.email, m.subject FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+            "JOIN person p ON p.person_id = t.person_id WHERE m.message_id = ?", (doubt[0]["entity_id"],)).fetchone()
+        self.assertEqual(message["state"], "sent")
+        sent_at = datetime.strptime(message["sent_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        self.assertEqual(ny_date(sent_at), D[3])
+        self.assertEqual(sum(1 for out, _, _ in self.mail.sent if out.to == message["email"]), 1,
+                         "Mail.app was asked to send it once")
+        self.assertEqual(sum(1 for s in self.mail.sent_items() if s.to == message["email"]), 1)
+        sent_ids = [rfc for _, rfc, _ in self.mail.sent]
+        self.assertEqual(len(sent_ids), len(set(sent_ids)))
+        per_address = Counter(out.to for out, _, _ in self.mail.sent)
+        self.assertEqual([a for a, n in per_address.items() if n > 1], [])
+        counts = dict(self.r.conn.execute("SELECT state, COUNT(*) FROM message GROUP BY state").fetchall())
+        self.assertFalse({"sending", "send_unknown", "failed"} & set(counts), counts)
 
 
 class StopRulesTest(unittest.TestCase):

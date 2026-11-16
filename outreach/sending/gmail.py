@@ -34,7 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email import policy as email_policy
@@ -421,7 +421,8 @@ class GmailClient(MailClient):
         return Sent(gmail_message_id=gid, thread_id=thread, rfc_message_id=kept,
                     marker=normalise_message_id(stored.get(MARKER_HEADER.lower())))
 
-    def history(self, start_history_id: str) -> HistoryPage:
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        # `skip_ids` is for a client that lists by Message-ID (Mail.app); Gmail's history names only new messages.
         if not start_history_id:
             raise HistoryExpired("no history cursor")
         added: list[Added] = []
@@ -464,12 +465,13 @@ class GmailClient(MailClient):
                          query={"format": "metadata", "metadataHeaders": READ_HEADERS})
         return [_meta(m) for m in res.get("messages", []) or []]
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Page Sent (Trash and Spam included) newest first and read each message's marker (`X-Outreach-Id`); match
-        it exactly, never by Message-ID (Gmail replaces the one the sender sets), To or Subject. The rules for when
-        a miss is proof are MailClient.find_sent's. Gmail does not promise the listing order, so a page is read to
-        its end and judged by its last dated message. Ten pages of 50 that never reach the claim time make an
-        incomplete scan.
+        it exactly, never by Message-ID (Gmail replaces the one the sender sets), To or Subject (`to` and `subject`
+        are ignored). The rules for when a miss is proof are MailClient.find_sent's. Gmail does not promise the
+        listing order, so a page is read to its end and judged by its last dated message. Ten pages of 50 that never
+        reach the claim time make an incomplete scan.
         """
         wanted = normalise_message_id(marker)
         started_ms = int(self._clock().timestamp() * 1000)

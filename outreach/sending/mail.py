@@ -9,13 +9,14 @@ Errors: every client method may raise `GmailError`, whose `kind` says what went 
 that passes a raw body by mistake still cannot log a token.
 """
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from email.utils import getaddresses
 from typing import Literal, Protocol, runtime_checkable
 
 __all__ = [
-    "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "GmailError", "KINDS",
+    "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "ThreadUnsupported",
+    "SentAmbiguous", "AccountOff", "GmailError", "KINDS",
     "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "MARKER_HEADER", "ORIGINAL_ID_HEADER",
     "check_outgoing", "normalise_message_id", "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches",
     "miss_is_proof",
@@ -98,21 +99,34 @@ class Added:
 
 @dataclass(frozen=True)
 class HistoryPage:
+    """New messages and the cursor to move to. `held`: the client already holds every message on the page (Mail.app
+    fetched their full records), so `message` costs nothing for any of them and the reader reads them all, so each is
+    recorded and never fetched again. `more`: the client left messages out (a busy window), so the read is not
+    complete and `history_id` is the cursor it was given; the next call returns the rest."""
     added: tuple[Added, ...]
     history_id: str
+    held: bool = False
+    more: bool = False
 
 
 class HistoryExpired(Exception):
     """The history cursor is empty, too old or unknown: read the tracked threads once, then take a new cursor."""
 
 
+class ThreadUnsupported(Exception):
+    """The client has no threads to read (Mail.app). With no usable cursor, read its mailboxes with `history` from
+    an hour before the account's earliest first send of the last `rethread_days` instead (`inbound.read_mailbox`)."""
+
+
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",
-                   "timeout"})
+                   "timeout", "app_closed", "not_allowed"})
 
 # A failure of these kinds says nothing about the message itself (it never went out because of the account, the
-# token, Gmail or the network), so a send proven missing from Sent may be tried again. Not retryable: a bad request
-# (a bad address or header would fail the same way again).
-RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout"})
+# token, Gmail, Mail.app not running or the network), so a send proven missing from Sent may be tried again. Not
+# retryable: a bad request (a bad address or header would fail the same way again), and `not_allowed` (macOS does not
+# let the sender control Mail.app, error -1743: it fails the same way until he allows it).
+RETRYABLE = frozenset({"rate_limit", "daily_limit", "account_blocked", "auth", "server", "network", "timeout",
+                       "app_closed"})
 
 DETAIL_LIMIT = 300
 
@@ -138,22 +152,42 @@ def scrub(text: str, *secrets: str) -> str:
 
 
 class GmailError(Exception):
-    """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one."""
+    """A Gmail call failed. `kind` is one of KINDS; `status` the HTTP status when there was one. `maybe_sent`: the
+    email may have gone out whatever the kind (Mail.app took it, or its send script was cut short), so a Sent miss
+    never makes it retryable: it is settled by the Sent Items rule, never by sending it again. Gmail never sets it."""
 
     def __init__(self, kind: Literal["auth", "rate_limit", "daily_limit", "account_blocked", "bad_request",
-                                     "server", "network", "timeout"],
-                 status: int | None = None, detail: str = ""):
+                                     "server", "network", "timeout", "app_closed", "not_allowed"],
+                 status: int | None = None, detail: str = "", *, maybe_sent: bool = False):
         if kind not in KINDS:
             raise ValueError(f"unknown Gmail error kind {kind!r}")
         self.kind = kind
         self.status = status
         self.detail = scrub(detail)
+        self.maybe_sent = maybe_sent
         super().__init__(f"Gmail {kind}" + (f" {status}" if status is not None else "") +
                          (f": {self.detail}" if self.detail else ""))
 
     @property
     def retryable(self) -> bool:
-        return self.kind in RETRYABLE
+        return self.kind in RETRYABLE and not self.maybe_sent
+
+
+class SentAmbiguous(GmailError):
+    """More than one email in Sent matches a send in doubt (Mail.app: the same address and subject after the claim).
+    Nothing can tell which is this send, so it stays in doubt and is never sent again; the tick tells him. A
+    GmailError of kind `server`, so any caller that keeps a send in doubt on a failed search does the same here."""
+
+    def __init__(self, detail: str = "", *, maybe_sent: bool = False):
+        super().__init__("server", None, detail, maybe_sent=maybe_sent)
+
+
+class AccountOff(GmailError):
+    """The Mail.app account exists but is turned off in Mail.app (`enabled` false): signed out for sending, as an
+    account Mail.app does not have. A GmailError of kind `auth`."""
+
+    def __init__(self, detail: str = ""):
+        super().__init__("auth", None, detail)
 
 
 def classify_http(status: int, body: str) -> str:
@@ -265,8 +299,10 @@ class MailClient(Protocol):
         back; Gmail storing another Message-ID than the one set is normal and is not an error."""
         ...
 
-    def history(self, start_history_id: str) -> HistoryPage:
-        """Messages added after `start_history_id`. Raises HistoryExpired for an empty, old or unknown cursor."""
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        """Messages added after `start_history_id`. Raises HistoryExpired for an empty, old or unknown cursor.
+        `skip_ids` are the bracketed Message-IDs the caller already handled: Mail.app lists its window by Message-ID
+        and fetches only the others (`MailAppClient.history`); Gmail ignores them."""
         ...
 
     def message(self, gmail_message_id: str) -> MessageMeta:
@@ -276,10 +312,14 @@ class MailClient(Protocol):
         """Every message in the thread, oldest first."""
         ...
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Look in Sent for the message whose `X-Outreach-Id` is exactly `marker` (or, failing that, whose
         `X-Google-Original-Message-ID` is: the marker is the Message-ID the sender set), never by Message-ID, To or
         Subject. A hit carries that marker and the Message-ID Gmail stored the message under.
+
+        `to` and `subject` are the send's recipient and subject. Gmail ignores them. Mail.app cannot carry the
+        marker, so it matches by them instead (`MailAppClient.find_sent`) and raises SentAmbiguous for two matches.
 
         `not_before_ms` is the claim time; `send_returned_ms` is when the failed send call returned. After a crash
         with no record of that, pass the time the stale `sending` row was first found (recorded when it moves to

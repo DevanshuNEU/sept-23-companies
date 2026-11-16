@@ -124,6 +124,7 @@ class _LiveRun(unittest.TestCase):
         self.live = temp_dir(self)
         self.db = fresh_store()
         self.client = mock.Mock(name="GmailClient")
+        self.mailapp = mock.Mock(name="MailAppClient")
         self.seen = {}
 
         def fake_tick(conn, deps, cfg, *, dry_run=False):
@@ -133,8 +134,10 @@ class _LiveRun(unittest.TestCase):
 
         patches = [mock.patch.object(cli, "GmailClient", return_value=self.client),
                    mock.patch.object(cli, "connect", return_value=self.db), mock.patch.object(cli, "run_tick", fake_tick),
-                   mock.patch.object(cli, "launchctl_loaded", side_effect=lambda label: (lambda: label == "gone"))]
+                   mock.patch.object(cli, "launchctl_loaded", side_effect=lambda label: (lambda: label == "gone")),
+                   mock.patch.object(cli, "MailAppClient", return_value=self.mailapp)]
         self.connect = patches[1].start()
+        self.built_mailapp = patches[4].start()
         for p in (patches[0], patches[2], patches[3]):
             p.start()
         for p in patches:
@@ -152,7 +155,11 @@ class LiveRunTest(_LiveRun):
         self.assertEqual(code, 0)
         self.connect.assert_called_once_with(fullfsync=True)
         deps = self.seen["deps"]
-        self.assertEqual(dict(deps.clients), {})  # no token file in the scratch Gmail folder: no client
+        # No token file in the scratch Gmail folder: no Gmail client. The Mail.app account always has its client.
+        self.assertEqual(dict(deps.clients), {NEU: self.mailapp})
+        cfg = load_config()
+        self.built_mailapp.assert_called_once_with(cfg.accounts[2],
+                                                   reconcile_after_minutes=cfg.reconcile_after_minutes)
         self.assertIs(deps.notify, cli.mac_notifier)
         self.assertEqual(self.seen["cfg"], load_config())
         self.assertFalse(self.seen["dry_run"])
@@ -257,10 +264,11 @@ class AccountFlagTest(_LiveRun):
         self.token()
         with mock.patch.object(cli, "GmailClient", side_effect=client):
             self.go("run")
-            self.assertEqual(set(self.seen["deps"].clients), {REST})
+            self.assertEqual(set(self.seen["deps"].clients), {REST, NEU})
             self.token(GENERAL)
             self.go("run")
-        self.assertEqual(set(self.seen["deps"].clients), {REST, GENERAL})
+        self.assertEqual(set(self.seen["deps"].clients), {REST, GENERAL, NEU})
+        self.assertIs(self.seen["deps"].clients[NEU], self.mailapp)
         self.assertIs(self.seen["deps"].clients[GENERAL], built[os.path.join(self.gdir, GENERAL)])
 
     def test_each_client_and_whoami_carry_their_accounts_sign_in_command(self):
@@ -311,7 +319,7 @@ class StatusTest(unittest.TestCase):
         code, out, _ = run(["status"], now=MON, old_sender_loaded=lambda: False)
         self.assertEqual(code, 0)
         self.assertIn("state: running", out)
-        self.assertIn("sent today: 0 of 20", out)
+        self.assertIn("sent today: 0 of 40", out)  # account 2 and the Northeastern account, 20 each
         self.assertIn("ramp: starts at 20", out)
         # Gmail is not proven to keep the Message-ID: the first email goes alone and the other waits for its check.
         self.assertIn("queue: 1 message_id_unproven, 1 ready", out)

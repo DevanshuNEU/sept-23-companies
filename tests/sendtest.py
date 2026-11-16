@@ -181,8 +181,8 @@ def settle_and_send(conn: sqlite3.Connection, clients, clock, rng, cfg) -> str |
     with transaction(conn):
         rows = _accounts.sync(conn, cfg, iso(now))
     account = rows[acct.address]
-    found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms),
-                            u.rfc_id)
+    found = {u.message_id: (*client.find_sent(u.rfc_id, u.not_before_ms, send_returned_ms=u.send_returned_ms,
+                                              to=u.to, subject=u.subject), u.rfc_id)
              for u in claim.unclear(conn, account.account_id)}
     with transaction(conn):
         claim.reconcile(conn, found, account.account_id, now=iso(now), cfg=cfg, rng=rng)

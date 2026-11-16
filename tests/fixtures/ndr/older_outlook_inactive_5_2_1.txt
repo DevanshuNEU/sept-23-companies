@@ -1,0 +1,53 @@
+From: Mail Delivery System <postmaster@mail.example.com>
+To: <chicholikar.d@northeastern.edu>
+Date: March 3, 2026 at 9:41:07 AM EST
+Content-Type: multipart/report; report-type=delivery-status; boundary="older-format-boundary"
+Subject: Undeliverable: Software Engineer Intern question
+Auto-Submitted: auto-generated
+
+mail.example.com rejected your message to the following email addresses:
+
+Dana Example (<dana@example.com>)
+mail.example.com gave this error:
+The email account that you tried to reach is inactive.
+
+Your message wasn't delivered. Check the address and try again, or ask the recipient for another one.
+
+--- quoted original follows ---
+> Line 00 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 01 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 02 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 03 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 04 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 05 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 06 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 07 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 08 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 09 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 10 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 11 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 12 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 13 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 14 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 15 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 16 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 17 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 18 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 19 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 20 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 21 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 22 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 23 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 24 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 25 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 26 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 27 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 28 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+> Line 29 of the quoted original message, kept long enough to push the report past the first two thousand characters.
+
+--- delivery-status ---
+Reporting-MTA: dns;mail.example.com
+Final-Recipient: rfc822;dana@example.com
+Action: failed
+Status: 5.2.1
+Diagnostic-Code: smtp;550 5.2.1 The email account that you tried to reach is inactive.

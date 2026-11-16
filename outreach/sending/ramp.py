@@ -148,6 +148,8 @@ def _reason(kind: str, account: AccountRow, cfg: SendConfig) -> str:
     return {
         "gmail_limit": f"Sending from {who} is paused because Gmail said the account hit its sending limit.",
         "gmail_policy": f"Sending from {who} is paused because Gmail said this account may not send.",
+        "provider_block": f"Sending from {who} is paused because the mail provider said the account is restricted "
+                          "from sending.",
         "stop_replies_hard": f"Sending from {who} is paused because {cfg.stop_replies_hard} people asked you to "
                              f"stop within {cfg.stop_replies_days} days.",
         "bounce_rate_hard": f"Sending from {who} is paused because 2% or more of its last 100 first emails "

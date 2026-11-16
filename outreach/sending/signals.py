@@ -18,7 +18,7 @@ __all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_
 # A warning: the day is not clean, today's limit drops one level at once, the next day starts from there.
 WARNING_KINDS = ("bounce_warning", "policy_rejection", "stop_reply")
 # A hard block: the sender is paused and Devanshu is told.
-HARD_KINDS = ("gmail_limit", "gmail_policy", "stop_replies_hard", "bounce_rate_hard")
+HARD_KINDS = ("gmail_limit", "gmail_policy", "stop_replies_hard", "bounce_rate_hard", "provider_block")
 # The hard bounce rule (spec, ramp and stops per account): at least this many of an account's last 100 first emails
 # sent, and this share of them bounced.
 HARD_BOUNCE_MIN_SENT = 30

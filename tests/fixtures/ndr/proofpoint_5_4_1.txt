@@ -1,0 +1,36 @@
+Date: May 13, 2025 at 11:02:20 AM EDT
+From: Mail Delivery Subsystem <MAILER-DAEMON@mx0a-002f8e01.pphosted.com>
+To: <chicholikar.d@northeastern.edu>
+Content-Type: multipart/report; report-type=delivery-status; boundary="54DF2Jg0025842.1747148540/mx0a-002f8e01.pphosted.com"
+Subject: Returned mail: see transcript for details
+Auto-Submitted: auto-generated (failure)
+
+[You don't often get email from mailer-daemon@mx0a-002f8e01.pphosted.com. Learn why this is important at https://aka.ms/LearnAboutSenderIdentification ]
+
+The original message was received at Tue, 13 May 2025 09:02:18 -0600
+from m0143793.ppops.net [127.0.0.1]
+
+  ----- The following addresses had permanent fatal errors -----
+<mc@acme-tree.example>
+   (reason: 550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [DS2PEPF00003446.namprd04.prod.outlook.com 2025-05-13T15:02:19.575Z 08DD8B0CDEF3684B])
+
+  ----- Transcript of session follows -----
+... while talking to acme-tree-example.mail.protection.outlook.com.:
+DATA
+<<< 550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [DS2PEPF00003446.namprd04.prod.outlook.com 2025-05-13T15:02:19.575Z 08DD8B0CDEF3684B]
+550 5.1.1 <mc@acme-tree.example>... User unknown
+<<< 503 5.5.2 Need rcpt command [DS2PEPF00003446.namprd04.prod.outlook.com 2025-05-13T15:02:19.575Z 08DD8B0CDEF3684B]
+Reporting-MTA: dns; mx0a-002f8e01.pphosted.com
+Received-From-MTA: DNS; m0143793.ppops.net
+Arrival-Date: Tue, 13 May 2025 09:02:18 -0600
+
+Final-Recipient: RFC822; mc@acme-tree.example
+X-Actual-Recipient: rfc822; mc@acme-tree.example
+Action: failed
+Status: 5.4.1
+Remote-MTA: DNS; acme-tree-example.mail.protection.outlook.com
+Diagnostic-Code: SMTP; 550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [DS2PEPF00003446.namprd04.prod.outlook.com 2025-05-13T15:02:19.575Z 08DD8B0CDEF3684B]
+Last-Attempt-Date: Tue, 13 May 2025 09:02:19 -0600
+
+--- delivery-status ---
+

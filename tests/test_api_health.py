@@ -235,7 +235,7 @@ class JobRuns(ApiCase):
     def test_sender_runs_in_the_window_on_a_weekday(self):
         sender = self.health()["sender"]
         self.assertEqual(sender["state"], "running")  # Tuesday 10:14 in New York
-        self.assertEqual((sender["sentToday"], sender["limitToday"]), (0, 20))
+        self.assertEqual((sender["sentToday"], sender["limitToday"]), (0, 40))  # Gmail and Mail.app, 20 each
 
     def test_sender_states(self):
         self.set_now("2026-11-14T15:14:00Z")  # a Saturday
@@ -246,14 +246,18 @@ class JobRuns(ApiCase):
         self.set_now(NOW)
         from outreach.sending import accounts
         from outreach.sending.config import load_config
-        general = accounts.sync(self.conn, load_config(), NOW)["devanshuchi9@gmail.com"].account_id
+        rows = accounts.sync(self.conn, load_config(), NOW)
+        general = rows["devanshuchi9@gmail.com"].account_id
+        neu = rows["chicholikar.d@northeastern.edu"].account_id
         self.sender(auth_state="signed_out")
         # The tick writes a sign-in on the account's own row as well as on sender row 1. Account 1 only reads now,
         # so its sign-in alone stops no sending; the sending account's does.
         self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = 1")
         self.assertEqual(self.health()["sender"]["state"], "running")
         self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out' WHERE account_id = ?", (general,))
-        self.assertEqual(self.health()["sender"]["state"], "signed_out")
+        self.assertEqual(self.health()["sender"]["state"], "running")  # the Northeastern account still sends
+        self.conn.execute("UPDATE sender_account SET auth_state = 'app_closed' WHERE account_id = ?", (neu,))
+        self.assertEqual(self.health()["sender"]["state"], "signed_out")  # Mail.app not running holds it too
         self.sender(paused=1, pause_kind="by_you", paused_at=NOW)
         self.assertEqual(self.health()["sender"]["state"], "paused_by_you")
         self.sender(pause_kind="hard_block")

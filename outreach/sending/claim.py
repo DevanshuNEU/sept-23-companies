@@ -27,7 +27,7 @@ import logging
 import math
 import random
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
@@ -424,9 +424,13 @@ def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, 
     removed) and event `send_unknown` with its kind and whether a proven miss may be retried. `at` is when the
     failed call returned: a Sent miss starts to count as proof only some minutes after it. The next send waits
     out a gap from `at` too, since the email may have gone out. `extra` adds ids to the event (never a secret).
+    A GmailError with `maybe_sent` (Mail.app may have taken the email) is never retryable whatever its kind: a Sent
+    Items miss leaves it `failed` for him to check, and the event says `maybe_sent`. Gmail never sets it.
     LookupError when the message is not `sending`."""
     stamp = _stamp(at)
     kind = error.kind if isinstance(error, GmailError) else _kind_of(error)
+    retryable = error.retryable if isinstance(error, GmailError) else kind in RETRYABLE
+    maybe_sent = {"maybe_sent": True} if isinstance(error, GmailError) and error.maybe_sent else {}
     text = scrub(str(error) if isinstance(error, GmailError) else describe_error(error))
     with atomic(conn, "record_unclear"):
         row = conn.execute("SELECT state, pending_rfc_id, touch_id FROM message WHERE message_id = ?",
@@ -439,7 +443,7 @@ def record_unclear(conn: sqlite3.Connection, message_id: int, error: Exception, 
                      kind="send_unknown", actor="sender", at=stamp,
                      idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
                      detail={**(extra or {}), "pending_rfc_id": row["pending_rfc_id"], "error": text,
-                             "error_kind": kind, "retryable": kind in RETRYABLE})
+                             "error_kind": kind, "retryable": retryable, **maybe_sent})
         _push_gap(conn, stamp, cfg, rng, row["touch_id"])
 
 
@@ -496,14 +500,18 @@ def _ms(text: str) -> int:
     return int(as_datetime(text).timestamp() * 1000)
 
 
-def leftover_claims(conn: sqlite3.Connection, now: str) -> int:
+def leftover_claims(conn: sqlite3.Connection, now: str, *, in_doubt_accounts: Collection[int] = ()) -> int:
     """In one transaction (a savepoint inside the caller's), every `sending` row becomes `send_unknown` with error
     `the sender stopped mid-send`: ticks never overlap, so a `sending` row at the start of one is a crash. Its
     `send_unknown` event is dated `now`, the moment it was found, and the wait before a Sent miss counts runs from
-    there, never from the claim (the Mac may have slept between the claim and the call). Returns how many."""
+    there, never from the claim (the Mac may have slept between the claim and the call). A claim from one of
+    `in_doubt_accounts` (the Mail.app accounts: no marker, and Sent Items can show a sent email late) may have gone
+    out, so it is never retried (`maybe_sent`); any other is retried once after a proven miss. Returns how many."""
     stamp = _stamp(now)
+    doubtful = set(in_doubt_accounts)
     with atomic(conn, "leftover_claims"):
-        rows = conn.execute("SELECT message_id, pending_rfc_id, touch_id FROM message WHERE state = 'sending'"
+        rows = conn.execute("SELECT m.message_id, m.pending_rfc_id, m.touch_id, "
+                            "COALESCE(t.account_id, 1) AS account_id FROM message m JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'sending'"
                             ).fetchall()
         for row in rows:
             conn.execute("UPDATE message SET state = 'send_unknown', error = ?, updated_at = ?, "
@@ -513,7 +521,8 @@ def leftover_claims(conn: sqlite3.Connection, now: str) -> int:
                          company_id=_company_of(conn, row["touch_id"]), kind="send_unknown", actor="sender", at=stamp,
                          idempotency_key=f"send_unknown:{row['pending_rfc_id']}",
                          detail={"pending_rfc_id": row["pending_rfc_id"], "error": LEFTOVER_ERROR,
-                                 "error_kind": INTERRUPTED, "retryable": True})
+                                 "error_kind": INTERRUPTED, "retryable": row["account_id"] not in doubtful,
+                                 **({"maybe_sent": True} if row["account_id"] in doubtful else {})})
     return len(rows)
 
 
@@ -525,7 +534,8 @@ class Unclear:
     `send_returned_ms`. `marked` is False for a claim made before the sender set the marker (its `claimed` event has
     none): a scan by marker can never find that email, so it is never scanned or failed. `stored` is set for an
     email the sender before the marker recorded as taken and stored under another Message-ID (event `send_unknown`
-    with error kind `message_id_rewritten`): it went out, and these are the ids Gmail kept."""
+    with error kind `message_id_rewritten`): it went out, and these are the ids Gmail kept. `to` and `subject` are
+    the person's address and the message's subject, which a Mail.app search matches on (it cannot carry a marker)."""
     message_id: int
     rfc_id: str
     claimed_at: str
@@ -533,6 +543,8 @@ class Unclear:
     send_returned_ms: int
     stored: Sent | None = None
     marked: bool = True
+    to: str = ""
+    subject: str = ""
 
 
 def _stored(event: sqlite3.Row | None) -> Sent | None:
@@ -564,8 +576,9 @@ def unclear(conn: sqlite3.Connection, account_id: int) -> list[Unclear]:
     """Every `send_unknown` message of this account (its touch's account; none is account 1), oldest claim first.
     Only this account's client may scan Sent for them. Read only."""
     out = []
-    for row in conn.execute("SELECT m.message_id, m.pending_rfc_id, m.claimed_at, m.updated_at FROM message m "
-                            "JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'send_unknown' "
+    for row in conn.execute("SELECT m.message_id, m.pending_rfc_id, m.claimed_at, m.updated_at, m.subject, "
+                            "p.email FROM message m JOIN touch t ON t.touch_id = m.touch_id "
+                            "LEFT JOIN person p ON p.person_id = t.person_id WHERE m.state = 'send_unknown' "
                             "AND COALESCE(t.account_id, 1) = ? ORDER BY m.claimed_at, m.message_id",
                             (account_id,)).fetchall():
         event = _unknown_event(conn, row["pending_rfc_id"])
@@ -574,7 +587,8 @@ def unclear(conn: sqlite3.Connection, account_id: int) -> list[Unclear]:
         out.append(Unclear(message_id=row["message_id"], rfc_id=row["pending_rfc_id"], claimed_at=row["claimed_at"],
                            not_before_ms=_ms(row["claimed_at"]) - CLAIM_MARGIN_MS,
                            send_returned_ms=max(_ms(returned), _ms(row["claimed_at"])), stored=_stored(event),
-                           marked=_marked(conn, row["pending_rfc_id"])))
+                           marked=_marked(conn, row["pending_rfc_id"]), to=row["email"] or "",
+                           subject=row["subject"] or ""))
     return out
 
 
@@ -585,7 +599,11 @@ def _fail(conn: sqlite3.Connection, u: Unclear, *, now: str, cfg: SendConfig) ->
     event = _unknown_event(conn, u.rfc_id)
     detail = json.loads(event["detail"]) if event is not None else {}
     row = conn.execute("SELECT touch_id, error FROM message WHERE message_id = ?", (u.message_id,)).fetchone()
-    text = f"Not in Sent {cfg.reconcile_after_minutes} minutes after the attempt, so it did not go out."
+    if detail.get("maybe_sent") is True:  # Mail.app may have taken it: it is never sent again, he checks
+        text = (f"Not in Sent Items {cfg.reconcile_after_minutes} minutes after Mail.app was asked to send it. It may "
+                "still have gone out, so it is not sent again: check Sent Items in Mail.app.")
+    else:
+        text = f"Not in Sent {cfg.reconcile_after_minutes} minutes after the attempt, so it did not go out."
     conn.execute(
         "UPDATE message SET state = 'failed', pending_rfc_id = NULL, claimed_at = NULL, reconciled_at = ?, "
         "error = ?, updated_at = ?, revision = revision + 1 "
@@ -595,7 +613,8 @@ def _fail(conn: sqlite3.Connection, u: Unclear, *, now: str, cfg: SendConfig) ->
                  kind="claim_failed", actor="sender", at=now, idempotency_key=f"claim_failed:{u.rfc_id}",
                  detail={"pending_rfc_id": u.rfc_id, "error": detail.get("error", row["error"]),
                          "error_kind": detail.get("error_kind", "unknown"),
-                         "retryable": detail.get("retryable") is True, "attempt": _attempts(conn, u.message_id)})
+                         "retryable": detail.get("retryable") is True and detail.get("maybe_sent") is not True,
+                         "attempt": _attempts(conn, u.message_id)})
 
 
 def reconcile(conn: sqlite3.Connection, found: Mapping[int, tuple[Sent | None, bool, str]], account_id: int, *,

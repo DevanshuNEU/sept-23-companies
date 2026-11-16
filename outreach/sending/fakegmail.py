@@ -12,7 +12,7 @@ Gmail behaviour copied on purpose:
 - Gmail's API storing a sent email under a Message-ID of its own (`rewrite_message_ids`, on by default: what the
   real Gmail did on the first live send) and keeping the sender's `X-Outreach-Id` marker (unless `drop_markers`).
 """
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 from email.utils import formataddr, parseaddr
@@ -248,8 +248,8 @@ class FakeGmail(MailClient):
             return Sent(gmail_message_id=meta.gmail_message_id, thread_id=meta.thread_id, rfc_message_id=m.message_id)
         return sent
 
-    def history(self, start_history_id: str) -> HistoryPage:
-        self._enter("history")
+    def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
+        self._enter("history")  # skip_ids: ignored, as the real Gmail client does
         if self._expire_next_history:
             self._expire_next_history = False
             raise HistoryExpired("history cursor expired")
@@ -282,10 +282,11 @@ class FakeGmail(MailClient):
             raise GmailError("bad_request", 404, "Requested entity was not found.")
         return [self._messages[mid] for mid in self._threads[thread_id]]
 
-    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int) -> tuple[Sent | None, bool]:
+    def find_sent(self, marker: str, not_before_ms: int, *, send_returned_ms: int, to: str = "",
+                  subject: str = "") -> tuple[Sent | None, bool]:
         """Newest first, a page at a time, by the same rules as the real client (see MailClient.find_sent): the
-        marker matches, never the Message-ID. Like the real client it reads each listed message's headers in turn,
-        and a failed read fails the scan."""
+        marker matches, never the Message-ID, To or Subject (`to` and `subject` are ignored). Like the real client it
+        reads each listed message's headers in turn, and a failed read fails the scan."""
         self._enter("find_sent")
         now = self.clock()
         visible = [(i, meta) for i, meta in enumerate(self.sent_box)

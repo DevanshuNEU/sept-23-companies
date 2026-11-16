@@ -4,7 +4,8 @@ Two steps, so Gmail is never called inside a transaction:
 1. `read_inbound` reads the store once (`snapshot`), then Gmail with no store access at all: new messages after
    the account's history cursor, or, with no usable cursor, every thread of its touches sent in the last 45 days
    (taking the profile's history id first, so nothing that arrives during the read is missed; Mail.app, which has
-   no threads, reads its mailboxes from 45 days back instead). An incomplete read keeps the old cursor.
+   no threads, reads its mailboxes from an hour before its earliest of those sends instead, in slices of at most 3
+   days). An incomplete read keeps the old cursor, but for a Mail.app slice behind now, which keeps its end.
 2. `apply_inbound` classifies each message and writes it in one transaction.
 
 A missed reply or bounce would send the next follow-up to someone who already answered, so: a read that fails is
@@ -138,13 +139,15 @@ def known_ids(conn: sqlite3.Connection, account_id: int) -> set[str]:
 class Snapshot:
     """What a read of one account's mailbox needs, read from the store before any Gmail call. `recent_threads` are
     the threads of its touches first sent within `rethread_days`, newest first: what a read with no usable cursor
-    goes through."""
+    goes through. `earliest_send` is the earliest first send of those touches (UTC text), or None: where a read with
+    no cursor and no threads (Mail.app) starts."""
     account_id: int
     threads: Mapping[str, int]
     subjects: Mapping[str, int]
     known: frozenset[str]
     history_id: str
     recent_threads: tuple[str, ...]
+    earliest_send: str | None = None
 
 
 def _cursor(conn: sqlite3.Connection, account_id: int) -> str:
@@ -160,16 +163,20 @@ def _cursor(conn: sqlite3.Connection, account_id: int) -> str:
 def snapshot(conn: sqlite3.Connection, account_id: int, *, now: datetime, cfg: SendConfig) -> Snapshot:
     """Read only."""
     since = (now.astimezone(timezone.utc) - timedelta(days=cfg.rethread_days)).strftime(ISO_FMT)
-    recent = tuple(row[0] for row in conn.execute(
-        "SELECT t.gmail_thread_id FROM touch t WHERE t.gmail_thread_id IS NOT NULL AND t.gmail_thread_id <> '' "
-        f"AND t.first_sent_at >= ? AND {_ON_ACCOUNT} ORDER BY t.first_sent_at DESC, t.touch_id DESC",
-        (since, account_id)))
+    rows = conn.execute(
+        "SELECT t.gmail_thread_id, t.first_sent_at FROM touch t WHERE t.gmail_thread_id IS NOT NULL "
+        f"AND t.gmail_thread_id <> '' AND t.first_sent_at >= ? AND {_ON_ACCOUNT} "
+        "ORDER BY t.first_sent_at DESC, t.touch_id DESC", (since, account_id)).fetchall()
     return Snapshot(account_id=account_id, threads=tracked_threads(conn, account_id),
                     subjects=tracked_subjects(conn, account_id), known=frozenset(known_ids(conn, account_id)),
-                    history_id=_cursor(conn, account_id), recent_threads=recent)
+                    history_id=_cursor(conn, account_id), recent_threads=tuple(row[0] for row in rows),
+                    earliest_send=rows[-1][1] if rows else None)
 
 
 # -- reading Gmail ----------------------------------------------------------------------------------------------
+
+# A Mail.app first read starts this long before the account's earliest first send (controller ruling, B4 fix 2).
+FIRST_READ_LEAD = timedelta(hours=1)
 
 @dataclass(frozen=True)
 class InboundRead:
@@ -220,11 +227,12 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
     With a cursor: `history` (given every Message-ID already handled, `_skip_ids`), then `message` for each new id,
     the tracked threads' first and then INBOX mail in other threads (only to catch a bounce Gmail did not thread), at
     most `inbound_meta_cap` in all; from a page the client already holds (`HistoryPage.held`: Mail.app fetched each
-    record) every new message is read, so applying it records it and it is never fetched again. A page that left
-    messages out (`HistoryPage.more`) ends the read incomplete with the cursor where it was. With no cursor,
+    record) every new message is read, so applying it records it and it is never fetched again. A page not fully
+    read (`HistoryPage.more`: messages left out, or a Mail.app slice that ends before now) ends the read incomplete
+    with the page's cursor (where it was, or the slice's end). With no cursor,
     or one Gmail calls expired: `profile` first (its history id becomes the cursor), then `thread` for each recent
     tracked thread; a client with no threads (Mail.app: ThreadUnsupported) is read with `history` from
-    `rethread_days` ago instead, and of that, the messages in a recent tracked thread (`_read_recent`). A failed
+    an hour before its earliest first send of the last `rethread_days` instead (`_read_recent`). A failed
     call, or the cap, ends the read incomplete: what was read is kept and applied, and the cursor moves only to the
     last history record whose messages were all read (it stays put when that is none, or when the client gives no
     record ids), so the next tick reads the rest and every tick makes progress."""
@@ -259,8 +267,8 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
                         break
                 done.add(gmail_id)
             if len(done) == len(wanted):
-                if page.more:  # the client left messages out: the cursor stays and the next read takes the rest
-                    return InboundRead(metas, None, False, snap.account_id)
+                if page.more:  # not all read (left out, or a slice behind now): the next read goes on from here
+                    return InboundRead(metas, page.history_id or None, False, snap.account_id)
                 return InboundRead(metas, page.history_id, True, snap.account_id)
             return InboundRead(metas, _read_through(page.added, set(wanted) - done), False, snap.account_id)
     try:
@@ -287,12 +295,16 @@ def read_mailbox(client: MailClient, snap: Snapshot, *, cfg: SendConfig, now: da
 
 def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: list[MessageMeta], cursor: str, *,
                  cfg: SendConfig, now: datetime) -> InboundRead:
-    """The no-cursor read for a client with no threads: `history` from `rethread_days` ago (a Mail.app cursor is a
-    time), then `message` for each new message in a recent tracked thread, as the thread read would have taken, or
-    for every new message of a page the client already holds (so each is recorded and never fetched again). A
-    failed call, or a page that left messages out, ends it incomplete with no new cursor; a message gone since (404)
-    is skipped."""
-    since = (now.astimezone(timezone.utc) - timedelta(days=cfg.rethread_days)).strftime(ISO_FMT)
+    """The no-cursor read for a client with no threads (Mail.app, whose cursor is a time): `history` from an hour
+    before the account's earliest first send of the last `rethread_days` (never a scan of all of them: a 45-day list
+    outlasts the real Mail.app's read), then `message` for each new message in a recent tracked thread, as the thread
+    read would have taken, or for every new message of a page the client already holds (so each is recorded and
+    never fetched again). A failed call ends it incomplete with no new cursor; a page that is behind now or left
+    messages out ends it incomplete with the page's cursor, so the next read goes on from there; a message gone
+    since (404) is skipped. With no send to start from, the cursor is `cursor` (the profile's: now)."""
+    if snap.earliest_send is None:
+        return InboundRead(metas, cursor or None, True, snap.account_id)
+    since = (datetime.fromisoformat(snap.earliest_send) - FIRST_READ_LEAD).astimezone(timezone.utc).strftime(ISO_FMT)
     try:
         page = client.history(since, skip_ids=_skip_ids(known))
     except (GmailError, HistoryExpired):
@@ -308,8 +320,8 @@ def _read_recent(client: MailClient, snap: Snapshot, known: set[str], metas: lis
             if not _gone(err):
                 return InboundRead(metas, None, False, snap.account_id)
     if page.more:
-        return InboundRead(metas, None, False, snap.account_id)
-    return InboundRead(metas, cursor or None, True, snap.account_id)
+        return InboundRead(metas, page.history_id or None, False, snap.account_id)
+    return InboundRead(metas, page.history_id or cursor or None, True, snap.account_id)
 
 
 # -- applying it ------------------------------------------------------------------------------------------------

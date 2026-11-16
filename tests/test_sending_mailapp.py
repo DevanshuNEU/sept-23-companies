@@ -30,6 +30,10 @@ def ms(at: datetime) -> int:
     return int(at.timestamp() * 1000)
 
 
+def _cursor(text: str) -> datetime:
+    return datetime.fromisoformat(text)
+
+
 def outgoing(n: int = 1, *, to: str = "ada@acme.example", subject: str = "Your team and the backend role",
              body: str = "Hi Ada,\n\nA short note.\n\nDevanshu", thread_id: str | None = None,
              in_reply_to: str | None = None, from_addr: str = NEU.address) -> Outgoing:
@@ -342,6 +346,34 @@ class HistoryTest(Base):
         self.assertEqual(sorted(a.gmail_message_id for a in page.added),
                          sorted(["mailapp:" + first.rfc_id, "mailapp:" + second.rfc_id]))
 
+    def test_a_cursor_10_days_old_catches_up_in_slices_of_at_most_3_days(self):
+        old = self.clock() - timedelta(days=10)
+        cursor = old.strftime("%Y-%m-%dT%H:%M:%SZ")
+        daily = [self.mail.deliver_unrelated(f"d{i}@x.example", f"Day {i}", at=old + timedelta(days=i, hours=1))
+                 for i in range(10)]
+        handled: set[str] = set()
+        for n in range(8):
+            page = self.mail.history(cursor, skip_ids=handled)
+            lo, hi = self.mail.windows[-1]
+            self.assertLessEqual(hi - lo, timedelta(days=3))
+            self.assertEqual(lo, _cursor(cursor) - mailapp.HISTORY_OVERLAP)
+            handled |= {a.gmail_message_id[len("mailapp:"):] for a in page.added}
+            if page.history_id == self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"):
+                self.assertFalse(page.more)  # the slice reached now: caught up, the cursor is the read start
+                break
+            self.assertTrue(page.more)  # behind: not fully read, the cursor moves to the slice end
+            self.assertEqual(_cursor(page.history_id), hi)
+            cursor = page.history_id
+        self.assertLessEqual(n, 5)
+        printed = [m for ids in self.mail.fetches for m in ids]
+        self.assertEqual(sorted(printed), sorted(d.msgid for d in daily))  # every message once, none twice
+        self.assertEqual(len(printed), len(set(printed)))
+
+    def test_a_slice_ends_now_when_now_is_closer_than_3_days(self):
+        self.mail.history(self.cursor)
+        lo, hi = self.mail.windows[-1]
+        self.assertEqual((lo, hi), (_cursor(self.cursor) - mailapp.HISTORY_OVERLAP, self.clock().replace(microsecond=0)))
+
     def test_nothing_new_fetches_nothing(self):
         done = self.mail.deliver_reply(self.first, "ada@acme.example")
         self.mail.scripts.clear()
@@ -481,6 +513,18 @@ class ScriptTest(Base):
         self.assertIn(m.subject, self.runs[0][1])
         self.assertIn(m.body, self.runs[0][1])
 
+    def test_both_bounds_of_the_slice_reach_the_scripts_as_arguments(self):
+        self.mail.deliver_unrelated("news@x.example", "A newsletter")
+        cursor = "2026-11-01T14:00:00Z"
+        self.mail.history(cursor)
+        lo = mailapp.local_parts(datetime(2026, 10, 31, 14, 0, tzinfo=UTC))
+        hi = mailapp.local_parts(START)  # now: closer than 3 days after the slice start
+        for script, args, _ in self.runs:
+            if script in (mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT):
+                self.assertEqual(args[1:9], lo + hi)
+        for script in (mailapp.LIST_SCRIPT, mailapp.FETCH_SCRIPT):
+            self.assertIn("whose date received > lo and date received <= hi", script)
+
     def test_sends_wait_60_seconds_and_reads_120(self):
         self.mail.send(outgoing())
         self.mail.profile()
@@ -552,34 +596,48 @@ class ScriptTest(Base):
 class InboundFallbackTest(Base):
     """A client with no threads (Mail.app) is read with `history` over the last 45 days when there is no cursor."""
 
-    def snap(self, threads: dict[str, int], history_id: str = "") -> inbound.Snapshot:
+    def snap(self, threads: dict[str, int], history_id: str = "",
+             earliest: datetime | None = None) -> inbound.Snapshot:
         return inbound.Snapshot(account_id=3, threads=threads, subjects={}, known=frozenset(), history_id=history_id,
-                                recent_threads=tuple(threads))
+                                recent_threads=tuple(threads),
+                                earliest_send=earliest.strftime("%Y-%m-%dT%H:%M:%SZ") if earliest else None)
 
-    def test_no_cursor_reads_the_last_45_days(self):
+    def test_no_cursor_reads_from_an_hour_before_the_first_send(self):
         first = self.mail.send(outgoing())
-        self.clock.advance(days=3)
+        self.mail.deliver_unrelated("early@x.example", "Before", at=START - timedelta(days=2))  # before the window
+        self.clock.advance(days=1)
         reply = self.mail.deliver_reply(first, "ada@acme.example")
         self.clock.advance(seconds=1)
         news = self.mail.deliver_unrelated("news@x.example", "A newsletter")  # not in a tracked thread
-        self.mail.deliver_reply(first, "ada@acme.example", at=self.clock() - timedelta(days=50))  # too old
         self.clock.advance(minutes=1)
-        read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}), cfg=CFG, now=self.clock())
+        snap = self.snap({first.thread_id: 1}, earliest=START)
+        read = inbound.read_mailbox(self.mail, snap, cfg=CFG, now=self.clock())
         self.assertTrue(read.complete)
         # Every message fetched is read, so applying it records it and it is never fetched again.
         self.assertEqual([m.gmail_message_id for m in read.metas],
                          ["mailapp:" + reply.rfc_id, "mailapp:" + news.rfc_id])
         self.assertEqual(read.new_history_id, self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"))
+        self.assertEqual(self.mail.windows[0][0], START - timedelta(hours=1) - mailapp.HISTORY_OVERLAP)
         self.assertEqual(self.mail.calls[1:], ["profile", "thread", "history", "message", "message"])
 
-    def test_a_failed_45_day_read_is_incomplete_and_keeps_no_cursor(self):
+    def test_no_cursor_and_an_old_first_send_catches_up_and_keeps_its_place(self):
+        first = self.mail.send(outgoing())
+        self.clock.advance(days=5)
+        snap = self.snap({first.thread_id: 1}, earliest=START)
+        read = inbound.read_mailbox(self.mail, snap, cfg=CFG, now=self.clock())
+        self.assertFalse(read.complete)  # behind: the account waits while it catches up
+        self.assertEqual(_cursor(read.new_history_id), self.mail.windows[0][1])  # but the slice end is kept
+        self.assertLessEqual(self.mail.windows[0][1] - self.mail.windows[0][0], timedelta(days=3))
+
+    def test_a_failed_first_read_is_incomplete_and_keeps_no_cursor(self):
         first = self.mail.send(outgoing())
 
         def close_on_history(name):
             if name == "history":
                 self.mail.closed = True
         self.mail.probe = close_on_history
-        read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}), cfg=CFG, now=self.clock())
+        read = inbound.read_mailbox(self.mail, self.snap({first.thread_id: 1}, earliest=START), cfg=CFG,
+                                    now=self.clock())
         self.assertEqual((read.complete, read.new_history_id), (False, None))
 
 
@@ -612,7 +670,7 @@ class InboundSkipTest(Base):
             self.clock.advance(seconds=1)
         read = inbound.read_mailbox(self.mail, self.snap(), cfg=CFG, now=self.clock())
         self.assertEqual(len(read.metas), 40)
-        self.assertEqual((read.complete, read.new_history_id), (False, None))
+        self.assertEqual((read.complete, read.new_history_id), (False, self.cursor))  # the cursor stays where it was
 
 
 class InboundFallbackWithCursorTest(Base):

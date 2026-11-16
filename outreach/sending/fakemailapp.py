@@ -114,6 +114,7 @@ class FakeMailApp(MailAppClient):
         self.mailboxes = list(MAILBOXES)                     # `every mailbox of account`, in order
         self.fetches: list[list[str]] = []                   # the Message-IDs (bare) each fetch printed
         self.fetch_limits: list[tuple[int, int]] = []        # each fetch's time budget and most records
+        self.windows: list[tuple[datetime, datetime]] = []   # each list script's slice (start, end), in UTC
         self.seconds_per_record = 0                          # what one record costs a fetch's time budget
         self._failures: list[_Failure] = []
         self._slow: list[timedelta | None] = []
@@ -286,16 +287,18 @@ class FakeMailApp(MailAppClient):
         year, month, day, seconds = (int(a) for a in args)
         return (datetime(year, month, day) + timedelta(seconds=seconds)).astimezone()  # the Mac's local time
 
-    def _window(self, pos: int, cutoff: datetime) -> list[Stored]:
-        """`messages of mb whose date received > cutoff` for the mailbox at `pos`, in Mail.app's order."""
+    def _window(self, pos: int, lo: datetime, hi: datetime) -> list[Stored]:
+        """`messages of mb whose date received > lo and date received <= hi` for the mailbox at `pos`, in Mail.app's
+        order."""
         name = self.mailboxes[pos - 1]
         first = self.mailboxes.index(name) + 1
         return [s for s in self._visible(name) if (s.position or first) == pos
-                and s.received_at.replace(microsecond=0) > cutoff]
+                and lo < s.received_at.replace(microsecond=0) <= hi]
 
     def _list_script(self, args: list[str]) -> list[str]:
-        cutoff = self._cutoff(args[1:5])
-        skip = set(args[5:])
+        lo, hi = self._cutoff(args[1:5]), self._cutoff(args[5:9])
+        self.windows.append((lo.astimezone(timezone.utc), hi.astimezone(timezone.utc)))
+        skip = set(args[9:])
         out = []
         for pos, box in enumerate(self.mailboxes, start=1):
             if box in skip:
@@ -305,15 +308,15 @@ class FakeMailApp(MailAppClient):
                                    _esc("Mail got an error: Can't get every message. (-1728)")))
                 continue
             out += [_record("id", str(pos), _esc(box), _esc(s.msgid), local_text(s.received_at))
-                    for s in self._window(pos, cutoff)]
+                    for s in self._window(pos, lo, hi)]
         return out
 
     def _fetch_script(self, args: list[str]) -> list[str]:
-        cutoff = self._cutoff(args[1:5])
-        budget, most = int(args[5]), int(args[6])
+        lo, hi = self._cutoff(args[1:5]), self._cutoff(args[5:9])
+        budget, most = int(args[9]), int(args[10])
         self.fetch_limits.append((budget, most))
         printed: list[str] = []
-        out, k, spent, stopped = [], 7, 0, False
+        out, k, spent, stopped = [], 11, 0, False
         while k < len(args) and not stopped:
             pos, n = int(args[k]), int(args[k + 1])
             wanted = set(args[k + 2:k + 2 + n])
@@ -322,7 +325,7 @@ class FakeMailApp(MailAppClient):
             if box in self._failing_boxes:
                 out.append(_record("error", str(pos), _esc(box), _esc("Mail got an error: Can't get mailbox. (-1728)")))
                 continue
-            for s in self._window(pos, cutoff):
+            for s in self._window(pos, lo, hi):
                 if len(printed) >= most or spent > budget:
                     stopped = True
                     break

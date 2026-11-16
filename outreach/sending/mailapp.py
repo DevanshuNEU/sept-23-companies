@@ -20,9 +20,11 @@
   message's mailbox, Message-ID and date (cheap), then fetches full records only for the ones the caller has not
   handled (`skip_ids`), at most 40 a call and none started after 80 seconds, oldest first. Neither step queries
   message by message: each mailbox's window is resolved once and walked. The page holds every message it names, so
-  `message` costs no further script. The cursor is a time (UTC, ISO), not a Gmail history id, and it moves to the
-  read's start only when nothing was left out. There are no threads to read (`thread` raises ThreadUnsupported): with no cursor the inbound
-  read takes the last 45 days with `history`.
+  `message` costs no further script. One read covers at most 3 days (`HISTORY_SLICE`) from the cursor less 24
+  hours. The cursor is a time (UTC, ISO), not a Gmail history id: when nothing was left out it moves to the slice's
+  end, or to the read's start when the slice reached now. There are no threads to read (`thread` raises
+  ThreadUnsupported): with no cursor the inbound read starts an hour before the account's earliest first send of the
+  last 45 days, and catches up from there.
 
 AppleScript text lives here as constants, each starting with `COMMON_HANDLERS` (the one escape handler every script
 prints its fields through, and the check that Mail.app is running: a script never starts it). Every value reaches a
@@ -53,6 +55,7 @@ from outreach.store.timefmt import ISO_FMT
 __all__ = ["MailAppClient", "COMMON_HANDLERS", "PROFILE_SCRIPT", "SEND_SCRIPT", "REPLY_SCRIPT", "FIND_SCRIPT",
            "LIST_SCRIPT", "FETCH_SCRIPT", "MESSAGE_SCRIPT", "ID_PREFIX", "SENT_BOX", "DRAFTS_BOX", "OUTBOX_BOX",
            "JUNK_BOX", "SKIPPED_BOXES", "SEND_TIMEOUT", "READ_TIMEOUT", "POLL_SECONDS", "HISTORY_OVERLAP",
+           "HISTORY_SLICE",
            "FETCH_LIMIT", "FETCH_BUDGET", "FETCH_ASK", "SNIPPET_LENGTH", "bracket", "bare", "local_text",
            "local_parts", "read_local"]
 
@@ -68,6 +71,9 @@ SEND_TIMEOUT = 60       # seconds: a send, and the Sent Items poll after it, all
 READ_TIMEOUT = 120      # seconds: any read
 POLL_SECONDS = 2        # between Sent Items reads after a send
 HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); known ids dedup what was read
+# One read lists at most this much (controller ruling, B4 fix round 2): a 45-day list outlasted the 120 s read on the
+# real account, a 2-day one took about 20 s. A cursor further back catches up a slice a tick.
+HISTORY_SLICE = timedelta(days=3)
 # One fetch prints at most FETCH_LIMIT full records (about 0.9 s each on the real Mail.app) and starts none after
 # FETCH_BUDGET seconds (controller ruling, B4 fix round 1): the real guard against the 120 s read timeout. The ids it
 # is asked about are at most FETCH_ASK, oldest first; what is left waits for the next tick.
@@ -257,9 +263,9 @@ on run argv
 end run
 '''
 
-# argv: account name, the local year, month, day and seconds into that day to read from, then the mailbox names to
-# skip. The first step of a read: one `id <position> <mailbox> <Message-ID> <date received>` record per message
-# received after that time. Each mailbox's window is resolved once (`whose`, about 1 s) and walked item by item: a
+# argv: account name, the slice's start and end, each as the local year, month, day and seconds into that day, then
+# the mailbox names to skip. The first step of a read: one `id <position> <mailbox> <Message-ID> <date received>`
+# record per message received after the start and at or before the end. Each mailbox's window is resolved once (`whose`, about 1 s) and walked item by item: a
 # bulk property read of a resolved list fails on the real Mail.app, and a `whose message id is` query per message
 # costs about 2 s each. The position is the mailbox's place in `every mailbox of account` (two mailboxes may share a
 # name). A mailbox that cannot be read prints `error <position> <mailbox> <text>` and the client fails the whole read.
@@ -267,8 +273,9 @@ LIST_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
 	my requireMail()
 	set acctName to item 1 of argv
-	set cutoff to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
-	set skipNames to items 6 thru -1 of argv
+	set lo to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
+	set hi to my cutoffOf(item 6 of argv, item 7 of argv, item 8 of argv, item 9 of argv)
+	set skipNames to items 10 thru -1 of argv
 	set out to {}
 	tell application "Mail"
 		set boxes to (get every mailbox of account acctName)
@@ -277,7 +284,7 @@ on run argv
 			set boxName to name of mb
 			if skipNames does not contain boxName then
 				try
-					set found to (messages of mb whose date received > cutoff)
+					set found to (messages of mb whose date received > lo and date received <= hi)
 					repeat with h in found
 						set end of out to my fields({"id", pos as text, my esc(boxName), my esc(message id of h), my isoOf(date received of h)})
 					end repeat
@@ -291,8 +298,8 @@ on run argv
 end run
 '''
 
-# argv: account name, the window as the list script's (year, month, day, seconds), the time budget in seconds, the
-# most records to print, then for each mailbox that holds wanted ids: its position, how many ids, and the ids (no
+# argv: account name, the slice as the list script's (start and end), the time budget in seconds, the most records to
+# print, then for each mailbox that holds wanted ids: its position, how many ids, and the ids (no
 # brackets). The second step: each such mailbox's window is resolved once and walked item by item, and each message
 # whose Message-ID is wanted is printed as one `msg` record (`messageRecord`). It starts no new record once the
 # budget is spent or the most records are printed, and then prints a last `more` record: the ids not printed were
@@ -302,10 +309,11 @@ on run argv
 	my requireMail()
 	set started to current date
 	set acctName to item 1 of argv
-	set cutoff to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
-	set budget to (item 6 of argv) as integer
-	set most to (item 7 of argv) as integer
-	set k to 8
+	set lo to my cutoffOf(item 2 of argv, item 3 of argv, item 4 of argv, item 5 of argv)
+	set hi to my cutoffOf(item 6 of argv, item 7 of argv, item 8 of argv, item 9 of argv)
+	set budget to (item 10 of argv) as integer
+	set most to (item 11 of argv) as integer
+	set k to 12
 	set printed to 0
 	set stopped to false
 	set out to {}
@@ -319,7 +327,7 @@ on run argv
 			set mb to item pos of boxes
 			set boxName to name of mb
 			try
-				set found to (messages of mb whose date received > cutoff)
+				set found to (messages of mb whose date received > lo and date received <= hi)
 				repeat with h in found
 					if printed >= most or (my secondsSince(started)) > budget then
 						set stopped to true
@@ -602,17 +610,22 @@ class MailAppClient(MailClient):
 
     def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
         """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`), in every mailbox but Sent Items,
-        Drafts and Outbox, in two steps: the window's Message-IDs (`LIST_SCRIPT`), then the full records of the ones
+        Drafts and Outbox, up to 3 days later at most (`HISTORY_SLICE`, never past now), in two steps: the slice's
+        Message-IDs (`LIST_SCRIPT`), then the full records of the ones
         not in `skip_ids` (bracketed or bare Message-IDs the caller already handled), oldest first, each once
         (`FETCH_SCRIPT`: at most `FETCH_LIMIT` records, none started after `FETCH_BUDGET` seconds). An id the fetch
         stopped before is left out; one it did not find though it read that mailbox through is gone (deleted or moved
         since the list), so it never holds the read. With none left out the new cursor is the time the read began
-        (`more` False); else it is the cursor given (`more` True) and the next call fetches the rest. A cursor that is
+        when the slice reached now (`more` False), else the slice's end (`more` True: the read is behind and the next
+        call reads on from there); with some left out it is the cursor given (`more` True) and the next call fetches
+        the rest. A cursor that is
         not a time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read fails the whole
         read (`server`). The page holds every message it names (`held`), so `message` serves them with no script."""
-        since = _cursor_time(start_history_id)
-        read_at = self._now_text()
-        window = local_parts(since - HISTORY_OVERLAP)
+        now = self._clock().astimezone(timezone.utc).replace(microsecond=0)
+        read_at = now.strftime(ISO_FMT)
+        start = _cursor_time(start_history_id) - HISTORY_OVERLAP
+        end = min(now, start + HISTORY_SLICE)
+        window = [*local_parts(start), *local_parts(end)]
         listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *window, *SKIPPED_BOXES], READ_TIMEOUT),
                         {"id": 5, "error": 4})
         _fail_on_error(listed)
@@ -643,10 +656,16 @@ class MailAppClient(MailClient):
                     fetched.setdefault(meta.gmail_message_id, meta)
         page = {_gmail_id(own): fetched[_gmail_id(own)] for own, _ in asked if _gmail_id(own) in fetched}
         self._page = page  # oldest first; an id not printed is gone, or left out when the fetch stopped early
-        more = (stopped and len(page) < len(asked)) or len(wanted) > len(asked)
+        left_out = (stopped and len(page) < len(asked)) or len(wanted) > len(asked)
+        if left_out:
+            cursor = start_history_id  # the next read lists this slice again and fetches the rest
+        elif end < now:
+            cursor = end.strftime(ISO_FMT)  # this slice is read; the next one starts from its end
+        else:
+            cursor = read_at
         return HistoryPage(added=tuple(Added(gmail_message_id=m.gmail_message_id, thread_id=m.thread_id,
                                              labels=m.labels) for m in page.values()),
-                           history_id=start_history_id if more else read_at, held=True, more=more)
+                           history_id=cursor, held=True, more=left_out or end < now)
 
     def message(self, gmail_message_id: str) -> MessageMeta:
         """One message by its `mailapp:<id>` (`_meta`). One the last history page held is served from it; any

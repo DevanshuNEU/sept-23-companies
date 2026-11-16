@@ -1687,8 +1687,10 @@ class MailAppBase(MultiBase):
         self.mail = FakeMailApp(clock=self.clock, account=self.cfg.accounts[2], probe=self.probe,
                                 reconcile_after_minutes=CFG.reconcile_after_minutes)
         self.clients = {**self.clients, NEU: self.mail}
-        if self.proven_neu:
+        if self.proven_neu:  # the account is live: proven, and its mailbox read up to now
             prove(self.db, self.neu.account_id)
+            self.db.execute("UPDATE sender_account SET history_id = ? WHERE account_id = ?",
+                            (iso(self.clock()), self.neu.account_id))
 
     def approve_sponsor(self) -> int:
         mid = self.approve()
@@ -1782,6 +1784,39 @@ class MailAppProofTest(MailAppBase):
         self.assertEqual(checked["missing"], 1)
         self.assertEqual(json.loads(self.events("marker_missing")[-1]["detail"])["reason"], "no_ids")
         self.assertEqual(self.phase(), proof.MISSING)
+
+
+class MailAppFirstReadTest(MailAppBase):
+    """The Northeastern account's first read (no cursor) never scans 45 days: with no email sent from it, the cursor
+    starts now; with one, an hour before its earliest first send in the last 45 days, then it catches up in slices."""
+
+    def cursor(self) -> str:
+        return self.account_of(self.neu.account_id)["history_id"]
+
+    def test_a_first_read_with_no_touches_starts_at_now(self):
+        self.tick()
+        self.assertEqual(self.cursor(), iso(self.clock()))
+        self.assertNotIn("list", self.mail.scripts)  # nothing to read back from before now
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(self.mail.windows[0], (MON - timedelta(hours=24), MON + timedelta(minutes=2)))
+
+    def test_a_first_read_with_a_touch_sent_5_days_ago_starts_an_hour_before_it(self):
+        sent_at = MON - timedelta(days=5)
+        person = seed_email_person(self.db, seed_company(self.db, "Neu Co"), "Ada", "ada@neu-co.example")
+        seed_sent(self.db, person, at=sent_at, account_id=self.neu.account_id)
+        seed_sent(self.db, seed_email_person(self.db, seed_company(self.db, "Old Co"), "Bo", "bo@old.example"),
+                  at=MON - timedelta(days=50), account_id=self.neu.account_id)  # older than 45 days: not counted
+        self.tick()
+        lo, hi = self.mail.windows[0]
+        self.assertEqual(lo, sent_at - timedelta(hours=1) - timedelta(hours=24))
+        self.assertEqual(hi - lo, timedelta(days=3))
+        self.assertEqual(self.cursor(), iso(hi))  # behind now: the cursor moves to the slice end
+        for _ in range(4):
+            self.clock.advance(minutes=2)
+            self.tick()
+        self.assertEqual(self.mail.windows[-1][1], self.clock().replace(microsecond=0))  # caught up
+        self.assertTrue(all(b - a <= timedelta(days=3) for a, b in self.mail.windows))
 
 
 class MailAppHistoryTest(MailAppBase):

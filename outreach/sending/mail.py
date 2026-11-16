@@ -115,7 +115,7 @@ class HistoryExpired(Exception):
 
 class ThreadUnsupported(Exception):
     """The client has no threads to read (Mail.app). With no usable cursor, read its mailboxes with `history` from
-    `rethread_days` ago instead (`inbound.read_mailbox`)."""
+    an hour before the account's earliest first send of the last `rethread_days` instead (`inbound.read_mailbox`)."""
 
 
 KINDS = frozenset({"auth", "rate_limit", "daily_limit", "account_blocked", "bad_request", "server", "network",

@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from outreach.drafts.checks import load_banned
-from outreach.sending import accounts, claim, proof, queue, tick
+from outreach.sending import accounts, claim, mailapp, proof, queue, tick
 from outreach.sending.config import load_config
 from outreach.sending.fakegmail import FakeClock, FakeGmail
 from outreach.sending.fakemailapp import FakeMailApp
@@ -1841,7 +1841,7 @@ class MailAppHistoryTest(MailAppBase):
             report = self.tick()
             self.clock.advance(minutes=2)
             if n < 2:
-                self.assertEqual(self.cursor(), start)  # some were left out: the cursor waits
+                self.assertEqual(self.cursor().split("|")[0], start)  # some were left out: the cursor waits
                 self.assertTrue(any(f"{NEU} was not fully read" in line for line in report.lines))
         self.assertEqual([len(ids) for ids in self.mail.fetches], [40, 40, 20])
         self.assertNotEqual(self.cursor(), start)
@@ -2059,6 +2059,72 @@ class MailAppTickTest(MailAppBase):
         self.assertEqual(title, tick.WAIT_TITLE)
         self.assertIn(NEU, text)
         self.assertNotIn("Gmail did not", text)
+
+    # M1 (final review): the read-back line names what the account is read back from.
+    def test_a_mail_app_read_back_that_failed_names_sent_items_never_gmail(self):
+        real = proof.verify_marker
+
+        def failing(conn, client, account_id, *, now, kind="gmail", **kw):
+            if kind == "mailapp":
+                return {"verified": 0, "missing": 0, "errors": 1}
+            return real(conn, client, account_id, now=now, kind=kind, **kw)
+        with mock.patch.object(proof, "verify_marker", failing):
+            report = self.tick()
+        [line] = [line for line in report.lines if "could not be" in line and NEU in line]
+        self.assertIn("Sent Items", line)
+        self.assertNotIn("Gmail", line)
+
+    # F3 (final review): a read that keeps stopping part way tells him once a day after 5 in a row.
+    def behind_notices(self) -> list[tuple[str, str]]:
+        return [n for n in self.notices if "has not finished reading" in n[1]]
+
+    def test_five_mail_app_reads_in_a_row_that_did_not_finish_tell_him_once_a_day(self):
+        self.tick()
+
+        def slow(args):
+            raise GmailError("timeout", None, "osascript took longer than 120 seconds")
+        self.mail._list_script = slow
+        for n in range(4):
+            self.clock.advance(minutes=2)
+            self.tick()
+        self.assertEqual(self.behind_notices(), [])
+        self.assertEqual(mailapp.partial_reads(self.account_of(self.neu.account_id)["history_id"]), 4)
+        self.clock.advance(minutes=2)
+        self.tick()
+        [(title, text)] = self.behind_notices()
+        self.assertEqual(title, tick.WAIT_TITLE)
+        self.assertIn("Mail.app", text)
+        self.assertIn(NEU, text)
+        self.assertNotIn("Gmail ", text.replace("Gmail keeps sending", ""))
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual(len(self.behind_notices()), 1)  # once a day
+        self.assert_no_gmail_signal()
+
+    def test_reads_that_fail_outright_count_toward_the_notice_too(self):
+        self.tick()
+        self.mail.fail_mailbox("Tasks")  # every read fails whole (`server`)
+        for _ in range(5):
+            self.clock.advance(minutes=2)
+            self.tick()
+        self.assertEqual(len(self.behind_notices()), 1)
+
+    def test_a_read_that_finishes_starts_the_count_over(self):
+        self.tick()
+        original = self.mail._list_script
+
+        def slow(args):
+            raise GmailError("timeout", None, "osascript took longer than 120 seconds")
+        for _ in range(2):
+            self.mail._list_script = slow
+            for _ in range(4):
+                self.clock.advance(minutes=2)
+                self.tick()
+            self.mail._list_script = original
+            self.clock.advance(minutes=2)
+            self.tick()
+            self.assertEqual(mailapp.partial_reads(self.account_of(self.neu.account_id)["history_id"]), 0)
+        self.assertEqual(self.behind_notices(), [])
 
     # F1 (final review): a send Mail.app took is settled by the Sent Items rule, never by sending it again.
     def assert_sent_once_and_left_failed(self, sponsor: int) -> None:

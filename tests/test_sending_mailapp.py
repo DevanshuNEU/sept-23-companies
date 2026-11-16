@@ -374,7 +374,7 @@ class HistoryTest(Base):
         self.assertEqual(len(self.mail.fetches[-1]), mailapp.FETCH_LIMIT)
         self.assertEqual(mailapp.FETCH_LIMIT, 40)
         self.assertEqual([a.gmail_message_id for a in page.added], ["mailapp:" + s.rfc_id for s in stored[:40]])
-        self.assertEqual((page.more, page.history_id), (True, self.cursor))  # left out: the cursor stays
+        self.assertEqual((page.more, page.history_id), (True, f"{self.cursor}|partial=1"))  # left out: time stays
         handled = {s.rfc_id for s in stored[:90]}
         last = self.mail.history(self.cursor, skip_ids=handled)
         self.assertEqual([a.gmail_message_id for a in last.added], ["mailapp:" + s.rfc_id for s in stored[90:]])
@@ -390,7 +390,7 @@ class HistoryTest(Base):
         read = [a.gmail_message_id for a in page.added]
         self.assertTrue(0 < len(read) < 30, len(read))
         self.assertEqual(read, ["mailapp:" + s.rfc_id for s in stored[:len(read)]])
-        self.assertEqual((page.more, page.history_id), (True, self.cursor))  # left out: the cursor stays
+        self.assertEqual((page.more, page.history_id), (True, f"{self.cursor}|partial=1"))  # left out: time stays
         self.mail.seconds_per_record = 0
         rest = self.mail.history(self.cursor, skip_ids={a[len("mailapp:"):] for a in read})
         self.assertEqual([a.gmail_message_id for a in rest.added], ["mailapp:" + s.rfc_id for s in stored[len(read):]])
@@ -484,6 +484,131 @@ class HistoryTest(Base):
         with self.assertRaises(GmailError) as caught:
             self.mail.history(self.cursor)
         self.assertIn("Outreach", caught.exception.detail)
+
+
+class SliceTest(Base):
+    """F3 (final review): a read that cannot finish shrinks its own slice (half each time, down to 2 hours) and grows
+    back to 3 days after a read that finished. The slice and the run of partial reads live in the cursor text
+    (`<time>|slice=<hours>h|partial=<n>`); a plain time is still a cursor."""
+
+    def setUp(self):
+        super().setUp()
+        self.old = self.clock() - timedelta(days=10)
+        self.cursor = self.old.strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.lists = 0
+
+    def list_times_out(self, times: int = 1_000) -> None:
+        original = self.mail._list_script
+
+        def slow(args):
+            self.lists += 1
+            if self.lists <= times:
+                self.mail.windows.append((self.mail._cutoff(args[1:5]).astimezone(UTC),
+                                          self.mail._cutoff(args[5:9]).astimezone(UTC)))
+                raise GmailError("timeout", None, "osascript took longer than 120 seconds")
+            return original(args)
+        self.mail._list_script = slow
+
+    def width(self) -> timedelta:
+        lo, hi = self.mail.windows[-1]
+        return hi - lo
+
+    def test_a_list_timeout_halves_the_next_slice_and_keeps_the_cursor_time(self):
+        self.list_times_out()
+        page = self.mail.history(self.cursor)
+        self.assertEqual((page.added, page.more), ((), True))
+        self.assertEqual(page.history_id, f"{self.cursor}|slice=36h|partial=1")
+        self.assertEqual(self.width(), timedelta(days=3))
+        page = self.mail.history(page.history_id)
+        self.assertEqual(self.width(), timedelta(hours=36))
+        self.assertEqual(self.mail.windows[-1][0], self.old - mailapp.HISTORY_OVERLAP)  # the same start
+        self.assertEqual(page.history_id, f"{self.cursor}|slice=18h|partial=2")
+
+    def test_the_slice_halves_down_to_2_hours_and_no_further(self):
+        self.list_times_out()
+        cursor, widths = self.cursor, []
+        for _ in range(8):
+            cursor = self.mail.history(cursor).history_id
+            widths.append(self.width())
+        self.assertEqual(widths, [timedelta(hours=h) for h in (72, 36, 18, 9, 4, 2, 2, 2)])
+        self.assertEqual(mailapp.partial_reads(cursor), 8)
+
+    def test_a_read_that_finished_grows_back_to_3_days_and_moves_on(self):
+        self.list_times_out(times=2)
+        daily = [self.mail.deliver_unrelated(f"d{i}@x.example", f"Day {i}", at=self.old + timedelta(days=i, hours=1))
+                 for i in range(10)]
+        cursor = self.mail.history(self.mail.history(self.cursor).history_id).history_id
+        self.assertEqual(cursor, f"{self.cursor}|slice=18h|partial=2")
+        page = self.mail.history(cursor)  # 18 hours: it finishes, and the cursor moves on
+        self.assertEqual(self.width(), timedelta(hours=18))
+        self.assertTrue(page.more)  # still behind now
+        self.assertNotIn("|", page.history_id)  # back to 3 days, no partial reads in a row
+        self.assertGreater(_cursor(page.history_id), self.old)  # moved forward, never back
+        handled = {a.gmail_message_id[len("mailapp:"):] for a in page.added}
+        cursor = page.history_id
+        for _ in range(10):
+            page = self.mail.history(cursor, skip_ids=handled)
+            self.assertEqual(self.width(), min(timedelta(days=3),
+                                               self.clock().replace(microsecond=0) - self.mail.windows[-1][0]))
+            handled |= {a.gmail_message_id[len("mailapp:"):] for a in page.added}
+            cursor = page.history_id
+            if not page.more:
+                break
+        self.assertFalse(page.more)
+        printed = [m for ids in self.mail.fetches for m in ids]
+        self.assertEqual(sorted(printed), sorted(d.msgid for d in daily))  # every message once, none twice
+
+    def test_a_2_hour_slice_behind_now_still_moves_the_cursor_forward(self):
+        cursor = f"{self.cursor}|slice=2h|partial=4"
+        page = self.mail.history(cursor)
+        self.assertEqual(self.width(), timedelta(hours=2))
+        self.assertTrue(page.more)
+        first = self.mail.windows[-1][0]
+        self.assertEqual(first, _cursor(self.cursor) - mailapp.HISTORY_OVERLAP)
+        self.assertGreater(_cursor(page.history_id), _cursor(self.cursor))  # forward, never back
+        self.mail.history(page.history_id)
+        self.assertEqual(self.mail.windows[-1][0], first + timedelta(hours=1))  # half the 2-hour slice on
+
+    def test_a_fetch_timeout_halves_the_next_slice(self):
+        self.mail.deliver_unrelated("news@x.example", "A newsletter", at=self.old + timedelta(hours=1))
+
+        def slow(args):
+            raise GmailError("timeout", None, "osascript took longer than 120 seconds")
+        self.mail._fetch_script = slow
+        page = self.mail.history(self.cursor)
+        self.assertEqual((page.added, page.more, page.history_id), ((), True, f"{self.cursor}|slice=36h|partial=1"))
+
+    def test_a_fetch_that_read_nothing_halves_the_next_slice(self):
+        self.mail.deliver_unrelated("news@x.example", "A newsletter", at=self.old + timedelta(hours=1))
+        self.mail.seconds_per_record = 0
+        original = self.mail._fetch_script
+        self.mail._fetch_script = lambda args: ["more"]  # the budget ran out before any wanted message was found
+        page = self.mail.history(self.cursor)
+        self.assertEqual((page.added, page.more, page.history_id), ((), True, f"{self.cursor}|slice=36h|partial=1"))
+        self.mail._fetch_script = original
+        self.assertEqual(len(self.mail.history(page.history_id).added), 1)
+
+    def test_a_read_that_left_some_out_keeps_its_slice_and_counts_a_partial_read(self):
+        now = self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")
+        for i in range(50):
+            self.mail.deliver_unrelated(f"p{i}@x.example", f"Note {i}")
+        page = self.mail.history(now)
+        self.assertEqual(len(page.added), mailapp.FETCH_LIMIT)
+        self.assertEqual((page.more, page.history_id), (True, f"{now}|partial=1"))
+        handled = {a.gmail_message_id[len("mailapp:"):] for a in page.added}
+        page = self.mail.history(page.history_id, skip_ids=handled)
+        self.assertEqual((page.more, page.history_id), (False, now))
+
+    def test_the_cursor_text_reads_back_and_a_bad_one_is_expired(self):
+        self.assertEqual(mailapp.partial_reads(self.cursor), 0)
+        self.assertEqual(mailapp.partial_reads(f"{self.cursor}|slice=9h|partial=3"), 3)
+        self.assertEqual(mailapp.partial_reads(""), 0)
+        self.assertEqual(mailapp.count_partial(self.cursor), f"{self.cursor}|partial=1")
+        self.assertEqual(mailapp.count_partial(f"{self.cursor}|slice=9h|partial=3"), f"{self.cursor}|slice=9h|partial=4")
+        self.assertEqual(mailapp.count_partial(""), "")
+        for bad in (f"{self.cursor}|slice=abc", f"{self.cursor}|slice=1h", f"{self.cursor}|oops=1", "12345|slice=2h"):
+            with self.assertRaises(HistoryExpired, msg=bad):
+                self.mail.history(bad)
 
 
 class MessageTest(Base):
@@ -759,7 +884,8 @@ class InboundSkipTest(Base):
             self.clock.advance(seconds=1)
         read = inbound.read_mailbox(self.mail, self.snap(), cfg=CFG, now=self.clock())
         self.assertEqual(len(read.metas), 40)
-        self.assertEqual((read.complete, read.new_history_id), (False, self.cursor))  # the cursor stays where it was
+        # the cursor time stays where it was, with one partial read counted
+        self.assertEqual((read.complete, read.new_history_id), (False, f"{self.cursor}|partial=1"))
 
 
 class InboundFallbackWithCursorTest(Base):

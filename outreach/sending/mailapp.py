@@ -58,8 +58,8 @@ __all__ = ["MailAppClient", "COMMON_HANDLERS", "PROFILE_SCRIPT", "SEND_SCRIPT", 
            "LIST_SCRIPT", "FETCH_SCRIPT", "MESSAGE_SCRIPT", "ID_PREFIX", "SENT_BOX", "DRAFTS_BOX", "OUTBOX_BOX",
            "JUNK_BOX", "SKIPPED_BOXES", "SEND_TIMEOUT", "READ_TIMEOUT", "POLL_SECONDS", "HISTORY_OVERLAP",
            "HISTORY_SLICE",
-           "FETCH_LIMIT", "FETCH_BUDGET", "FETCH_ASK", "SNIPPET_LENGTH", "bracket", "bare", "local_text",
-           "local_parts", "read_local"]
+           "MIN_SLICE", "FETCH_LIMIT", "FETCH_BUDGET", "FETCH_ASK", "SNIPPET_LENGTH", "bracket", "bare", "local_text",
+           "local_parts", "read_local", "partial_reads", "count_partial"]
 
 ID_PREFIX = "mailapp:"
 # The Exchange account's own mailboxes (the spike, 2026-11-15).
@@ -76,6 +76,10 @@ HISTORY_OVERLAP = timedelta(hours=24)  # controller ruling (B2 fix round 1); kno
 # One read lists at most this much (controller ruling, B4 fix round 2): a 45-day list outlasted the 120 s read on the
 # real account, a 2-day one took about 20 s. A cursor further back catches up a slice a tick.
 HISTORY_SLICE = timedelta(days=3)
+# A read that cannot finish (its list timed out, or its fetch timed out or read nothing) halves the next read's slice,
+# down to this (final review F3); a read that finished grows it back to HISTORY_SLICE. The slice in use, and how many
+# reads in a row did not finish, are kept in the cursor text: `<time>|slice=<hours>h|partial=<n>`.
+MIN_SLICE = timedelta(hours=2)
 # One fetch prints at most FETCH_LIMIT full records (about 0.9 s each on the real Mail.app) and starts none after
 # FETCH_BUDGET seconds (controller ruling, B4 fix round 1): the real guard against the 120 s read timeout. The ids it
 # is asked about are at most FETCH_ASK, oldest first; what is left waits for the next tick.
@@ -423,7 +427,7 @@ def read_local(text: str) -> int | None:
 
 
 def _cursor_time(cursor: str) -> datetime:
-    """The time a Mail.app cursor names (UTC ISO text); HistoryExpired for anything else."""
+    """The time a Mail.app cursor's time text names (UTC ISO text); HistoryExpired for anything else."""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-]\d{2}:?\d{2})?", cursor or ""):
         raise HistoryExpired("the Mail.app cursor is not a time")
     try:
@@ -431,6 +435,52 @@ def _cursor_time(cursor: str) -> datetime:
     except ValueError:
         raise HistoryExpired("the Mail.app cursor is not a time") from None
     return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
+_SLICE_HOURS = int(HISTORY_SLICE.total_seconds() // 3600)
+_MIN_HOURS = int(MIN_SLICE.total_seconds() // 3600)
+
+
+def _parse_cursor(cursor: str) -> tuple[str, datetime, int, int]:
+    """A Mail.app cursor as (its time text, that time, the slice in hours, the partial reads in a row). A plain time
+    is a 3-day slice with none; HistoryExpired for anything that is not one of the two forms."""
+    text, *parts = (cursor or "").split("|")
+    at = _cursor_time(text)
+    hours, partial = _SLICE_HOURS, 0
+    for part in parts:
+        if m := re.fullmatch(r"slice=(\d+)h", part):
+            hours = int(m.group(1))
+        elif m := re.fullmatch(r"partial=(\d+)", part):
+            partial = int(m.group(1))
+        else:
+            raise HistoryExpired("the Mail.app cursor is not a time")
+    if not _MIN_HOURS <= hours <= _SLICE_HOURS:
+        raise HistoryExpired("the Mail.app cursor names a slice it cannot read")
+    return text, at, hours, partial
+
+
+def _cursor_text(text: str, hours: int = _SLICE_HOURS, partial: int = 0) -> str:
+    """The cursor for `text` (a time) with a slice of `hours` and `partial` reads in a row that did not finish; the
+    plain time when both are the defaults, so a read that finished leaves the cursor as it always was."""
+    return text + (f"|slice={hours}h" if hours != _SLICE_HOURS else "") + (f"|partial={partial}" if partial else "")
+
+
+def partial_reads(cursor: str) -> int:
+    """How many Mail.app reads in a row did not finish, from the cursor text (0 for a plain time or no cursor)."""
+    try:
+        return _parse_cursor(cursor)[3]
+    except HistoryExpired:
+        return 0
+
+
+def count_partial(cursor: str) -> str:
+    """The cursor with one more partial read in a row (a read that failed outright: the tick counts it); a cursor
+    that is not a Mail.app one is given back as it is."""
+    try:
+        text, _, hours, partial = _parse_cursor(cursor)
+    except HistoryExpired:
+        return cursor
+    return _cursor_text(text, hours, partial + 1)
 
 
 def _gmail_id(message_id: str) -> str:
@@ -660,24 +710,41 @@ class MailAppClient(MailClient):
 
     def history(self, start_history_id: str, *, skip_ids: Collection[str] = frozenset()) -> HistoryPage:
         """Messages received after the cursor time less 24 hours (`HISTORY_OVERLAP`), in every mailbox but Sent Items,
-        Drafts and Outbox, up to 3 days later at most (`HISTORY_SLICE`, never past now), in two steps: the slice's
-        Message-IDs (`LIST_SCRIPT`), then the full records of the ones
+        Drafts and Outbox, up to the cursor's slice later at most (3 days, `HISTORY_SLICE`, unless shrunk; never past
+        now), in two steps: the slice's Message-IDs (`LIST_SCRIPT`), then the full records of the ones
         not in `skip_ids` (bracketed or bare Message-IDs the caller already handled), oldest first, each once
         (`FETCH_SCRIPT`: at most `FETCH_LIMIT` records, none started after `FETCH_BUDGET` seconds). An id the fetch
         stopped before is left out; one it did not find though it read that mailbox through is gone (deleted or moved
         since the list), so it never holds the read. With none left out the new cursor is the time the read began
         when the slice reached now (`more` False), else the slice's end (`more` True: the read is behind and the next
-        call reads on from there); with some left out it is the cursor given (`more` True) and the next call fetches
-        the rest. A cursor that is
-        not a time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read fails the whole
-        read (`server`). The page holds every message it names (`held`), so `message` serves them with no script."""
+        call reads on from there; a slice shorter than 2 days starts the next one half a slice before its end, so
+        the cursor always moves forward); either way the slice is 3 days again. With some left out it is the cursor
+        given (`more` True) and the next call fetches the rest. A read that cannot finish (the list timed out, or the
+        fetch timed out or read nothing) keeps the cursor time with half the slice (down to `MIN_SLICE`) and returns
+        an empty page (`more` True), so a busy or slow Mail.app never stalls the read for good. Every read that did
+        not finish counts one more partial read in the cursor (`partial_reads`); one that finished counts none. A
+        cursor that is not a time (empty, or a Gmail history id) is HistoryExpired. A mailbox Mail.app could not read
+        fails the whole read (`server`). The page holds every message it names (`held`), so `message` serves them
+        with no script."""
+        text, at, hours, partial = _parse_cursor(start_history_id)
         now = self._clock().astimezone(timezone.utc).replace(microsecond=0)
         read_at = now.strftime(ISO_FMT)
-        start = _cursor_time(start_history_id) - HISTORY_OVERLAP
-        end = min(now, start + HISTORY_SLICE)
+        size = timedelta(hours=hours)
+        start = at - HISTORY_OVERLAP
+        end = min(now, start + size)
         window = [*local_parts(start), *local_parts(end)]
-        listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *window, *SKIPPED_BOXES], READ_TIMEOUT),
-                        {"id": 5, "error": 4})
+
+        def stalled() -> HistoryPage:  # nothing could be read: the same time, half the slice, one more partial read
+            self._page = {}
+            return HistoryPage(added=(), history_id=_cursor_text(text, max(_MIN_HOURS, hours // 2), partial + 1),
+                               held=True, more=True)
+        try:
+            listed = _shape(self._records(LIST_SCRIPT, [self.mailapp_account, *window, *SKIPPED_BOXES],
+                                          READ_TIMEOUT), {"id": 5, "error": 4})
+        except GmailError as err:
+            if err.kind == "timeout":
+                return stalled()
+            raise
         _fail_on_error(listed)
         skip = {bracket(i) for i in skip_ids} - {""}
         wanted: dict[str, str] = {}  # Message-ID to the position of the mailbox it is fetched from, oldest first
@@ -696,21 +763,30 @@ class MailAppClient(MailClient):
             args = [self.mailapp_account, *window, str(FETCH_BUDGET), str(FETCH_LIMIT)]
             for pos, ids in by_box.items():
                 args += [pos, str(len(ids)), *ids]
-            records = _shape(self._records(FETCH_SCRIPT, args, READ_TIMEOUT),
-                             {"msg": _MSG_FIELDS, "error": 4, "more": 1})
+            try:
+                records = _shape(self._records(FETCH_SCRIPT, args, READ_TIMEOUT),
+                                 {"msg": _MSG_FIELDS, "error": 4, "more": 1})
+            except GmailError as err:
+                if err.kind == "timeout":
+                    return stalled()
+                raise
             _fail_on_error(records)
             stopped = any(rec[0] == "more" for rec in records)
             for rec in records:
                 if rec[0] == "msg":
                     meta = _meta(rec)
                     fetched.setdefault(meta.gmail_message_id, meta)
+            if stopped and not fetched:
+                return stalled()  # the budget ran out before any wanted message: the window is too big today
         page = {_gmail_id(own): fetched[_gmail_id(own)] for own, _ in asked if _gmail_id(own) in fetched}
         self._page = page  # oldest first; an id not printed is gone, or left out when the fetch stopped early
         left_out = (stopped and len(page) < len(asked)) or len(wanted) > len(asked)
         if left_out:
-            cursor = start_history_id  # the next read lists this slice again and fetches the rest
+            cursor = _cursor_text(text, hours, partial + 1)  # the next read lists this slice again, fetches the rest
         elif end < now:
-            cursor = end.strftime(ISO_FMT)  # this slice is read; the next one starts from its end
+            # This slice is read; the next one starts from its end less the overlap, or less half this slice when
+            # that is shorter (a shrunk slice), so the cursor moves forward whatever the slice.
+            cursor = (end + HISTORY_OVERLAP - min(HISTORY_OVERLAP, size / 2)).strftime(ISO_FMT)
         else:
             cursor = read_at
         return HistoryPage(added=tuple(Added(gmail_message_id=m.gmail_message_id, thread_id=m.thread_id,

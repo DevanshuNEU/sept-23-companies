@@ -70,12 +70,12 @@ import random
 import sqlite3
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from outreach.sending import calendar as cal
-from outreach.sending import accounts, claim, followups, inbound, proof, queue, ramp, signals
+from outreach.sending import accounts, claim, followups, inbound, mailapp, proof, queue, ramp, signals
 from outreach.sending.config import AccountConfig, SendConfig
 from outreach.sending.mail import AccountOff, GmailError, MailClient, SentAmbiguous, scrub
 from outreach.sending.notify import Notifier, notify_once
@@ -97,6 +97,8 @@ COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skippe
 WAIT_TITLE = "Outreach sending waits"
 STOP_TITLE = "Outreach sending stopped"
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
+# A Mail.app account whose reads did not finish this many ticks in a row tells him once a day (final review F3).
+MAILAPP_BEHIND_READS = 5
 # The auth_error of a Mail.app account whose account was missing (or turned off) once: the next tick checks again,
 # and only a second miss in a row signs it out (Mail.app just started may not have loaded its accounts yet).
 FIRST_MISS = "checked again next tick: "
@@ -257,6 +259,7 @@ class _Tick:
         self.counts = Counter()
         self.unread: set[int] = set()  # the accounts whose inbound mail this tick did not fully read or apply
         self.ambiguous: list[tuple[str, int, str]] = []  # (address, message id, to): sends in doubt Sent shows twice
+        self.behind: list[tuple[str, int]] = []  # (address, partial reads): Mail.app reads that keep not finishing
 
     # -- the frame ----------------------------------------------------------------------------------------------
 
@@ -645,6 +648,8 @@ class _Tick:
             client = self._client(address)
             found[address] = self._scan_sent(client, row)
             read = inbound.read_inbound(self.conn, client, row, cfg=self.cfg, now=self.now)
+            if acct.kind == "mailapp" and not read.complete:
+                read = self._count_partial(read, row)
             reads[address] = read
             if not read.complete:
                 self.unread.add(row.account_id)
@@ -653,6 +658,21 @@ class _Tick:
             if not self.dry_run:
                 self._read_back(client, row)
         return found, reads
+
+    def _count_partial(self, read: inbound.InboundRead, row: accounts.AccountRow) -> inbound.InboundRead:
+        """A Mail.app read that did not finish. The client counts its own partial reads in the cursor; one that failed
+        outright (no new cursor) is counted here on the stored cursor, so a mailbox that always fails is seen too.
+        After `MAILAPP_BEHIND_READS` in a row he is told (step 5)."""
+        if read.new_history_id is None:
+            stored = self.conn.execute("SELECT history_id FROM sender_account WHERE account_id = ?",
+                                       (row.account_id,)).fetchone()
+            bumped = mailapp.count_partial(stored[0] if stored is not None else "")
+            if bumped:
+                read = replace(read, new_history_id=bumped)
+        partial = mailapp.partial_reads(read.new_history_id or "")
+        if partial >= MAILAPP_BEHIND_READS:
+            self.behind.append((row.cfg.address, partial))
+        return read
 
     def _scan_sent(self, client: MailClient, row: accounts.AccountRow) -> dict:
         """A Sent scan for each of this account's sends in doubt, with its own client: by marker on Gmail, by address
@@ -702,7 +722,8 @@ class _Tick:
         if checked["missing"]:
             self._line(f"{checked['missing']} sent email(s) from {address} are not {found}")
         if checked["errors"]:
-            self._partial(f"sent email from {address} could not be read back from Gmail; tried again next tick" +
+            source = "checked against Sent Items" if row.cfg.kind == "mailapp" else "read back from Gmail"
+            self._partial(f"sent email from {address} could not be {source}; tried again next tick" +
                           (", and nothing else goes out from it until then" if before == proof.CHECKING else ""))
 
     def _old_sender_loaded(self) -> bool:
@@ -735,6 +756,12 @@ class _Tick:
                         f"The email of message {message_id} to {to} matches more than one email in Sent on "
                         f"{address}, so it is not known which is this one. Nothing is resent; it stays in doubt "
                         "until you look.", at=stamp, account_id=self.rows[address].account_id)
+        for address, partial in self.behind:
+            notify_once(conn, self.notify, "mailapp_read_behind", self.today, WAIT_TITLE,
+                        f"Mail.app has not finished reading the mail on {address} for {partial} ticks in a row, so "
+                        "nothing is sent from it or to a company it emailed. Keep Mail.app open; if this goes on, "
+                        "quit Mail.app and open it again. Gmail keeps sending.", at=stamp,
+                        account_id=self.rows[address].account_id)
         self.counts["requeued"] = claim.requeue_failed(conn, now=stamp, cfg=cfg)
         self.reconciled = {**self.reconciled, "requeued": self.counts["requeued"], "leftover": self.counts["leftover"]}
         applied = Counter()

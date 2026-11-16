@@ -76,8 +76,8 @@ from pathlib import Path
 
 from outreach.sending import calendar as cal
 from outreach.sending import accounts, claim, followups, inbound, proof, queue, ramp, signals
-from outreach.sending.config import SendConfig
-from outreach.sending.mail import GmailError, MailClient, SentAmbiguous, scrub
+from outreach.sending.config import AccountConfig, SendConfig
+from outreach.sending.mail import AccountOff, GmailError, MailClient, SentAmbiguous, scrub
 from outreach.sending.notify import Notifier, notify_once
 from outreach.sending.precheck import LIST_MISSING, precheck
 from outreach.sending.proof import PROOF_SQL  # noqa: F401 (the proof's one query; status and tests read it here)
@@ -97,6 +97,9 @@ COUNT_KEYS = ("sent", "reconciled", "replies", "autoReplies", "bounces", "skippe
 WAIT_TITLE = "Outreach sending waits"
 STOP_TITLE = "Outreach sending stopped"
 BANNED_TEXT = "Sending waits: the banned phrases list could not be read. Fix it to resume."
+# The auth_error of a Mail.app account whose account was missing (or turned off) once: the next tick checks again,
+# and only a second miss in a row signs it out (Mail.app just started may not have loaded its accounts yet).
+FIRST_MISS = "checked again next tick: "
 # macOS refused the sender's Apple events to Mail.app (error -1743): he allows it once in System Settings.
 MAILAPP_NOT_ALLOWED = ("Knock may not control Mail. Open System Settings, Privacy and Security, Automation, and allow "
                        "Mail for python3.")
@@ -424,6 +427,9 @@ class _Tick:
                         # others go on. Not a sign-out, not a Gmail error: nothing pauses and the ramp is not touched.
                         self._mailapp_failed(address, err, checks, failures)
                         continue
+                    if acct.kind == "mailapp":
+                        self._mailapp_signed_out(acct, err, checks, failures)
+                        continue
                     if err.kind != "auth":
                         self.signed[address] = "unknown"
                         failures.append(f"Gmail did not answer the sign-in check on {address}: {text}")
@@ -466,8 +472,8 @@ class _Tick:
         text = _mailapp_text(err)
         if err.kind == "app_closed":
             state, failure, line = ("app_closed", f"Mail.app is not running, so {address} waits",
-                                    f"Mail.app is not running ({text}); nothing is read or sent from {address} until it "
-                                    "is open again")
+                                    f"Mail.app is not running ({text}); nothing is read or sent from {address} until "
+                                    "it is open again")
         elif err.kind == "not_allowed":
             state, failure, line = ("mailapp_not_allowed", f"macOS does not let Knock control Mail.app, so {address} "
                                     "waits", f"macOS does not let Knock control Mail.app ({text}); nothing is read or "
@@ -485,6 +491,34 @@ class _Tick:
         failures.append(failure)
         self._line(line)
 
+    def _mailapp_signed_out(self, acct: AccountConfig, err: GmailError, checks: list[tuple[str, str, str]],
+                            failures: list[str]) -> None:
+        """A Mail.app account Mail.app does not have, or has turned off (`AccountOff`). The first miss in a row only
+        waits (`mailapp_first_miss`: no sign-out, no notice); a second one in a row signs it out for sending
+        (`signed_out`, or `mailapp_off`, each with one notice a day naming Mail.app and the account)."""
+        address, name = acct.address, acct.mailapp_account
+        text = _mailapp_text(err)
+        off = isinstance(err, AccountOff)
+        what = f"Mail.app's {name} account is turned off" if off else f"Mail.app has no {name} account"
+        if not self._missed_before(address):
+            self.signed[address] = "unknown"
+            checks.append((address, "mailapp_first_miss", text))
+            failures.append(f"{what} on {address}; it is checked again next tick")
+            self._line(f"{what} ({text}); nothing is read or sent from {address} this tick, and the next tick checks "
+                       "again (Mail.app may still be starting)")
+            return
+        self.signed[address] = "signed_out"
+        checks.append((address, "mailapp_off" if off else "signed_out", text))
+        failures.append(f"{what}, so {address} is signed out")
+        self._line(f"{what} ({text}); nothing is read or sent from {address} until it is back in Mail.app")
+
+    def _missed_before(self, address: str) -> bool:
+        """True when the account's last check already missed its Mail.app account (a first miss, or signed out)."""
+        row = self.conn.execute("SELECT auth_state, auth_error FROM sender_account WHERE address = ?",
+                                (address,)).fetchone()
+        return row is not None and (row["auth_state"] == "signed_out" or (
+            row["auth_state"] == "unknown" and (row["auth_error"] or "").startswith(FIRST_MISS)))
+
     def _write_sign_ins(self, checks: list[tuple[str, str, str]]) -> None:
         """Step 2's write, inside the caller's transaction: every account has a row, and each one checked holds its
         state (account 1's also on `sender` row 1, which the readers of one account still show)."""
@@ -493,8 +527,12 @@ class _Tick:
             row = self.rows[address]
             if state == "ok":
                 self._signed_ok(row)
-            elif state == "signed_out":
-                self._signed_out(row, text)
+            elif state in ("signed_out", "mailapp_off"):
+                self._signed_out(row, text, off=state == "mailapp_off")
+            elif state == "mailapp_first_miss":
+                self.conn.execute("UPDATE sender_account SET auth_state = 'unknown', auth_error = ?, "
+                                  "auth_checked_at = ? WHERE account_id = ?",
+                                  (FIRST_MISS + text, self.stamp, row.account_id))
             elif state in ("app_closed", "mailapp_slow", "mailapp_failed", "mailapp_not_allowed"):
                 self._mailapp_down(row, text, how=state)
             else:
@@ -527,7 +565,7 @@ class _Tick:
                     f"open with the {row.cfg.mailapp_account} account signed in; Gmail keeps sending.",
                     at=self.stamp, account_id=row.account_id)
 
-    def _signed_out(self, row: accounts.AccountRow, text: str) -> None:
+    def _signed_out(self, row: accounts.AccountRow, text: str, *, off: bool = False) -> None:
         address = row.cfg.address
         self.conn.execute("UPDATE sender_account SET auth_state = 'signed_out', auth_error = ?, auth_checked_at = ? "
                           "WHERE account_id = ?", (text, self.stamp, row.account_id))
@@ -538,8 +576,11 @@ class _Tick:
                      at=self.stamp, detail={"error": text, "address": address},
                      idempotency_key=f"signed_out:{row.account_id}:{self.today.isoformat()}")
         if row.cfg.kind == "mailapp":
-            notice = (f"Mail.app has no {row.cfg.mailapp_account} account, so nothing is sent from {address} and its "
-                      f"replies are not read. Add the {row.cfg.mailapp_account} account in Mail.app to resume.")
+            name = row.cfg.mailapp_account
+            notice = (f"Mail.app's {name} account is turned off, so nothing is sent from {address} and its replies are "
+                      f"not read. Turn the {name} account on in Mail.app to resume." if off else
+                      f"Mail.app has no {name} account, so nothing is sent from {address} and its replies are not "
+                      f"read. Add the {name} account in Mail.app to resume.")
             notify_once(self.conn, self.notify, "signed_out", self.today, STOP_TITLE, notice, at=self.stamp,
                         account_id=row.account_id)
             return
@@ -921,7 +962,7 @@ class _Tick:
 
 
 def _mailapp_text(err: GmailError) -> str:
-    """A Mail.app failure as one scrubbed line: its kind and detail, never the word Gmail (`str(GmailError)` says it)."""
+    """A Mail.app failure as one scrubbed line: its kind and detail, never the word Gmail (as `str(GmailError)`)."""
     return scrub(f"{err.kind}: {err.detail}" if err.detail else err.kind)
 
 

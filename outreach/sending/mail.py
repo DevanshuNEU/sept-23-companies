@@ -16,7 +16,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 __all__ = [
     "Outgoing", "Sent", "Profile", "MessageMeta", "Added", "HistoryPage", "HistoryExpired", "ThreadUnsupported",
-    "SentAmbiguous", "GmailError", "KINDS",
+    "SentAmbiguous", "AccountOff", "GmailError", "KINDS",
     "classify_http", "RETRYABLE", "MailClient", "META_HEADERS", "MARKER_HEADER", "ORIGINAL_ID_HEADER",
     "check_outgoing", "normalise_message_id", "MESSAGE_ID", "CLOCK_SKEW_MS", "settle_minutes", "page_reaches",
     "miss_is_proof",
@@ -180,6 +180,14 @@ class SentAmbiguous(GmailError):
 
     def __init__(self, detail: str = "", *, maybe_sent: bool = False):
         super().__init__("server", None, detail, maybe_sent=maybe_sent)
+
+
+class AccountOff(GmailError):
+    """The Mail.app account exists but is turned off in Mail.app (`enabled` false): signed out for sending, as an
+    account Mail.app does not have. A GmailError of kind `auth`."""
+
+    def __init__(self, detail: str = ""):
+        super().__init__("auth", None, detail)
 
 
 def classify_http(status: int, body: str) -> str:

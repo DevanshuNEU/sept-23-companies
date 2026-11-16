@@ -49,7 +49,8 @@ import live_checkout
 from outreach.sending.applescript import Runner, osascript_runner, parse_records
 from outreach.sending.config import AccountConfig
 from outreach.sending.mail import (CLOCK_SKEW_MS, META_HEADERS, Added, GmailError, HistoryExpired, HistoryPage,
-                                   MailClient, MessageMeta, Outgoing, Profile, Sent, SentAmbiguous, ThreadUnsupported,
+                                   AccountOff, MailClient, MessageMeta, Outgoing, Profile, Sent, SentAmbiguous,
+                                   ThreadUnsupported,
                                    check_outgoing, miss_is_proof, normalise_message_id, settle_minutes)
 from outreach.store.timefmt import ISO_FMT
 
@@ -179,7 +180,8 @@ on messageRecord(boxName, h)
 end messageRecord
 '''
 
-# argv: account name. Prints `missing` when Mail.app has no such account, else one `address <addr>` per address.
+# argv: account name. Prints `missing` when Mail.app has no such account, `disabled` when it is turned off, else one
+# `address <addr>` per address.
 # The address list is read first: walking `email addresses of account ...` directly fails on the real Mail.app (-1700).
 PROFILE_SCRIPT = COMMON_HANDLERS + r'''
 on run argv
@@ -188,6 +190,7 @@ on run argv
 	set out to {}
 	tell application "Mail"
 		if not (exists account acctName) then return "missing"
+		if not (enabled of account acctName) then return "disabled"
 		set addrs to (get email addresses of account acctName)
 	end tell
 	repeat with a in addrs
@@ -551,11 +554,14 @@ class MailAppClient(MailClient):
 
     def profile(self) -> Profile:
         """The configured address when the Mail.app account holds it, else the account's first address (the tick
-        then reports the wrong account). No such account is `auth`. The history id is now: a new cursor."""
+        then reports the wrong account). No such account is `auth`, and one turned off is `AccountOff` (`auth` too).
+        The history id is now: a new cursor."""
         records = _shape(self._records(PROFILE_SCRIPT, [self.mailapp_account], READ_TIMEOUT),
-                         {"missing": 1, "address": 2})
+                         {"missing": 1, "disabled": 1, "address": 2})
         if any(rec[0] == "missing" for rec in records):
             raise GmailError("auth", None, f"Mail.app has no account named {self.mailapp_account}")
+        if any(rec[0] == "disabled" for rec in records):
+            raise AccountOff(f"Mail.app's {self.mailapp_account} account is turned off")
         addresses = [rec[1].strip() for rec in records]
         email = self.address if any(a.lower() == self.address.lower() for a in addresses) else \
             (addresses[0] if addresses else "")

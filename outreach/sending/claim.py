@@ -510,8 +510,8 @@ def leftover_claims(conn: sqlite3.Connection, now: str, *, in_doubt_accounts: Co
     stamp = _stamp(now)
     doubtful = set(in_doubt_accounts)
     with atomic(conn, "leftover_claims"):
-        rows = conn.execute("SELECT m.message_id, m.pending_rfc_id, m.touch_id, COALESCE(t.account_id, 1) AS account_id "
-                            "FROM message m JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'sending'"
+        rows = conn.execute("SELECT m.message_id, m.pending_rfc_id, m.touch_id, "
+                            "COALESCE(t.account_id, 1) AS account_id FROM message m JOIN touch t ON t.touch_id = m.touch_id WHERE m.state = 'sending'"
                             ).fetchall()
         for row in rows:
             conn.execute("UPDATE message SET state = 'send_unknown', error = ?, updated_at = ?, "

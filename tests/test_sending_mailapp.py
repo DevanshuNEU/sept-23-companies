@@ -554,6 +554,18 @@ class ProfileTest(Base):
             self.mail.profile()
         self.assertEqual(caught.exception.kind, "auth")
 
+    def test_a_turned_off_account_is_signed_out_for_sending(self):
+        self.mail.accounts_off = {NEU.mailapp_account}
+        with self.assertRaises(GmailError) as caught:
+            self.mail.profile()
+        self.assertEqual(caught.exception.kind, "auth")
+        self.assertIn("turned off", caught.exception.detail)
+        self.assertIn(NEU.mailapp_account, caught.exception.detail)
+
+    def test_the_profile_script_checks_the_account_is_turned_on(self):
+        self.assertIn("enabled of account acctName", mailapp.PROFILE_SCRIPT)
+        self.assertIn('"disabled"', mailapp.PROFILE_SCRIPT)
+
     def test_mail_app_closed_fails_every_call_and_sends_nothing(self):
         self.mail.closed = True
         m = outgoing()

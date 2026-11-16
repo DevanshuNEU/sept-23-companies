@@ -203,6 +203,14 @@ class SignalsTest(Base):
         self.assertEqual(s.gmail_errors_today, 2)
         self.assertIn("may not send", s.gmail_message)
 
+    def test_a_provider_block_today_is_a_mail_error_and_says_the_provider_restricted_it(self):
+        # M2 (final review): Microsoft's block of the Northeastern account shows as its Gmail ones do.
+        put_day(self.db, MON_DAY, 40)
+        self.signal("provider_block", ny(2, 10), detail={"error_kind": "provider_block", "source": "inbound"})
+        s = self.snap(ny(2, 11))
+        self.assertEqual(s.gmail_errors_today, 1)
+        self.assertIn("mail provider said the account is restricted", s.gmail_message)
+
     def test_stop_replies_today_counts_asked_to_stop_tags_dated_today(self):
         for day, kind in ((2, "asked_to_stop"), (2, "asked_to_stop"), (2, "said_no"), (1, "asked_to_stop")):
             person = self.person()
@@ -514,6 +522,9 @@ class AccountsSnapshotTest(unittest.TestCase):
         self.auth(self.three, "signed_out", "Gmail auth: Mail.app has no account named Exchange")
         self.assertEqual(self.lines(self.snap())[NEU],
                          f"{NEU}: Mail.app has no Exchange account. Sign in to the Exchange account in Mail.app")
+        self.auth(self.three, "signed_out", "auth: Mail.app's Exchange account is turned off")  # F4
+        self.assertEqual(self.lines(self.snap())[NEU],
+                         f"{NEU}: Mail.app's Exchange account is turned off. Turn it on in Mail.app")
 
     def test_totals_are_sums_over_the_sending_accounts(self):
         both = dataclasses.replace(self.cfg, accounts=tuple(

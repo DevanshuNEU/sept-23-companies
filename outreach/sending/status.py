@@ -34,7 +34,8 @@ OLD_SENDER_TEXT = "The old mail sender is still running, so the new one waits un
 NOTHING_APPROVED = "Nothing is approved and waiting to send."
 ALL_STOPPED = "Every email waiting is stopped and will be removed."
 _GMAIL_TEXT = {"gmail_limit": "Gmail said the account hit a sending limit",
-               "gmail_policy": "Gmail said this account may not send"}
+               "gmail_policy": "Gmail said this account may not send",
+               "provider_block": "The mail provider said the account is restricted from sending"}
 
 
 # What one account does today, as the strip names it.
@@ -198,6 +199,8 @@ def _sign_in_line(row: accounts.AccountRow, auth_error: str, cfg: SendConfig) ->
         return "waits: Mail.app is not open. Open Mail.app and keep it open"
     if row.cfg.kind == "mailapp":
         account = row.cfg.mailapp_account
+        if row.auth_state != "wrong_account" and "turned off" in (auth_error or ""):
+            return f"Mail.app's {account} account is turned off. Turn it on in Mail.app"
         what = ("Mail.app holds another address" if row.auth_state == "wrong_account"
                 else f"Mail.app has no {account} account")
         return f"{what}. Sign in to the {account} account in Mail.app"
@@ -287,10 +290,12 @@ def _levels(acct: AccountConfig) -> tuple[int, ...]:
 
 
 def _gmail_message(conn: sqlite3.Connection, account_id: int, today: str) -> tuple[int, str | None]:
-    """How many Gmail limit or policy signals belong to today, and a plain line for the newest."""
+    """How many Gmail limit or policy signals, or mail provider blocks (Microsoft's, on the Mail.app account), belong
+    to today, and a plain line for the newest."""
     rows = conn.execute(
         "SELECT kind, json_extract(detail, '$.error_kind') AS error_kind, json_extract(detail, '$.status') AS status "
-        "FROM event WHERE entity = 'sender' AND entity_id = ? AND kind IN ('gmail_limit', 'gmail_policy') "
+        "FROM event WHERE entity = 'sender' AND entity_id = ? "
+        "AND kind IN ('gmail_limit', 'gmail_policy', 'provider_block') "
         "AND json_extract(detail, '$.day') = ? ORDER BY event_id DESC", (account_id, today)).fetchall()
     if not rows:
         return 0, None

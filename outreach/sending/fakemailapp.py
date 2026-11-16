@@ -10,7 +10,8 @@ Hooks, as FakeGmail's: `fail_next_send`, `slow_sent` (the email waits in Mail.ap
 goes out and its copy never shows in Sent Items or an Outbox), `refuse_next_send` (the script stops before Mail.app's
 `send` and prints `notsent`), `deliver_reply`,
 `deliver_auto_reply`, `deliver_ndr` (a Microsoft "Undeliverable" notice), `deliver_unrelated`, `add_to_sent`,
-`add_to_mailbox`, `copy_to`, `fail_mailbox`, and `closed` (Mail.app not running: every script fails with `app_closed`).
+`add_to_mailbox`, `copy_to`, `fail_mailbox`, `accounts_off` (an account turned off in Mail.app), and `closed` (Mail.app
+not running: every script fails with `app_closed`).
 `probe(method_name)` runs at the start of every client method; `calls` lists them, `scripts` the scripts run,
 `fetches` the bare Message-IDs each fetch script printed and `fetch_limits` its time budget and record cap.
 `seconds_per_record` makes each record cost a fetch that much of its budget; `mailboxes` is the account's mailbox
@@ -108,6 +109,7 @@ class FakeMailApp(MailAppClient):
         self.id_prefix = id_prefix
         self.closed = False                                  # Mail.app is not running
         self.accounts_in_app = {account.mailapp_account}     # the Mail.app account names that exist
+        self.accounts_off: set[str] = set()                  # of those, the ones turned off (`enabled` false)
         self.addresses = [account.address]                   # the account's email addresses
         self.store: list[Stored] = []
         self.sent: list[tuple[Outgoing | None, str, datetime]] = []  # (email, Message-ID, when) for each that went
@@ -269,6 +271,8 @@ class FakeMailApp(MailAppClient):
     def _profile_script(self, args: list[str]) -> list[str]:
         if args[0] not in self.accounts_in_app:
             return ["missing"]
+        if args[0] in self.accounts_off:
+            return ["disabled"]
         return [_record("address", _esc(a)) for a in self.addresses]
 
     def _send_script(self, args: list[str]) -> list[str]:

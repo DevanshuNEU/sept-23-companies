@@ -1926,6 +1926,9 @@ class MailAppTickTest(MailAppBase):
         self.mail.accounts_in_app = set()
         general = self.approve()
         self.assertEqual(self.tick().sent, (general,))
+        self.assertEqual(self.mailapp_notices(), [])  # one miss may be Mail.app still starting: checked again
+        self.clock.advance(minutes=2)
+        self.tick()
         self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
         [(_, text)] = self.mailapp_notices()
         self.assertEqual(text, f"Mail.app has no Exchange account, so nothing is sent from {NEU} and its replies are "
@@ -1969,6 +1972,52 @@ class MailAppTickTest(MailAppBase):
         self.tick()
         self.assertEqual(self.message(sponsor)["state"], "sent")
         self.assertEqual(len(self.mail.sent), 1)
+
+    # M3 (final review): one `missing` right after Mail.app starts is not a sign-out; two in a row are.
+    def test_one_missing_account_right_after_mail_app_starts_waits_without_a_stop_notice(self):
+        sponsor, general = self.approve_sponsor(), self.approve()
+        self.mail.accounts_in_app = set()  # Mail.app just opened and has not loaded its accounts yet
+        report = self.tick()
+        self.assertEqual(report.sent, (general,))
+        self.assertEqual(self.message(sponsor)["state"], "approved")
+        self.assertNotEqual(report.accounts[NEU], "ok")
+        self.assertNotEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
+        self.assertEqual([n for n in self.notices if n[0] == tick.STOP_TITLE], [])
+        self.assertEqual(self.events("signed_out"), [])
+        self.assertTrue(any("Mail.app" in line and NEU in line for line in report.lines))
+        self.mail.accounts_in_app = {"Exchange"}
+        self.clock.advance(minutes=2)
+        report = self.tick()
+        self.assertEqual(report.sent, (sponsor,))
+        self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "ok")
+        self.assertEqual([n for n in self.notices if n[0] == tick.STOP_TITLE], [])
+        # A later single miss is again only a wait: the count starts over after a good check.
+        self.mail.accounts_in_app = set()
+        self.clock.advance(minutes=2)
+        self.tick()
+        self.assertEqual([n for n in self.notices if n[0] == tick.STOP_TITLE], [])
+        self.assert_no_gmail_signal()
+
+    # F4 (final review): an Exchange account turned off in Mail.app is signed out for sending.
+    def test_an_exchange_account_turned_off_in_mail_app_waits_and_says_so(self):
+        sponsor, general = self.approve_sponsor(), self.approve()
+        self.mail.accounts_off = {"Exchange"}
+        self.assertEqual(self.tick().sent, (general,))
+        self.clock.advance(minutes=2)
+        report = self.tick()
+        self.assertEqual(self.message(sponsor)["state"], "approved")
+        self.assertEqual(report.accounts[NEU], "signed_out")
+        self.assertEqual(self.account_of(self.neu.account_id)["auth_state"], "signed_out")
+        [(title, text)] = self.mailapp_notices()
+        self.assertEqual(title, tick.STOP_TITLE)
+        self.assertEqual(text, f"Mail.app's Exchange account is turned off, so nothing is sent from {NEU} and its "
+                               "replies are not read. Turn the Exchange account on in Mail.app to resume.")
+        self.clock.advance(minutes=30)
+        self.tick()
+        self.assertEqual(len(self.mailapp_notices()), 1)  # once a day
+        self.mail.accounts_off = set()
+        self.clock.advance(minutes=30)
+        self.assertEqual(self.tick().sent, (sponsor,))
 
     # F2 (final review): every Mail.app sign-in failure waits on the Mail.app path, worded for Mail.app.
     def profile_fails(self, err: GmailError) -> None:

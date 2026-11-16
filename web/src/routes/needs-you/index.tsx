@@ -10,6 +10,7 @@ import {
   queryKeys,
   usePageClient,
   type Id,
+  type WriteOptions,
   type JobRunSummary,
   type NeedsYouView,
   type NoGoReason,
@@ -37,12 +38,12 @@ import { NoGoDialog, type NoGoStart } from './no-go-dialog';
 import { mergeName, possessive } from './merge-compare';
 import { EDIT_FIELD, ReviewItemRow, TRIGGER, hasNoGo } from './review-item';
 import { SettledPanel } from './settled-panel';
-import { resolvedGroups } from './groups';
+import { CompanyDetailsRow } from './company-row';
+import { DETAILS, byPriority, companyRows, resolvedGroups, type CompanyRow } from './groups';
 import { settleView, type Settling } from './patches';
 
 type Section = { id: string; title: string; items: ReviewItem[] };
 
-const DETAILS: readonly ReviewKind[] = ['size_unknown', 'size_guess', 'size_check', 'domain_missing'];
 const BOARDS: readonly ReviewKind[] = ['board_unreadable', 'board_empty'];
 
 /**
@@ -318,28 +319,34 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   const write = usePendingWrite();
   const [editing, setEditing] = useState<Id | null>(null);
   // Kept after close so the dialog keeps its words through the exit animation; `n` keys each open afresh.
-  const [noGo, setNoGo] = useState<{ item: ReviewItem; start: NoGoStart; n: number; open: boolean } | null>(null);
+  const [noGo, setNoGo] = useState<{ row: CompanyRow; start: NoGoStart; n: number; open: boolean } | null>(null);
   const [gapsOpen, setGapsOpen] = useState(false);
 
-  const sections = sectionsOf(data.open);
-  const ordered = sections.flatMap((s) => s.items);
+  // Boards, duplicates and flags keep the API's order; the sections about a company he is working are ranked.
+  const RANKED = new Set(['email', 'sponsorship', 'details']);
+  const sections = sectionsOf(data.open).map((s) => {
+    const rows = companyRows(s.items);
+    return { ...s, rows: RANKED.has(s.id) ? byPriority(rows) : rows };
+  });
+  const ordered = sections.flatMap((s) => s.rows);
   const gaps = data.dataGaps;
+  const gapRows = companyRows(gaps);
   const gapIds = new Set(gaps.map((r) => r.id));
-  // A data gap joins the keyboard list only while its section is open.
-  const listed = gapsOpen ? [...ordered, ...gaps] : ordered;
-  const ids = listed.map((r) => r.id);
-  const byId = new Map(listed.map((r) => [r.id, r]));
+  // A data gap joins the keyboard list only while its section is open. A row stands in the list by its lead item.
+  const listed = gapsOpen ? [...ordered, ...gapRows] : ordered;
+  const ids = listed.map((r) => r.lead.id);
+  const byId = new Map(listed.map((r) => [r.lead.id, r]));
   const { selected, select, rowProps } = useListNav<Id>({
     ids,
     // One next action: the first item is selected when he arrives, so the first key settles it.
     initial: ids[0],
     onOpen: (id) => {
       const r = byId.get(id);
-      if (r) navigate(`/companies/${r.company.id}`);
+      if (r) navigate(`/companies/${r.lead.company.id}`);
     },
     announce: (id) => {
       const r = byId.get(id);
-      return r ? mergeName(r) : '';
+      return r ? mergeName(r.lead) : '';
     },
   });
   const current = selected === null ? undefined : byId.get(selected);
@@ -350,17 +357,21 @@ function OpenItems({ data }: { data: NeedsYouView }) {
    * no Undo of its own: the toast holds it.
    */
   const patchesFor = (
-    r: ReviewItem,
-    settled: Settling,
+    rs: ReviewItem[],
+    settled: Settling | ((r: ReviewItem) => Settling),
     extra?: (s: ShellSummary) => Partial<ShellSummary>,
   ): Patch[] => [
     {
       key: queryKeys.needsYou,
-      apply: (d: NeedsYouView) => settleView(d, r, settled),
+      apply: (d: NeedsYouView) => rs.reduce((v, r) => settleView(v, r, typeof settled === 'function' ? settled(r) : settled), d),
     },
     {
       key: queryKeys.shell,
-      apply: (s: ShellSummary) => ({ ...s, openReviewItems: gapIds.has(r.id) ? s.openReviewItems : Math.max(0, s.openReviewItems - 1), ...extra?.(s) }),
+      apply: (s: ShellSummary) => ({
+        ...s,
+        openReviewItems: Math.max(0, s.openReviewItems - rs.filter((r) => !gapIds.has(r.id)).length),
+        ...extra?.(s),
+      }),
     },
   ];
   const moveOn = (r: ReviewItem) => {
@@ -368,8 +379,15 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     const next = ids[at + 1] ?? ids[at - 1];
     if (next !== undefined) select(next);
   };
+  /**
+   * One call per item, in order, each with its own request id (the server keeps the first answer per id). A row
+   * with one item sends the write's options as they are.
+   */
+  const eachCall = (calls: ((o: WriteOptions) => Promise<unknown>)[]) => async (o: WriteOptions) => {
+    for (const [i, call] of calls.entries()) await call(calls.length === 1 ? o : { ...o, requestId: `${o.requestId}:${i}` });
+  };
 
-  const markOk = (r: ReviewItem) => {
+  const markOk = ({ lead: r, members }: CompanyRow) => {
     if (editing === r.id) setEditing(null);
     moveOn(r);
     const merge = r.kind === 'merge_candidate';
@@ -377,13 +395,15 @@ function OpenItems({ data }: { data: NeedsYouView }) {
       ? r.merge
         ? `Kept ${mergeName(r)} separate.`
         : `Kept separate. ${r.company.name} ${OK_TEXT[r.kind]}.`
-      : `Marked ok. ${r.company.name} ${OK_TEXT[r.kind]}.`;
+      : members.length > 1
+        ? `Marked ok. ${r.company.name} stays as it is.`
+        : `Marked ok. ${r.company.name} ${OK_TEXT[r.kind]}.`;
     write({
       id: `review:${r.id}`,
       label,
-      afterCommit: merge ? label : `Marked ok and locked. ${r.company.name} ${OK_TEXT[r.kind]}.`,
-      patches: patchesFor(r, { resolution: 'marked_ok', note: merge ? 'Kept separate by you' : 'Marked ok by you', locked: false }),
-      commit: (o) => client.resolveReview(r.id, { kind: 'ok' }, r.revision, o),
+      afterCommit: merge ? label : members.length > 1 ? `Marked ok and locked. ${r.company.name} stays as it is.` : `Marked ok and locked. ${r.company.name} ${OK_TEXT[r.kind]}.`,
+      patches: patchesFor(members, { resolution: 'marked_ok', note: merge ? 'Kept separate by you' : 'Marked ok by you', locked: false }),
+      commit: eachCall(members.map((m) => (o) => client.resolveReview(m.id, { kind: 'ok' }, m.revision, o))),
     });
   };
 
@@ -397,28 +417,46 @@ function OpenItems({ data }: { data: NeedsYouView }) {
       id: `review:${r.id}`,
       label,
       afterCommit: label,
-      patches: patchesFor(r, { resolution: 'field_edited', note: `Merged ${loser.name} into ${keeper.name} by you`, locked: false }),
+      patches: patchesFor([r], { resolution: 'field_edited', note: `Merged ${loser.name} into ${keeper.name} by you`, locked: false }),
       commit: (o) => client.resolveReview(r.id, { kind: 'merge', keep }, r.revision, o),
     });
   };
 
-  const saveEdit = (r: ReviewItem, fix: Extract<ReviewFix, { kind: 'edit' }>) => {
+  const saveEdit = ({ lead: r, members }: CompanyRow, fixes: Extract<ReviewFix, { kind: 'edit' }>[]) => {
     setEditing(null);
     moveOn(r);
+    const [only] = fixes;
     const label =
-      fix.field === 'domain'
-        ? `Saved and locked. ${possessive(r.company.name)} drafts will be checked now.`
-        : `Saved and locked. ${possessive(r.company.name)} ${FIELD_NAME[fix.field]} is ${fix.value}.`;
+      only && fixes.length === 1
+        ? only.field === 'domain'
+          ? `Saved and locked. ${possessive(r.company.name)} drafts will be checked now.`
+          : `Saved and locked. ${possessive(r.company.name)} ${FIELD_NAME[only.field]} is ${only.value}.`
+        : `Saved and locked. ${r.company.name}: ${fixes.map((f) => `${FIELD_NAME[f.field]} ${f.value}`).join(', ')}.`;
+    // An edit settles every item of its field's family (the API does the same), so the first of each is the one sent.
+    const familyOf = (field: string) => members.filter((m) => EDIT_FIELD[m.kind] === field);
+    const settledBy = new Map<Id, Extract<ReviewFix, { kind: 'edit' }>>();
+    for (const f of fixes) for (const m of familyOf(f.field)) settledBy.set(m.id, f);
     write({
       id: `review:${r.id}`,
       label,
       afterCommit: label,
-      patches: patchesFor(r, { resolution: 'field_edited', note: `${FIELD_LABEL[fix.field]} set to ${fix.value} by you, from ${fix.source}`, locked: true }),
-      commit: (o) => client.resolveReview(r.id, fix, r.revision, o),
+      patches: patchesFor(
+        members.filter((m) => settledBy.has(m.id)),
+        (m) => {
+          const fix = settledBy.get(m.id);
+          return { resolution: 'field_edited', note: `${FIELD_LABEL[fix?.field ?? 'size']} set to ${fix?.value} by you, from ${fix?.source}`, locked: true };
+        },
+      ),
+      commit: eachCall(
+        fixes.flatMap((f) => {
+          const m = familyOf(f.field)[0];
+          return m ? [(o: WriteOptions) => client.resolveReview(m.id, f, m.revision, o)] : [];
+        }),
+      ),
     });
   };
 
-  const markNoGo = (r: ReviewItem, reason: NoGoReason, source: string) => {
+  const markNoGo = ({ lead: r, members }: CompanyRow, reason: NoGoReason, source: string) => {
     if (editing === r.id) setEditing(null);
     moveOn(r);
     write({
@@ -426,7 +464,7 @@ function OpenItems({ data }: { data: NeedsYouView }) {
       label: `${r.company.name} is on the no-go list.`,
       afterCommit: `${r.company.name} is on the no-go list.`,
       patches: patchesFor(
-        r,
+        members,
         { resolution: 'marked_no_go', note: `Added to the no-go list by you: ${NO_GO_WORDS[reason] ?? reason.replace(/_/g, ' ')}`, locked: false },
         (s) => ({ noGoCount: s.noGoCount + 1 }),
       ),
@@ -435,8 +473,8 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     });
   };
 
-  const openNoGo = (r: ReviewItem, source = '') =>
-    setNoGo((prev) => ({ item: r, start: { reason: 'no_sponsorship', source }, n: (prev?.n ?? 0) + 1, open: true }));
+  const openNoGo = (r: CompanyRow, source = '') =>
+    setNoGo((prev) => ({ row: r, start: { reason: 'no_sponsorship', source }, n: (prev?.n ?? 0) + 1, open: true }));
 
   const group = 'Needs you';
   // These act on the selected item, so a key right after j, k or a click waits for that move to render.
@@ -446,43 +484,61 @@ function OpenItems({ data }: { data: NeedsYouView }) {
         keys: 'e',
         label: 'Edit the field, with a source',
         group,
-        enabled: current !== undefined && EDIT_FIELD[current.kind] !== null && editing !== current.id,
+        enabled: current !== undefined && EDIT_FIELD[current.lead.kind] !== null && editing !== current.lead.id,
         run: () => {
-          if (current) setEditing(current.id);
+          if (current) setEditing(current.lead.id);
         },
       },
       { keys: 'o', label: 'Mark ok, or keep a possible duplicate separate', group, enabled: current !== undefined, run: () => current && markOk(current) },
-      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined && hasNoGo(current.kind), run: () => current && openNoGo(current) },
+      { keys: 'n', label: 'Mark no-go, with a reason', group, enabled: current !== undefined && hasNoGo(current.lead.kind), run: () => current && openNoGo(current) },
       {
         keys: 'm',
         label: 'Merge into the suggested company',
         group,
-        enabled: current?.merge != null,
+        enabled: current?.lead.merge != null,
         run: () => {
-          if (current?.merge) merge(current, current.merge.suggestedKeep);
+          if (current?.lead.merge) merge(current.lead, current.lead.merge.suggestedKeep);
         },
       },
     ],
     { selection: selected },
   );
 
-  const row = (r: ReviewItem) => (
-    <ReviewItemRow
-      key={r.id}
-      item={r}
-      row={rowProps(r.id)}
-      editing={editing === r.id}
-      onEdit={() => {
+  const row = (cr: CompanyRow) => {
+    const r = cr.lead;
+    const common = {
+      row: rowProps(r.id),
+      editing: editing === r.id,
+      onEdit: () => {
         select(r.id);
         setEditing(r.id);
-      }}
-      onOk={() => markOk(r)}
-      onNoGo={(source) => openNoGo(r, source)}
-      onSave={(fix) => saveEdit(r, fix)}
-      onCancelEdit={() => setEditing(null)}
-      onMerge={(keep) => merge(r, keep)}
-    />
-  );
+      },
+      onOk: () => markOk(cr),
+      onCancelEdit: () => setEditing(null),
+    };
+    return cr.members.length > 1 ? (
+      <CompanyDetailsRow
+        key={r.id}
+        row={cr}
+        rowProps={common.row}
+        editing={common.editing}
+        onEdit={common.onEdit}
+        onOk={common.onOk}
+        onNoGo={() => openNoGo(cr)}
+        onSave={(fixes) => saveEdit(cr, fixes)}
+        onCancelEdit={common.onCancelEdit}
+      />
+    ) : (
+      <ReviewItemRow
+        key={r.id}
+        item={r}
+        {...common}
+        onNoGo={(source) => openNoGo(cr, source)}
+        onSave={(fix) => saveEdit(cr, [fix])}
+        onMerge={(keep) => merge(r, keep)}
+      />
+    );
+  };
 
   let main: ReactNode;
   if (ordered.length === 0) {
@@ -502,8 +558,8 @@ function OpenItems({ data }: { data: NeedsYouView }) {
   } else {
     main = sections.map((s) => (
       <section key={s.id} aria-labelledby={`ny-${s.id}`}>
-        <SectionTitle id={`ny-${s.id}`} title={s.title} count={s.items.length} />
-        <Card className="gap-0 overflow-hidden py-0">{s.items.map(row)}</Card>
+        <SectionTitle id={`ny-${s.id}`} title={s.title} count={s.rows.length} />
+        <Card className="gap-0 overflow-hidden py-0">{s.rows.map(row)}</Card>
       </section>
     ));
   }
@@ -512,20 +568,20 @@ function OpenItems({ data }: { data: NeedsYouView }) {
     <>
       {main}
       {gaps.length > 0 ? (
-        <DataGaps count={gaps.length} open={gapsOpen} onOpenChange={setGapsOpen}>
-          {gaps.map(row)}
+        <DataGaps count={gapRows.length} open={gapsOpen} onOpenChange={setGapsOpen}>
+          {gapRows.map(row)}
         </DataGaps>
       ) : null}
       {noGo ? (
         <NoGoDialog
           key={noGo.n}
-          name={noGo.item.company.name}
+          name={noGo.row.lead.company.name}
           start={noGo.start}
           open={noGo.open}
           onOpenChange={(o) => {
             if (!o) setNoGo((prev) => (prev ? { ...prev, open: false } : prev));
           }}
-          onMark={(reason, source) => markNoGo(noGo.item, reason, source)}
+          onMark={(reason, source) => markNoGo(noGo.row, reason, source)}
         />
       ) : null}
     </>

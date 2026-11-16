@@ -287,7 +287,8 @@ visa, OPT or sponsorship. A reply from anyone at the company stops all queued em
 there.
 
 A nightly job drafts every follow-up due the next business day into the Outbox the same way (#142), so by hand
-this is only for one he asks for. `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7):
+this is only for one he asks for. First emails to the people loaded on record (his Apollo export) are drafted nightly too, by
+`python -m outreach.first_drafter` (#298), at the pace the accounts can send; by hand is for a job link he gives. `followups_due` lists the follow-ups due today (or within `days_ahead`, 0 to 7):
 person, company, `seq`, the first email's subject. For each, call `draft_brief` for the person, both parts (part 1 shows the
 thread so far), write a body of 25 to 80 words that greets by first name, nudges or says the one new thing, and ends with
 the signature, then `save_followup` with `person_id`, `seq`, `body` and the brief's `brief_id`. The subject is set

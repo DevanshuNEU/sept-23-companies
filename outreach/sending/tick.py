@@ -46,7 +46,8 @@ The rest follow."). The next tick reads it back (step 4): the `SENT` label and i
 with a notice once a day. Every later marked email is read back the same way once. A first email in doubt is never
 retried while unproven; reconcile may settle it from Sent by its marker, and then it is read back like any other.
 `claim.claim` checks the same rule inside its own transaction (`proof.may_claim`), and refuses an account that does
-not send.
+not send. A Mail.app account cannot carry the marker: its proof is its first email found in Sent Items by the
+find_sent rule, read from the store with no Mail.app call (`proof.verify_marker(kind="mailapp")`).
 
 A dry run does steps 2 and 4 (but not the imported-mail check or the read back, which write), runs 5, 6 and the
 pre-claim check inside one transaction that is rolled back, never sends, and writes nothing, `job_run` included;
@@ -572,7 +573,7 @@ class _Tick:
     def _read_back(self, client: MailClient, row: accounts.AccountRow) -> None:
         """The checks that write: imported mail (account 1's, sent by the old mailer) and this account's read back."""
         address, account_id = row.cfg.address, row.account_id
-        if account_id == 1:
+        if account_id == 1 and row.cfg.kind == "gmail":  # imported mail is in the old Gmail mailbox, never Mail.app's
             verified = inbound.verify_imported(self.conn, client, now=self.now)
             self.counts["verified"] += verified["verified"]
             if verified["not_in_sent"]:
@@ -580,7 +581,7 @@ class _Tick:
             if verified["errors"]:
                 self._partial("imported mail could not be checked against Gmail; tried again next tick")
         before = proof.phase(self.conn, account_id)
-        checked = proof.verify_marker(self.conn, client, account_id, now=self.now)
+        checked = proof.verify_marker(self.conn, client, account_id, now=self.now, kind=row.cfg.kind)
         self.counts["verified"] += checked["verified"]
         if before == proof.CHECKING and proof.phase(self.conn, account_id) == proof.PROVEN:
             self._line(f"the first email from {address} is in Sent with the sender's marker, so the rest may follow")

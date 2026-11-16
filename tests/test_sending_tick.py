@@ -1673,5 +1673,116 @@ class TwoSendersTest(MultiBase):
                 self.assertEqual(len(self.gmail.sent) + len(self.gmail2.sent), 1)
 
 
+# Phase B: the Northeastern account sends the sponsor lane through Mail.app, beside account 2 on Gmail.
+NEU_SENDS = _sending(SHIPPED, 2, sends=True)
+
+
+class MailAppBase(MultiBase):
+    """Account 1 rests, account 2 sends the general lane on FakeGmail, the Northeastern account sends the sponsor lane
+    on FakeMailApp (`self.mail`). The Northeastern account starts unproven unless `proven_neu`."""
+    cfg = NEU_SENDS
+    proven_neu = False
+
+    def setUp(self):
+        super().setUp()
+        self.neu = self.rows[NEU]
+        self.mail = FakeMailApp(clock=self.clock, account=self.cfg.accounts[2], probe=self.probe,
+                                reconcile_after_minutes=CFG.reconcile_after_minutes)
+        self.clients = {**self.clients, NEU: self.mail}
+        if self.proven_neu:
+            prove(self.db, self.neu.account_id)
+
+    def approve_sponsor(self) -> int:
+        mid = self.approve()
+        self.sponsor(mid)
+        return mid
+
+    def phase(self) -> str:
+        return proof.phase(self.db, self.neu.account_id)
+
+
+class MailAppProofTest(MailAppBase):
+    """Mail.app cannot put the sender's marker on an email, so the Northeastern account's proof is its first email
+    found in Sent Items by the find_sent rule (the send's own hit, or a send in doubt settled by `find_sent`), never
+    a marker read and never a `message` call on a Sent Items id."""
+
+    def test_the_first_email_goes_alone_is_proven_from_sent_items_and_the_next_may_follow(self):
+        first, second = self.approve_sponsor(), self.approve_sponsor()
+        report = self.tick()
+        self.assertEqual(report.sent, (first,))
+        self.assertEqual(len(self.mail.sent), 1)
+        self.assertEqual(self.phase(), proof.CHECKING)
+        self.assertEqual(self.message(second)["state"], "approved")
+        self.clock.advance(minutes=60)
+        report = self.tick()
+        self.assertEqual(self.phase(), proof.PROVEN)
+        [verified] = self.events("marker_verified")[-1:]
+        self.assertEqual(verified["entity_id"], first)
+        detail = json.loads(verified["detail"])
+        self.assertEqual(detail["source"], "sent_items")
+        self.assertEqual(detail["stored_rfc_id"], self.message(first)["rfc_message_id"])
+        self.assertEqual(self.events("marker_missing"), [])
+        self.assertNotIn("message", self.mail.calls)  # no marker read, no slow lookup in every mailbox
+        self.assertEqual(report.sent, (second,))  # proven in step 4, so the next goes in the same tick
+        self.assertEqual(len(self.mail.sent), 2)
+        self.assertEqual(self.problems, [])
+
+    def test_a_first_email_in_doubt_found_in_sent_items_is_proven_and_not_resent(self):
+        first, second = self.approve_sponsor(), self.approve_sponsor()
+        self.mail.fail_next_send(GmailError("timeout", None, "Mail.app did not answer"), accepted=True)
+        self.tick()
+        self.assertEqual(self.message(first)["state"], "send_unknown")
+        self.assertEqual(self.phase(), proof.IN_DOUBT)
+        self.clock.advance(minutes=CFG.reconcile_after_minutes + 1)
+        report = self.tick()
+        self.assertEqual(self.message(first)["state"], "sent")  # settled by the Sent Items rule
+        self.assertEqual(report.sent, ())
+        self.clock.advance(minutes=60)
+        self.assertEqual(self.tick().sent, (second,))
+        self.assertEqual(self.events("marker_verified")[-1]["entity_id"], first)
+        self.assertEqual([out.to for out, _, _ in self.mail.sent], [self.emails[first], self.emails[second]])
+        self.assertEqual(self.events("claim_failed"), [])
+        self.assertNotIn("message", self.mail.calls)
+
+    def test_a_first_email_missing_from_sent_items_after_the_settle_time_stops_as_on_gmail(self):
+        first, second = self.approve_sponsor(), self.approve_sponsor()
+        self.mail.fail_next_send(GmailError("timeout", None, "Mail.app did not answer"))  # it never went out
+        self.tick()
+        self.assertEqual(self.message(first)["state"], "send_unknown")
+        self.clock.advance(minutes=4)
+        self.assertEqual(self.tick().sent, ())
+        self.clock.advance(minutes=10)
+        report = self.tick()
+        self.assertEqual(self.message(first)["state"], "approved")
+        self.assertEqual(self.phase(), proof.STOPPED)
+        for _ in range(3):
+            self.assertEqual(report.sent, ())
+            self.clock.advance(minutes=30)
+            report = self.tick()
+        self.assertEqual(self.mail.sent, [])
+        self.assertEqual(self.message(second)["state"], "approved")
+        self.assertIn((tick.STOP_TITLE, f"{NEU}: {proof.PHASE_TEXT[proof.STOPPED]}"), self.notices)
+
+    def test_the_proof_never_calls_mail_app(self):
+        first = self.approve_sponsor()
+        self.tick()
+        self.assertEqual(self.phase(), proof.CHECKING)
+        def refuse(*args, **kwargs):
+            raise AssertionError("the proof called Mail.app")
+        with mock.patch.object(self.mail, "message", refuse), mock.patch.object(self.mail, "_run", refuse):
+            checked = proof.verify_marker(self.db, self.mail, self.neu.account_id, now=self.clock(), kind="mailapp")
+        self.assertEqual(checked, {"verified": 1, "missing": 0, "errors": 0})
+        self.assertEqual(self.events("marker_verified")[-1]["entity_id"], first)
+
+    def test_an_email_not_recorded_from_a_sent_items_hit_is_no_proof(self):
+        first = self.approve_sponsor()
+        self.tick()
+        self.db.execute("UPDATE message SET gmail_message_id = 'gmail-77' WHERE message_id = ?", (first,))
+        checked = proof.verify_marker(self.db, self.mail, self.neu.account_id, now=self.clock(), kind="mailapp")
+        self.assertEqual(checked["missing"], 1)
+        self.assertEqual(json.loads(self.events("marker_missing")[-1]["detail"])["reason"], "no_ids")
+        self.assertEqual(self.phase(), proof.MISSING)
+
+
 if __name__ == "__main__":
     unittest.main()

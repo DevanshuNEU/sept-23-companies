@@ -266,9 +266,12 @@ class FullDayFloorTest(unittest.TestCase):
     def test_new_york_and_los_angeles_mixed_send_fifteen_on_every_seed(self):
         self.assertEqual(self.counts(("America/New_York", "America/Los_Angeles")), [15] * 20)
 
-    def test_a_start_at_14_30_new_york_sends_at_most_three_that_day(self):
+    def test_a_start_at_14_30_new_york_fits_the_last_half_hour(self):
+        # #9 dynamic pacing (2026-11-17): a late start packs the sends left into the time left, 2 minutes apart at
+        # the closest, so the last half hour sends far more than the old floor's 3.
         got = self.counts(("America/New_York",), approve_at="14:30")
-        self.assertTrue(all(1 <= n <= 3 for n in got), got)
+        self.assertTrue(all(n >= 4 for n in got), got)
+        self.assertGreaterEqual(sum(got) / len(got), 8, got)
 
 
 class EverySendingAccountTest(unittest.TestCase):

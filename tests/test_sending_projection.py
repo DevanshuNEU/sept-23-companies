@@ -152,9 +152,9 @@ class ShippedPacingTest(Base):
         _, b = self.approve(company=seed_company(self.db, "B"))
         got = self_project(self.db, FRI, cfg)
         # 16 a day, 1 sent, 1 placed: 14 left, 15 intervals; 11:06 to 15:00 in New York is 234 minutes: 15.6 each.
-        # That is below the floor, 0.75 of 420 minutes over 17 (18.5), so a late start sends fewer: 18.5 it is.
+        # With no real floor (#9 dynamic pacing, 2026-11-17) the late day packs the 14 into the 234 minutes left.
         self.assertEqual(got[a], FRI)
-        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 0.75 * 420 / 17 * 60, places=3)
+        self.assertAlmostEqual((got[b] - got[a]).total_seconds(), 234 / 15 * 60, delta=60)
 
 
 def self_project(db, now, cfg):

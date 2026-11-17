@@ -225,7 +225,7 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual((three.ramp_start, three.ramp_step, three.ramp_floor, three.ramp_ceiling), (15, 3, 15, 60))
         self.assertIsNone(one.mailapp_account)
         self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
-        self.assertEqual((cfg.spread_jitter, cfg.spread_gap_minutes), ((0.6, 1.4), (2, 45)))
+        self.assertEqual((cfg.spread_jitter, cfg.spread_gap_minutes), ((0.4, 1.6), (2, 45)))
         self.assertIs(cfg.account("devanshuchi9@gmail.com"), two)
         with self.assertRaises(KeyError):
             cfg.account("nobody@example.com")
@@ -280,7 +280,7 @@ class SendConfigTest(unittest.TestCase):
         self.refused("spread_gap_minutes", spread_gap_minutes="[2]")
         self.refused("spread_floor_slack", spread_floor_slack="1")
         self.refused("spread_floor_slack", spread_floor_slack="0")
-        self.assertEqual(load_config(SHIPPED_SEND_CONFIG).spread_floor_slack, 0.75)
+        self.assertEqual(load_config(SHIPPED_SEND_CONFIG).spread_floor_slack, 0.01)  # #9 dynamic pacing, 2026-11-17
 
 
 if __name__ == "__main__":

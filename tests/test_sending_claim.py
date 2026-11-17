@@ -253,7 +253,7 @@ class RecordSentTest(Base):
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
         self.assertEqual(got, iso(MON + timedelta(minutes=max(360 / 15, 0.75 * 420 / 17))))
 
-    def test_a_late_start_sends_fewer_not_faster(self):
+    def test_a_late_start_fits_the_rest_of_the_day(self):
         from tests import SHIPPED_SEND_CONFIG
         from tests.sendtest import with_ramp
         from tests.test_sending_human import MiddleRng
@@ -263,9 +263,9 @@ class RecordSentTest(Base):
         _, mid = self.approve()
         claim.send_one(self.db, self.gmail, self.queued(mid), cfg, now=iso(late), clock=clock,
                        rng=MiddleRng(), account=accounts.primary(self.db, cfg))
-        # 14 left over 30 minutes would be 2 minutes; the floor is 0.75 of 420 minutes over 15 + 1, 19.7.
+        # 14 left over 30 minutes is 2 minutes apart (#9 dynamic pacing, 2026-11-17: the day's quota goes out).
         got = self.db.execute("SELECT next_send_at FROM sender_account WHERE account_id = 1").fetchone()[0]
-        self.assertEqual(got, iso(late + timedelta(minutes=0.75 * 420 / 16)))
+        self.assertEqual(got, iso(late + timedelta(minutes=2)))
 
     def test_a_missing_account_row_raises_and_the_record_rolls_back(self):
         _, mid = self.approve()

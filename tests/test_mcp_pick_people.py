@@ -76,6 +76,21 @@ class PickPeopleCase(McpCase):
         self.assertIn("not an engineering recruiter", reasons["Sal Es"])
         self.assertIn("not on the engineering team", reasons["Pro Duct"])
 
+    def test_program_project_product_hr_and_non_engineering_recruiters_are_never_picked(self):
+        """#300: a manager title with a tech word is not an engineering manager by that alone."""
+        from outreach.mcp.tools.picking import role_of
+        for title in ("Senior Technical Program Manager", "Technical Project Manager", "Product Manager, AI Products",
+                      "Engineering Project Manager", "Senior Technical Product Manager",
+                      "HR Business Partner (Tech)", "Global Lead People Partner - Corporate Engineering",
+                      "Customer Success Engineer", "Sr. Analyst, Talent Acquisition- Pharmacy Campus",
+                      "Nursing Recruiter", "Scrum Master"):
+            self.assertIsInstance(role_of(title), str, title)
+        for title, group in (("Software Engineering Manager", "manager"), ("Director of Engineering", "manager"),
+                             ("Technical Recruiter", "recruiter"), ("IS&T Recruiting Program Manager", "recruiter"),
+                             ("University Recruiter", "recruiter"), ("Senior Software Engineer", "engineer"),
+                             ("Director - Software Engineering, Sales Applications", "manager")):
+            self.assertEqual(role_of(title).group, group, title)
+
     def test_pre_sales_and_support_managers_are_never_picked(self):
         """#296 (Verkada): a Solutions Engineering Manager is pre-sales, not the engineering team."""
         self.size(900)

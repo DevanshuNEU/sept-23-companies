@@ -77,10 +77,13 @@ def role_of(title: str) -> Role | str:
         return "an intern"
     if _has(t, "advisor", "adviser", "board member", "investor", "board of directors"):
         return "an advisor"
+    if _has(t, "hr", "human resources", "business partner", "people partner", "people operations", "hrbp"):
+        return "not on the engineering team"  # #300: "HR Business Partner (Tech)" read as a manager
     if _has(t, "recruit\\w*", "talent", "sourcer", "sourcing"):
         if _has(t, "agency", "staffing", "executive search"):
             return "an agency recruiter"
-        if _has(t, "sales", "gtm", "go-to-market", "marketing", "finance", "non-technical", "business"):
+        if _has(t, "sales", "gtm", "go-to-market", "marketing", "finance", "non-technical", "business", "pharmacy",
+                "pharmacist", "nursing", "nurse", "clinical", "retail", "store", "hourly", "warehouse"):
             return "not an engineering recruiter"
         early = _has(t, "university", "campus", "early career", "new grad", "technical", "engineering", "tech")
         return Role("recruiter", "recruiter", 0 if early else 1, False)
@@ -93,6 +96,9 @@ def role_of(title: str) -> Role | str:
     if _has(t, "solutions engineer\\w*", "sales engineer\\w*", "support engineer\\w*", "customer engineer\\w*",
             "field engineer\\w*", "pre-?sales", "customer success", "technical support"):
         return "not on the engineering team"  # pre-sales and support, managers included (#296)
+    if _has(t, "program manager", "project manager", "product manager", "product owner", "scrum master",
+            "program management", "project management", "product management", "tpm", "customer success"):
+        return "not on the engineering team"  # #300: a tech word does not make these engineering managers
     eng = _has(t, "engineering", "engineer", "software", "technical", "developer", "platform", "infrastructure",
                "machine learning", "ml", "ai", "data")
     if _has(t, "chief", "vp", "vice president", "svp", "evp"):

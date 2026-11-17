@@ -13,8 +13,9 @@ at most `max_per_run`, and `--limit` lowers that. At most `per_company` at one c
 Order: companies take turns (one person from each, then a second from each), the companies with the fewest first
 emails sent going first, then the fewest waiting, so the next night starts with companies that got nobody. Inside a
 company, the #9 reach out order by size, as `pick_people` reads it (`role_of`, `ORDER`, `band_of`, `company_sizes`).
-A person whose title `pick_people` would never pick (an intern, sales, an executive at a company over 200) goes last
-and is never dropped: they were loaded on purpose.
+A person whose title `pick_people` would never pick (an intern, sales, a program manager, HR, an executive at a
+company over 200) is skipped (#300: about 165 such titles came in with his Apollo list). Only people created on or
+after the config's `loaded_since` are in the pool, so older contacts are never drafted.
 
 `read_pool` reads the store (only); `order_in_company`, `queue` and `how_many` are pure.
 """
@@ -67,18 +68,16 @@ def how_many(*, outbox_target: int, waiting: int, max_per_run: int, limit: int |
 
 
 def order_in_company(people: Sequence[Person], band: str) -> list[Person]:
-    """Everyone at one company in #9's reach out order for its size: the size's turns taken in a round (the best of
-    the first turn, then of the second, ...), so five are never five recruiters. Inside a group a better title goes
-    first (a university or technical recruiter before another), then the lower person id. Anyone `role_of` would not
-    pick, or an executive at a company over 200, follows everyone else, by person id."""
+    """The people at one company `pick_people` would pick, in #9's reach out order for its size: the size's turns
+    taken in a round (the best of the first turn, then of the second, ...), so five are never five recruiters. Inside a
+    group a better title goes first (a university or technical recruiter before another), then the lower person id.
+    Anyone `role_of` would not pick, or an executive at a company over 200, is skipped (#300)."""
     turns = ORDER[band]
     in_turns = {group for turn in turns for group in turn}
     groups: dict[str, list[tuple[int, Person]]] = {}
-    last: list[Person] = []
     for p in sorted(people, key=lambda p: p.person_id):
         role = role_of(p.title or "")
         if isinstance(role, str) or role.group not in in_turns or (role.executive and band == "over_200"):
-            last.append(p)
             continue
         groups.setdefault(role.group, []).append((role.sub, p))
     for members in groups.values():
@@ -89,7 +88,7 @@ def order_in_company(people: Sequence[Person], band: str) -> list[Person]:
             options = [(groups[g][0][0], turn.index(g), groups[g][0][1].person_id, g) for g in turn if groups.get(g)]
             if options:
                 out.append(groups[min(options)[3]].pop(0)[1])
-    return out + last
+    return out
 
 
 def queue(people: Sequence[Person], companies: dict[int, Company], *, per_company: int) -> list[Person]:
@@ -103,8 +102,9 @@ def queue(people: Sequence[Person], companies: dict[int, Company], *, per_compan
     return [lines[cid][n] for n in range(per_company) for cid in order if n < len(lines[cid])]
 
 
-def read_pool(conn: sqlite3.Connection) -> Pool:
-    """Everyone who may get a first email tonight, their companies and the Outbox's waiting count. Reads only."""
+def read_pool(conn: sqlite3.Connection, loaded_since: str | None = None) -> Pool:
+    """Everyone who may get a first email tonight, their companies and the Outbox's waiting count. With
+    `loaded_since` (YYYY-MM-DD), only people created that day or later. Reads only."""
     family = Family(conn)
     companies = family.companies
     held = held_survivors(companies)
@@ -116,7 +116,7 @@ def read_pool(conn: sqlite3.Connection) -> Pool:
         "WHERE p.channel = 'email' AND p.email IS NOT NULL AND trim(p.email) <> '' "
         "AND NOT EXISTS (SELECT 1 FROM touch t WHERE t.person_id = p.person_id AND (t.first_sent_at IS NOT NULL "
         "OR EXISTS (SELECT 1 FROM message m WHERE m.touch_id = t.touch_id AND m.seq = 0))) "
-        "ORDER BY p.person_id").fetchall()
+        "AND (? IS NULL OR p.created_at >= ?) ORDER BY p.person_id", (loaded_since, loaded_since)).fetchall()
     said_no = said_no_ids(conn, [r["person_id"] for r in rows])
     people = []
     for r in rows:

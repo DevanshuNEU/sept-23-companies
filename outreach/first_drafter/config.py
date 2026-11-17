@@ -6,6 +6,7 @@ A missing section or key raises KeyError naming it, so a typo fails at load inst
 from __future__ import annotations
 
 import tomllib
+from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,7 +15,7 @@ __all__ = ["CONFIG_PATH", "DrafterConfig", "load_drafter_config"]
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
 _KEYS = {
-    "drafter": ("enabled", "model", "max_per_run", "outbox_target", "per_company"),
+    "drafter": ("enabled", "model", "max_per_run", "outbox_target", "per_company", "loaded_since"),
     "run": ("call_timeout_s", "max_consecutive_failures", "session_limit_patterns", "auth_patterns"),
 }
 
@@ -26,6 +27,7 @@ class DrafterConfig:
     max_per_run: int
     outbox_target: int
     per_company: int
+    loaded_since: str | None  # YYYY-MM-DD: only people created that day or later (#300); None is everyone
     call_timeout_s: int
     max_consecutive_failures: int
     session_limit_patterns: tuple[str, ...]
@@ -56,4 +58,13 @@ def load_drafter_config(path: Path = CONFIG_PATH) -> DrafterConfig:
         if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
             raise ValueError(f"{key} must be a list of non-empty text")
         values[key] = tuple(value)
+    since = values["loaded_since"]
+    if not isinstance(since, str):
+        raise ValueError(f"loaded_since must be a YYYY-MM-DD date in quotes, got {since!r}")
+    if since.strip():
+        try:
+            date.fromisoformat(since.strip())
+        except ValueError:
+            raise ValueError(f"loaded_since must be a YYYY-MM-DD date, got {since!r}") from None
+    values["loaded_since"] = since.strip() or None
     return DrafterConfig(**values)

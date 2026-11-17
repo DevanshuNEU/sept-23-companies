@@ -226,7 +226,7 @@ def _tonight(cfg: DrafterConfig, path: str | None, limit: int | None, summary: D
     """The night's queue, read once through a guarded connection with no grants."""
     conn = open_guarded({}, path=path)
     try:
-        pool = read_pool(conn)
+        pool = read_pool(conn, loaded_since=cfg.loaded_since)
     finally:
         conn.close()
     summary.waiting, summary.eligible = pool.waiting, len(pool.people)

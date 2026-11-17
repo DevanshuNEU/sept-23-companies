@@ -15,6 +15,9 @@ max_per_run = 30
 outbox_target = 60
 # First emails drafted at one company in one run, at most, so one company does not take the night.
 per_company = 2
+# Only people created in Knock on this day or later are drafted (#300): the list he loaded (his Apollo export, loaded
+# 2026-11-16), never older contacts he may have kept back on purpose. Set it to the day of a new load. "" is everyone.
+loaded_since = "2026-11-16"
 
 [run]
 call_timeout_s = 300

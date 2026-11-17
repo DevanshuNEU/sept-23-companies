@@ -22,7 +22,8 @@ from tests.test_mcp_reads import merge, no_go
 
 FIXTURE_MAIL = Path(__file__).parent / "fixtures" / "plan"  # its me.md is the evidence the brief reads
 NOW = "2026-11-17T10:00:00Z"  # 05:00 in New York: the job's night
-CFG = load_drafter_config()
+SHIPPED = load_drafter_config()
+CFG = replace(SHIPPED, loaded_since=None)  # the seeded people are created on 2026-11-01
 SIG = "Devanshu Chicholikar\nhttps://www.devanshuchicholikar.com"  # the fallback signature: tests never read his
 # Distinct first emails, so colleagues never read as copies and no sentence repeats across many emails.
 BODIES = (
@@ -145,7 +146,7 @@ class OrderInCompanyTest(unittest.TestCase):
         people = [_p(1, "Software Engineer"), _p(2, "Technical Recruiter"), _p(3, "Account Executive"),
                   _p(4, "Founding Engineer"), _p(5, "CTO")]
         self.assertEqual(self.titles(people, "under_50"), [
-            "CTO", "Founding Engineer", "Technical Recruiter", "Software Engineer", "Account Executive"])
+            "CTO", "Founding Engineer", "Technical Recruiter", "Software Engineer"])  # #300: no Account Executive
 
     def test_50_to_200_manager_and_recruiter_first(self):
         people = [_p(1, "Software Engineer"), _p(2, "CEO"), _p(3, "Recruiter"), _p(4, "Engineering Manager")]
@@ -156,12 +157,12 @@ class OrderInCompanyTest(unittest.TestCase):
         people = [_p(1, "Software Engineer"), _p(2, "Engineering Manager")]
         self.assertEqual(self.titles(people, "unknown"), ["Engineering Manager", "Software Engineer"])
 
-    def test_over_200_recruiter_first_and_executives_go_last_never_dropped(self):
+    def test_over_200_recruiter_first_and_executives_and_rejected_titles_are_skipped(self):
+        """#300: a title pick_people would never pick is skipped, not drafted last."""
         people = [_p(1, "CTO"), _p(2, "Software Engineer"), _p(3, "VP of Engineering"), _p(4, "Engineering Manager"),
                   _p(5, "University Recruiter"), _p(6, "Sales Engineer")]
-        self.assertEqual(self.titles(people, "over_200"), [
-            "University Recruiter", "Engineering Manager", "Software Engineer", "CTO", "VP of Engineering",
-            "Sales Engineer"])
+        self.assertEqual(self.titles(people, "over_200"),
+                         ["University Recruiter", "Engineering Manager", "Software Engineer"])
 
     def test_turns_go_round_so_five_are_not_five_recruiters(self):
         people = [_p(i, "Recruiter") for i in range(1, 4)] + [_p(10, "Engineering Manager"), _p(11, "Engineer")]
@@ -171,9 +172,11 @@ class OrderInCompanyTest(unittest.TestCase):
         people = [_p(1, "Recruiter"), _p(2, "University Recruiter")]
         self.assertEqual([p.person_id for p in order_in_company(people, "over_200")], [2, 1])
 
-    def test_every_person_is_kept_even_with_no_title(self):
-        people = [_p(1, ""), _p(2, "Office Manager"), _p(3, "Intern")]
-        self.assertEqual(sorted(p.person_id for p in order_in_company(people, "under_50")), [1, 2, 3])
+    def test_titles_pick_people_rejects_are_skipped(self):
+        """#300: about 165 loaded people were program, project or product managers, HR or customer success."""
+        people = [_p(1, ""), _p(2, "Office Manager"), _p(3, "Intern"), _p(4, "Senior Technical Program Manager"),
+                  _p(5, "HR Business Partner (Tech)"), _p(6, "Software Engineer")]
+        self.assertEqual([p.person_id for p in order_in_company(people, "under_50")], [6])
 
 
 class QueueTest(unittest.TestCase):
@@ -200,6 +203,20 @@ class QueueTest(unittest.TestCase):
 class PoolTest(DrafterCase):
     def picked(self) -> set[int]:
         return {p.person_id for p in self.pool().people}
+
+    def test_only_people_loaded_on_or_after_loaded_since_are_picked(self):
+        """#300: the pool is the loaded list, never older contacts such as a warm interview lead."""
+        old = self.person("Olga Older")
+        new = self.person("Nina Newer")
+        self.db.execute("UPDATE person SET created_at = '2026-11-16T15:00:00Z' WHERE person_id = ?", (new,))
+        conn = open_guarded({}, path=self.path)
+        try:
+            self.assertEqual({p.person_id for p in read_pool(conn, loaded_since="2026-11-16").people}, {new})
+            self.assertEqual({p.person_id for p in read_pool(conn).people}, {old, new})
+        finally:
+            conn.close()
+        got = self.run_it(FakeModel(), cfg=replace(CFG, loaded_since="2026-11-16"), dry_run=True)
+        self.assertEqual(got.eligible, 1)
 
     def test_people_with_an_address_and_no_first_email_are_picked(self):
         plain = self.person("Pat Plain")
@@ -595,15 +612,16 @@ class OffAndDryRunTest(DrafterCase):
 
 class ConfigAndCliTest(DrafterCase):
     def test_the_shipped_config(self):
-        self.assertIs(CFG.enabled, True)
-        self.assertEqual((CFG.model, CFG.max_per_run, CFG.outbox_target, CFG.per_company),
-                         ("claude-opus-5-5", 30, 60, 2))
+        self.assertIs(SHIPPED.enabled, True)
+        self.assertEqual((SHIPPED.model, SHIPPED.max_per_run, SHIPPED.outbox_target, SHIPPED.per_company,
+                          SHIPPED.loaded_since), ("claude-opus-5-5", 30, 60, 2, "2026-11-16"))
 
     def test_a_bad_config_value_fails_at_load(self):
         from outreach.first_drafter.config import CONFIG_PATH
         text = CONFIG_PATH.read_text(encoding="utf-8")
         folder = Path(self.path).parent
         for old, new in (("per_company = 2", "per_company = 0"), ("outbox_target = 60", "outbox_target = -1"),
+                         ('loaded_since = "2026-11-16"', 'loaded_since = "last week"'),
                          ("enabled = true", 'enabled = "yes"')):
             bad = folder / "bad.toml"
             bad.write_text(text.replace(old, new), encoding="utf-8")
@@ -629,13 +647,16 @@ class ConfigAndCliTest(DrafterCase):
         self.assertIn("live checkout", str(caught.exception))
 
     def test_a_dry_run_from_the_cli_prints_who_and_one_summary_line(self):
-        self.person("Pat Lee")
+        pat = self.person("Pat Lee")
+        older = self.person("Olga Older")  # created before the shipped loaded_since: never listed
+        self.db.execute("UPDATE person SET created_at = '2026-11-16T15:00:00Z' WHERE person_id = ?", (pat,))
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"OUTREACH_DB": self.path}):
             code = cli.main(["run", "--dry-run"], stdout=out, runner=FakeModel(), now=NOW)
         self.assertEqual(code, 0)
         lines = out.getvalue().splitlines()
         self.assertIn("Pat Lee", lines[0])
+        self.assertNotIn("Olga Older", out.getvalue())
         self.assertIn("first drafter: dry_run", lines[-1])
 
     def test_off_prints_the_off_line_and_exits_0(self):

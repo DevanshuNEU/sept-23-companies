@@ -60,23 +60,24 @@ class SpreadGapTest(unittest.TestCase):
         self.assertEqual(human.expected_gap_minutes(10, 15, CFG), CFG.spread_gap_minutes[0])
         self.assertEqual(human.expected_gap_minutes(420, 0, CFG), CFG.spread_gap_minutes[1])
 
-    def test_a_late_start_sends_fewer_not_faster(self):
-        # 30 minutes left and 14 sends left would be 2 minute gaps; the full day's pace (a 420 minute window over a
-        # limit of 15, plus one: 26.25) times the slack is the floor before the factor.
-        self.assertEqual(CFG.spread_floor_slack, 0.75)
-        floor = 0.75 * 420 / 16
-        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), CFG, day_minutes=420, limit=15), floor)
-        self.assertEqual(human.expected_gap_minutes(30, 14, CFG, day_minutes=420, limit=15), floor)
-        whole = dataclasses.replace(CFG, spread_floor_slack=0.9999)
-        self.assertAlmostEqual(human.spread_gap(30, 14, MiddleRng(), whole, day_minutes=420, limit=15), 26.25, places=2)
-        # Early in the day the minutes left over the sends left is the larger, and it still rules.
+    def test_a_late_start_fits_the_rest_of_the_day(self):
+        # #9 dynamic pacing (2026-11-17, his call): the day's quota goes out, so a late start packs the sends left into
+        # the minutes left. 30 minutes left and 14 to go is 2 minute gaps (the shipped slack, 0.01, is no real floor).
+        self.assertEqual(CFG.spread_floor_slack, 0.01)
+        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), CFG, day_minutes=420, limit=15), 2.0)
+        self.assertEqual(human.expected_gap_minutes(30, 14, CFG, day_minutes=420, limit=15), 2.0)
+        # The floor still works when a config asks for one (the 2026-11-13 rule was 0.75).
+        old = dataclasses.replace(CFG, spread_floor_slack=0.75)
+        self.assertEqual(human.spread_gap(30, 14, MiddleRng(), old, day_minutes=420, limit=15), 0.75 * 420 / 16)
+        # Early in the day the minutes left over the sends left rules.
         self.assertEqual(human.spread_gap(300, 9, MiddleRng(), CFG, day_minutes=420, limit=15), 30.0)
         self.assertEqual(human.expected_gap_minutes(300, 9, CFG, day_minutes=420, limit=15), 30.0)
-        # The factor and the clip still apply on top of the floor.
+        # The factor (0.4 to 1.6) and the clip (never under 2 minutes) still apply.
         rng = random.Random(3)
         no_breaks = dataclasses.replace(CFG, break_chance=0.0)
-        gaps = [human.spread_gap(30, 14, rng, no_breaks, day_minutes=420, limit=15) for _ in range(2000)]
-        self.assertTrue(all(floor * 0.6 - 1e-9 <= g <= floor * 1.4 + 1e-9 for g in gaps))
+        gaps = [human.spread_gap(120, 14, rng, no_breaks, day_minutes=420, limit=15) for _ in range(2000)]
+        self.assertTrue(all(2 - 1e-9 <= g <= 8 * 1.6 + 1e-9 for g in gaps))
+        self.assertGreater(max(gaps) - min(gaps), 8)  # dynamic, not one fixed spacing
 
     def test_the_mean_draw_is_the_expected_gap(self):
         rng = random.Random(5)

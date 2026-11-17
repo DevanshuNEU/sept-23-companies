@@ -7,6 +7,8 @@ and when a send in doubt counts as sent, missing or neither.
 """
 import re
 import shutil
+
+from outreach.sending.applescript import parse_records
 import subprocess
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -768,6 +770,27 @@ class ScriptTest(Base):
             done = subprocess.run(["osacompile", "-o", "/dev/null", "-"], input=script, capture_output=True,
                                   text=True, encoding="utf-8", timeout=60, check=False)
             self.assertEqual(done.returncode, 0, f"{script.split('on run')[-1][:80]!r}: {done.stderr}")
+
+    def test_esc_leaves_no_raw_line_break_before_a_combining_mark(self):
+        # 2026-11-17: a LinkedIn newsletter in his Exchange Inbox had a line feed followed by U+034F (combining
+        # grapheme joiner). AppleScript treats the pair as one character, so the text item delimiter swap never
+        # matched it, a raw line feed reached the output, the record split in two and every read of the account
+        # failed for 7 hours (partial=222). This runs only the esc handler (Mail.app is not asked anything).
+        if shutil.which("osascript") is None:
+            self.skipTest("osascript is macOS only")
+        handlers = mailapp.COMMON_HANDLERS.split("on isoOf(")[0].replace("on requireMail()", "on unusedRequireMail()")
+        script = handlers + (
+            '\non run argv\n'
+            '\tset s to "a" & (character id 10) & (character id 847) & "b" & (character id 13) & (character id 847)'
+            ' & "c" & tab & "d\\\\e" & (character id 10) & "f"\n'
+            '\treturn my esc(s)\nend run\n')
+        done = subprocess.run(["osascript", "-"], input=script, capture_output=True, text=True, encoding="utf-8",
+                              timeout=60, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = done.stdout.rstrip("\n")
+        self.assertNotIn("\n", out)
+        self.assertNotIn("\r", out)
+        self.assertEqual(parse_records(out), [["a\n\u034fb\n\u034fc\td\\e\nf"]])
 
     def test_every_loop_walks_a_list_already_read(self):
         # On the real Mail.app, `repeat with h in (messages of mb whose ...)` re-runs the whose filter for every

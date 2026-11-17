@@ -116,8 +116,36 @@ on esc(v)
 	set t to my swapText(t, (character id 13) & (character id 10), "\\n")
 	set t to my swapText(t, character id 13, "\\n")
 	set t to my swapText(t, character id 10, "\\n")
+	if t is "" then return t
+	set ids to id of t
+	if class of ids is integer then set ids to {ids}
+	if ids contains 10 or ids contains 13 or ids contains 9 then return my escById(v as text)
 	return t
 end esc
+
+-- AppleScript joins a line feed or return with a following combining mark (U+034F in a LinkedIn newsletter) into
+-- one character, so the swaps above miss it. Rare, so only then: escape code point by code point.
+on escById(t)
+	set ids to id of t
+	if class of ids is integer then set ids to {ids}
+	set out to {}
+	repeat with i in ids
+		set n to contents of i
+		if n is 92 then
+			set end of out to 92
+			set end of out to 92
+		else if n is 9 then
+			set end of out to 92
+			set end of out to 116
+		else if n is 10 or n is 13 then
+			set end of out to 92
+			set end of out to 110
+		else
+			set end of out to n
+		end if
+	end repeat
+	return string id out
+end escById
 
 on isoOf(d)
 	if d is missing value then return ""

@@ -30,6 +30,12 @@ The list reads the decision's columns:
   or his own Done mark (`outreach.pipeline.reached`); the not contacted filter hides every company that has one.
 - Windows: a dated row is in the 7, 30, 60 or 90 day window when its list time is at or after 00:00 New York that
   many days before today.
+- H-1B chip (#309): `has` keeps the companies whose name the H-1B list holds with approvals (any trend), `none` the
+  rest, `any` all. It reads the row tag's own lookup (`outreach.h1b.lookup.tag_for`, as an SQL function), so a chip and
+  a tag never disagree. With no list built `has` and `none` are a ValueError, never an empty page.
+- One per company (#309): each company is shown once per tab, by its newest posting under every other filter, and the
+  row says how many more it has there (`more_roles`). The counts and the total count companies. `company_id` lists one
+  company's postings (the survivor of any merge), the rows behind a "N more roles".
 - Order: list time newest first, then the smaller company (known small sizes by size, then unknown, then guessed big,
   then known big by size), then posting id; the Date unknown group last, newest first sighting first, then the same.
   `after` is a keyset cursor of `(group, time, size_rank, posting_id)`, the group `dated` or `unknown` (the time is
@@ -40,6 +46,7 @@ Reads only; the clock comes in as `now`.
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import re
 import sqlite3
@@ -48,6 +55,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from outreach.h1b import lookup as h1b_lookup
 from outreach.pipeline import reached
 from outreach.pipeline.config import StaffingConfig, load_pipeline_config
 from outreach.plan.outbound import load_outbound
@@ -67,6 +75,7 @@ BIG_BY_POSTINGS = 50  # a company of unknown size is big above this many open po
 ENTERPRISE_ATS = ("workday", "oracle_orc")  # an active board on one of these makes a company of unknown size big
 _VIEWS = ("your_level", "higher", "other")  # a row's group is its index (`grp`)
 _SIZES = ("any", "small", "big", "unknown")
+_H1B = ("any", "has", "none")
 _TZ = "America/New_York"
 _NY = ZoneInfo(_TZ)
 # Size ranks: a small company by its size, then unknown, then guessed big, then known big by its size.
@@ -106,6 +115,9 @@ class JobFilters:
     q: str = ""
     window_hours: int = 0  # one of WINDOW_HOURS, with window_days 0; 0: the day window decides
     levels: frozenset[str] = frozenset()  # keys of LEVELS; empty: any level
+    h1b: Literal["any", "has", "none"] = "any"  # the H-1B chips (#309)
+    one_per_company: bool = False  # each company once per tab, by its newest posting (#309)
+    company_id: int | None = None  # one company's postings only (its survivor after a merge): a row's "more roles"
 
 
 @dataclass(frozen=True)
@@ -131,6 +143,7 @@ class JobRow:
     contacted_on: str | None  # the newest day he reached it: a person contacted there, or his own Done mark
     maybe_staffing: bool = False  # work tier 3 (staffing-flagged by the LCA rules), not promoted (#257)
     for_client: bool = False  # the posting opens with client wording, a recruiter's (#257)
+    more_roles: int = 0  # One per company: the company's other postings in this tab under the same filters (#309)
 
 
 @dataclass(frozen=True)
@@ -241,20 +254,37 @@ rows AS (
     AND CASE :size WHEN 'small' THEN co.size <= :big WHEN 'big' THEN co.big
                    WHEN 'unknown' THEN (co.size IS NULL AND co.big_guess = 0) ELSE 1 END
     AND (:not_contacted = 0 OR c.cid NOT IN (SELECT value FROM json_each(:contacted)))
-)
-""".replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL).replace("{level_key}", LEVEL_KEY_SQL).replace(
-    "{software}", SOFTWARE_SQL)
-_COUNT = (_SQL + "SELECT COALESCE(SUM(grp = 0), 0) AS g0, COALESCE(SUM(grp = 1), 0) AS g1, "
-          "COALESCE(SUM(grp = 2), 0) AS g2 FROM rows")
-# The page and both counts in one pass: the window functions run over every row of the filters, before the view
-# and the cursor narrow it to the page.
-_PAGE = _SQL + """
-SELECT * FROM (SELECT rows.*, SUM(grp = 0) OVER () AS g0, SUM(grp = 1) OVER () AS g1, SUM(grp = 2) OVER () AS g2
-               FROM rows)
+    AND CASE :h1b WHEN 'has' THEN h1b_has(co.name) WHEN 'none' THEN NOT h1b_has(co.name) ELSE 1 END
+    AND (:company = 0 OR c.cid = :company)
+){shown}
+"""
+# One per company (#309): the posting that leads each company in a tab (the order the page uses), and how many more it
+# has there. Off, the extra CTE is a pass-through and the plan is the one the list always had.
+_SHOWN_ALL = ",\nshown AS (SELECT rows.*, 0 AS n_roles FROM rows)"
+_SHOWN_ONE = (",\nshown AS (SELECT * FROM (SELECT rows.*, "
+              "ROW_NUMBER() OVER (PARTITION BY cid, grp ORDER BY unk, at DESC, rank, posting_id) AS rn, "
+              "COUNT(*) OVER (PARTITION BY cid, grp) - 1 AS n_roles FROM rows) WHERE rn = 1)")
+
+
+@functools.cache
+def _sql(one: bool) -> tuple[str, str]:
+    """The count query and the page query, for One per company on or off."""
+    base = (_SQL.replace("{state}", STATE_SQL).replace("{listed}", LISTED_SQL).replace("{level_key}", LEVEL_KEY_SQL)
+            .replace("{software}", SOFTWARE_SQL).replace("{shown}", _SHOWN_ONE if one else _SHOWN_ALL))
+    count = (base + "SELECT COALESCE(SUM(grp = 0), 0) AS g0, COALESCE(SUM(grp = 1), 0) AS g1, "
+             "COALESCE(SUM(grp = 2), 0) AS g2 FROM shown")
+    # The page and both counts in one pass: the window functions run over every row of the filters, before the view
+    # and the cursor narrow it to the page.
+    page = base + """
+SELECT * FROM (SELECT shown.*, SUM(grp = 0) OVER () AS g0, SUM(grp = 1) OVER () AS g1, SUM(grp = 2) OVER () AS g2
+               FROM shown)
 WHERE grp = :grp AND (:has_after = 0 OR unk > :a_unk OR (unk = :a_unk AND (at < :a_at OR (at = :a_at
       AND (rank > :a_rank OR (rank = :a_rank AND posting_id > :a_id))))))
 ORDER BY unk, at DESC, rank, posting_id LIMIT :limit
 """
+    return count, page
+
+
 _GROUPS = ("dated", "unknown")  # the cursor's group segment, by `unk`
 
 
@@ -302,6 +332,10 @@ def _check(f: JobFilters, limit: int) -> None:
         raise ValueError(f"levels must be among {LEVELS}, got {unknown}")
     if f.size not in _SIZES:
         raise ValueError(f"size must be one of {_SIZES}, got {f.size!r}")
+    if f.h1b not in _H1B:
+        raise ValueError(f"h1b must be one of {_H1B}, got {f.h1b!r}")
+    if f.h1b != "any" and not h1b_lookup.has_list():
+        raise ValueError("The H-1B list is not built, so the H-1B chips cannot filter. Run the H-1B build first.")
     if limit < 1:
         raise ValueError("limit must be at least 1")
 
@@ -363,6 +397,7 @@ def _params(conn: sqlite3.Connection, now: str, today: date, f: JobFilters, cano
         "contacted": json.dumps(sorted(contacted)),
         "hour_window": int(bool(f.window_hours)), "any_level": int(not f.levels),
         "levels": json.dumps(sorted(f.levels)),
+        "h1b": f.h1b, "company": f.company_id or 0,
     }
 
 
@@ -381,8 +416,15 @@ def _contacted(conn: sqlite3.Connection, canon: dict[int, int]) -> dict[int, dat
     return out
 
 
+def _h1b_has(name: str | None) -> int:
+    """1 when the H-1B list holds approvals for this company name: the test the row's tag makes (#309)."""
+    tag = h1b_lookup.tag_for(name)
+    return int(tag is not None and tag.total > 0)
+
+
 def _prepare(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int):
     _check(f, limit)
+    conn.create_function("h1b_has", 1, _h1b_has, deterministic=True)
     cursor = _decode(after) if after is not None else None
     today = _today(now)
     canon = canonical_ids(conn)
@@ -400,8 +442,9 @@ def query(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, 
     contacted, params, page = _prepare(conn, now, f, after, limit)
     cur = conn.cursor()
     cur.row_factory = sqlite3.Row
-    found = cur.execute(_PAGE, page).fetchall()
-    counted = found[0] if found else cur.execute(_COUNT, params).fetchone()  # an empty page carries no count
+    count_sql, page_sql = _sql(f.one_per_company)
+    found = cur.execute(page_sql, page).fetchall()
+    counted = found[0] if found else cur.execute(count_sql, params).fetchone()  # an empty page carries no count
     counts = {view: counted[f"g{i}"] for i, view in enumerate(_VIEWS)}
     more = len(found) > limit
     rows = [_row(r, contacted) for r in found[:limit]]
@@ -428,11 +471,12 @@ def _row(r: sqlite3.Row, contacted: dict[int, date]) -> JobRow:
         reposted_from=r["reposted_from"], company_id=r["cid"], company_name=r["name"],
         size=size, big=bool(r["big"]), says_no_sponsorship=r["sponsorship"] == "no",
         everify=bool(r["everify"]), yc=bool(r["yc"]), contacted_on=when.isoformat() if when else None,
-        maybe_staffing=bool(r["maybe_staffing"]), for_client=bool(r["for_client"]))
+        maybe_staffing=bool(r["maybe_staffing"]), for_client=bool(r["for_client"]), more_roles=r["n_roles"])
 
 
 def explain(conn: sqlite3.Connection, now: str, f: JobFilters, after: str | None, limit: int = 50) -> list[str]:
     """SQLite's query plan lines for the page query and the count query (for the plan test and for timing work)."""
     _, params, page = _prepare(conn, now, f, after, limit)
-    return ([r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _PAGE, page)]
-            + [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + _COUNT, params)])
+    count_sql, page_sql = _sql(f.one_per_company)
+    return ([r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + page_sql, page)]
+            + [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + count_sql, params)])

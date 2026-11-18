@@ -18,7 +18,7 @@ from outreach.api.clock import get_clock
 from outreach.api.db import read_conn
 from outreach.api.errors import ApiProblem
 from outreach.api.idempotency import run_write
-from outreach.api.models.jobs import (AppliedResult, CheckNowResult, CheckStatus, DoneResult, JobSize, JobsView,
+from outreach.api.models.jobs import (AppliedResult, CheckNowResult, CheckStatus, DoneResult, JobH1b, JobSize, JobsView,
                                       JobView, JobWindow, JobWriteBody, PassJobResult)
 from outreach.api.queries import jobs_list as queries
 from outreach.api.routers import row_id
@@ -39,14 +39,23 @@ LEVELS_PATTERN = "^(" + "|".join(LEVELS) + ")(,(" + "|".join(LEVELS) + "))*$"
 async def jobs(request: Request, view: JobView = "your_level", window: JobWindow = "30", size: JobSize = "any",
                not_contacted: bool = Query(False, alias="notContacted"), q: str = Query("", max_length=100),
                after: str | None = Query(None, max_length=CURSOR_MAX), limit: int = Query(50, ge=1, le=50),
-               levels: str | None = Query(None, max_length=100, pattern=LEVELS_PATTERN)) -> Response:
+               levels: str | None = Query(None, max_length=100, pattern=LEVELS_PATTERN), h1b: JobH1b = "any",
+               one_row_per_company: bool = Query(False, alias="oneRowPerCompany"),
+               company_id: int | None = Query(None, alias="companyId", ge=1)) -> Response:
     """The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a
     page. `window`
-    is days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips."""
+    is days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.
+    `h1b` is the H-1B chips (#309): `has` keeps companies the H-1B list holds, `none` the rest. `oneRowPerCompany` shows
+    each company once, by its newest posting, with `moreRoles`; `companyId` lists one company's postings (the rows
+    behind a "more roles")."""
+    if h1b != "any" and not h1b_lookup.has_list():
+        raise ApiProblem("conflict", "The H-1B list is not built yet, so the H-1B chips cannot filter. "
+                                     "Set the chip to Any, or run the H-1B build.")
     hours = int(window[:-1]) if window.endswith("h") else 0
     days = 0 if hours or window == "any" else int(window)
     f = JobFilters(view=view, window_days=days, window_hours=hours, size=size, not_contacted=not_contacted, q=q,
-                   levels=frozenset(levels.split(",")) if levels else frozenset())
+                   levels=frozenset(levels.split(",")) if levels else frozenset(), h1b=h1b,
+                   one_per_company=one_row_per_company, company_id=company_id)
 
     def compute(now: str, _) -> JobsView:
         with read_conn(request) as conn:

@@ -57,7 +57,7 @@ class ListTest(JobsCase):
         self.assertEqual(
             sorted(row), sorted(["postingId", "title", "url", "location", "levelTag", "listAt", "postedAt", "firstSeenAt", "seenGapS", "firstRead", "repostedFrom",
                                  "companyId", "companyName", "size", "big", "saysNoSponsorship", "everify", "yc",
-                                 "contactedOn", "maybeStaffing", "forClient", "h1b"]))
+                                 "contactedOn", "maybeStaffing", "forClient", "moreRoles", "h1b"]))
         self.assertEqual((row["companyName"], row["size"], row["big"], row["levelTag"], row["firstSeenAt"]),
                          ("Acme", 40, False, "new grad", "2026-11-09T12:00:00Z"))
 
@@ -263,3 +263,54 @@ class H1bTagTest(JobsCase):
         (Path(os.environ["OUTREACH_H1B_DIR"]) / "companies.md").write_text(
             H1B_FILE.replace("| 0 | 1 | 2 | 4 | 7 |", "| 0 | 1 | 2 | 4 | 17 |"), encoding="utf-8")
         self.assertEqual(self.jobs()["rows"][0]["h1b"]["label"], "H-1B 24, rising")
+
+
+class H1bChipAndOnePerCompanyTest(H1bTagTest):
+    """The H-1B chips and One per company (#309): the query's filters on the wire."""
+
+    def test_has_and_none_split_the_list(self):
+        self.folder()
+        acme = self.job(self.company("Acme", size=40))
+        nobody = self.job(self.company("Nobody", size=40))
+        self.assertEqual(self.ids(h1b="has"), [acme])
+        self.assertEqual(self.ids(h1b="none"), [nobody])
+        self.assertEqual(sorted(self.ids(h1b="any")), sorted([acme, nobody]))
+        self.assertEqual(self.jobs(h1b="has")["counts"]["yourLevel"], 1)
+
+    def test_with_no_list_built_has_is_a_409_in_plain_words_never_an_empty_list(self):
+        self.folder(None)
+        self.job(self.company("Acme", size=40))
+        res = self.get("/api/jobs", params={"h1b": "has"})
+        self.assertEqual(res.status_code, 409, res.text)
+        self.assertIn("H-1B list", res.json()["message"])
+        self.assertEqual(len(self.ids()), 1)
+
+    def test_a_bad_h1b_choice_is_a_400(self):
+        self.folder()
+        self.assertEqual(self.get("/api/jobs", params={"h1b": "maybe"}).status_code, 400)
+
+    def test_one_row_per_company_with_the_count_of_the_rest(self):
+        co = self.company("Acme", size=40)
+        new = self.job(co, "New", posted="2026-11-09")
+        self.job(co, "Old", posted="2026-11-01")
+        self.job(self.company(size=40), "Other", posted="2026-11-05")
+        rows = self.jobs(oneRowPerCompany="true")["rows"]
+        self.assertEqual([(r["postingId"], r["moreRoles"]) for r in rows][0], (new, 1))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([r["moreRoles"] for r in self.jobs()["rows"]], [0, 0, 0])
+
+    def test_company_id_lists_that_companys_postings(self):
+        co = self.company("Acme", size=40)
+        a, b = self.job(co, "A", posted="2026-11-09"), self.job(co, "B", posted="2026-11-01")
+        self.job(self.company(size=40), "Other")
+        self.assertEqual(self.ids(companyId=co), [a, b])
+
+    def test_the_view_cache_keeps_the_filters_apart(self):
+        self.folder()
+        co = self.company("Acme", size=40)
+        self.job(co, "New", posted="2026-11-09")
+        self.job(co, "Old", posted="2026-11-01")
+        self.assertEqual(len(self.ids()), 2)
+        self.assertEqual(len(self.ids(oneRowPerCompany="true")), 1)
+        self.assertEqual(len(self.ids(h1b="has")), 2)
+        self.assertEqual(len(self.ids(h1b="none")), 0)

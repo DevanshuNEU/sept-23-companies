@@ -122,4 +122,6 @@ sends = true
 ramp_start = 15
 ramp_step = 3
 ramp_floor = 15
-ramp_ceiling = 60
+# Up to 150 a day (#9 Northeastern ceiling ruling, 2026-11-18), still 3 more a day and only after a clean day, so it
+# takes about 43 clean sending days from 21. Still the sponsor lane only.
+ramp_ceiling = 150

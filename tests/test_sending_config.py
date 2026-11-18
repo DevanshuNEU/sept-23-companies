@@ -222,7 +222,8 @@ class SendConfigTest(unittest.TestCase):
         self.assertEqual((two.ramp_start, two.ramp_step, two.ramp_floor, two.ramp_ceiling), (15, 3, 15, 40))
         self.assertEqual((three.kind, three.lane, three.sends, three.mailapp_account),
                          ("mailapp", "sponsor", True, "Exchange"))  # the #9 placement test passed (2026-11-15)
-        self.assertEqual((three.ramp_start, three.ramp_step, three.ramp_floor, three.ramp_ceiling), (15, 3, 15, 60))
+        # #9 Northeastern ceiling ruling (2026-11-18): up to 150 a day, still 3 more a day, only after a clean day.
+        self.assertEqual((three.ramp_start, three.ramp_step, three.ramp_floor, three.ramp_ceiling), (15, 3, 15, 150))
         self.assertIsNone(one.mailapp_account)
         self.assertEqual(cfg.from_name, "Devanshu Chicholikar")
         self.assertEqual((cfg.spread_jitter, cfg.spread_gap_minutes), ((0.4, 1.6), (2, 45)))

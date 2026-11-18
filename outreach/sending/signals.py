@@ -12,7 +12,7 @@ from outreach.sending.config import SendConfig
 from outreach.store.timefmt import ISO_FMT
 from outreach.store.writes import append_event
 
-__all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_on", "counted_sends_on", "bounce_rate_3d",
+__all__ = ["WARNING_KINDS", "HARD_KINDS", "record_signal", "signal_day", "sends_on", "counted_sends_on", "bounce_rate_3d", "bounces_3d",
            "bounce_rate_last_100", "bounce_rate_hard", "bounce_rate_warns", "stop_tags_in", "as_datetime"]
 
 # A warning: the day is not clean, today's limit drops one level at once, the next day starts from there.
@@ -79,15 +79,21 @@ def counted_sends_on(conn: sqlite3.Connection, account_id: int, d: date, cfg: Se
 
 
 def bounce_rate_3d(conn: sqlite3.Connection, account_id: int, d: date, cfg: SendConfig) -> float:
-    """Bounces over sends across the last `cfg.bounce_days` New York dates that had at least one send, up to and
+    """`bounces_3d` as a rate: 0.0 when nothing was sent."""
+    bounced, sent = bounces_3d(conn, account_id, d, cfg)
+    return bounced / sent if sent else 0.0
+
+
+def bounces_3d(conn: sqlite3.Connection, account_id: int, d: date, cfg: SendConfig) -> tuple[int, int]:
+    """(bounces, sends) across the last `cfg.bounce_days` New York dates that had at least one send, up to and
     including `d` (weekend dates count when something was sent). Sends are every message sent on those dates.
     Bounces are touches with `bounced_at` anywhere from the start of the earliest of those dates to the end of
     `d`: a delayed notice that arrives on a date with no sends (Saturday, for a Friday send) still counts.
-    0.0 when nothing was sent."""
+    (0, 0) when nothing was sent."""
     first = conn.execute(f"SELECT MIN(m.sent_at) FROM message m JOIN touch t ON t.touch_id = m.touch_id "
                          f"WHERE m.sent_at IS NOT NULL AND {_ACCT} = ?", (account_id,)).fetchone()[0]
     if first is None:
-        return 0.0
+        return 0, 0
     earliest = cal.ny_date(as_datetime(first), cfg)
     sent = found = 0
     day, window_start = d, d
@@ -99,12 +105,12 @@ def bounce_rate_3d(conn: sqlite3.Connection, account_id: int, d: date, cfg: Send
             window_start = day
         day -= timedelta(days=1)
     if not sent:
-        return 0.0
+        return 0, 0
     start = cal.ny_day_bounds(window_start, cfg)[0]
     end = cal.ny_day_bounds(d, cfg)[1]
     bounced = conn.execute(f"SELECT COUNT(*) FROM touch t WHERE {_ACCT} = ? AND t.bounced_at >= ? "
                            "AND t.bounced_at < ?", (account_id, start, end)).fetchone()[0]
-    return bounced / sent
+    return bounced, sent
 
 
 def bounce_rate_last_100(conn: sqlite3.Connection, account_id: int) -> tuple[int, int]:
@@ -127,9 +133,10 @@ def bounce_rate_hard(bounced: int, sent: int) -> bool:
     return sent >= HARD_BOUNCE_MIN_SENT and bounced / sent >= HARD_BOUNCE_RATE - 1e-12
 
 
-def bounce_rate_warns(rate: float, cfg: SendConfig) -> bool:
-    """A day is clean only when bounces are under `clean_bounce_rate`: exactly 2% is a warning."""
-    return rate >= cfg.clean_bounce_rate - 1e-12
+def bounce_rate_warns(bounced: int, sent: int, cfg: SendConfig) -> bool:
+    """A day is clean only when bounces are under `clean_bounce_rate` (exactly 2% is a warning), or fewer than
+    `bounce_warn_min` bounced (#305: one bounce alone never warns)."""
+    return bool(sent) and bounced >= cfg.bounce_warn_min and bounced / sent >= cfg.clean_bounce_rate - 1e-12
 
 
 def stop_tags_in(conn: sqlite3.Connection, now: datetime | str, days: int, account_id: int | None = None) -> int:

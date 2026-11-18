@@ -802,8 +802,9 @@ class _Tick:
         start, end = cal.ny_day_bounds(self.today, cfg)
         if conn.execute("SELECT 1 FROM touch WHERE COALESCE(account_id, 1) = ? AND bounced_at >= ? "
                         "AND bounced_at < ? LIMIT 1", (account.account_id, start, end)).fetchone():
-            rate = signals.bounce_rate_3d(conn, account.account_id, self.today, cfg)
-            if signals.bounce_rate_warns(rate, cfg):
+            bounced3, sent3 = signals.bounces_3d(conn, account.account_id, self.today, cfg)
+            rate = bounced3 / sent3 if sent3 else 0.0
+            if signals.bounce_rate_warns(bounced3, sent3, cfg):
                 ramp.note_signal(conn, "bounce_warning", detail={"rate": rate, "source": "tick"},
                                  key=signals.day_key("bounce_warning", account.account_id, self.today), **signal)
             bounced, sent = signals.bounce_rate_last_100(conn, account.account_id)

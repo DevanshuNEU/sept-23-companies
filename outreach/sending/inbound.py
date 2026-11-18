@@ -475,8 +475,9 @@ def _apply_bounce(conn: sqlite3.Connection, touch_id: int, meta: MessageMeta, fo
         note_signal(conn, "policy_rejection", detail=detail, key=f"policy_rejection:{meta.gmail_message_id}",
                     **signal)
     day = cal.ny_date(signals.as_datetime(received), cfg)
-    rate = signals.bounce_rate_3d(conn, account.account_id, day, cfg)
-    if signals.bounce_rate_warns(rate, cfg):
+    bounced3, sent3 = signals.bounces_3d(conn, account.account_id, day, cfg)
+    rate = bounced3 / sent3 if sent3 else 0.0
+    if signals.bounce_rate_warns(bounced3, sent3, cfg):
         note_signal(conn, "bounce_warning", detail={**detail, "rate": rate},
                     key=signals.day_key("bounce_warning", account.account_id, day), **signal)
     bounced, sent = signals.bounce_rate_last_100(conn, account.account_id)

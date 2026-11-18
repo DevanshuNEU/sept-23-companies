@@ -10,6 +10,10 @@ day_tz = "America/New_York"
 # A day is clean when bounces are under 2% over the last 3 days (#9).
 clean_bounce_rate = 0.02
 bounce_days = 3
+# The rate warns only with at least this many bounces in that window (#305, 2026-11-18): at 15 a day one bounce is
+# 4 to 7%, and Apollo addresses bounce about 3% anyway (#9 bounce ruling), so one alone froze the ramp for 3 sending
+# days. The hard pause below and every Gmail and stop signal are unchanged.
+bounce_warn_min = 2
 
 # Hard block on the bounce rate (#9 multi-sender ruling, 2026-11-12): 2% of an account's last 100 first emails, once 30 are sent, pauses that account.
 

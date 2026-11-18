@@ -44,6 +44,7 @@ class SendConfig:
     spread_floor_slack: float
     clean_bounce_rate: float
     bounce_days: int
+    bounce_warn_min: int  # bounces in the window before the rate can warn (#305)
     stop_replies_hard: int
     stop_replies_days: int
     window_start: time
@@ -91,7 +92,7 @@ DERIVED_FIELDS = ("accounts",)
 
 
 # Whole numbers that count things, so zero or less makes no sense.
-COUNT_KEYS = ("bounce_days", "stop_replies_hard",
+COUNT_KEYS = ("bounce_days", "bounce_warn_min", "stop_replies_hard",
               "stop_replies_days", "per_company_daily", "followup_lapse_business_days", "close_after_business_days",
               "reconcile_after_minutes", "max_send_attempts", "rethread_days", "inbound_meta_cap",
               "prune_noop_after_days", "pick_pool")

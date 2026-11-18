@@ -140,17 +140,27 @@ class RampTest(Base):
 
     def test_a_day_is_not_clean_when_the_three_day_bounce_rate_warns(self):
         put_day(self.db, d(0), 50)
-        mon = self.sends(ny(0, 10), 20)
-        bounce(self.db, mon[0], ny(0, 15))  # 1 in 20: 5%
+        mon = self.sends(ny(0, 10), 40)
+        bounce(self.db, mon[0], ny(0, 15))
+        bounce(self.db, mon[1], ny(0, 15))  # 2 in 40: 5%
         self.assertEqual(ramp.limit_for(self.db, self.acct, d(1), CFG), 40)  # the open Monday is not clean
         self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 40)
         self.assertEqual(self.row(d(0))["outcome"], "warning")
         self.assertEqual(self.row(d(0))["outcome_note"], "bounce rate")
-        self.sends(ny(1, 10), 20)  # Tuesday has no bounce, but the 3-day rate is 1 in 40: 2.5%
+        self.sends(ny(1, 10), 40)  # Tuesday has no bounce, but the 3-day rate is 2 in 80: 2.5%
         self.assertEqual(ramp.limit_for(self.db, self.acct, d(2), CFG), 30)
         self.assertEqual(ramp.open_day(self.db, self.acct, ny(2), CFG).start_limit, 30)
         self.assertEqual(self.row(d(1))["outcome"], "warning")
         self.assertEqual(self.row(d(1))["outcome_note"], "bounce rate")
+
+    def test_one_bounce_alone_never_makes_a_day_not_clean(self):
+        """#305 (devanshuchi9, 2026-11-16): 1 bounce in 14 sends is 7%, and at 15 a day one Apollo bounce froze the
+        ramp for three sending days. A day needs at least `bounce_warn_min` bounces in the window to warn."""
+        put_day(self.db, d(0), 50)
+        mon = self.sends(ny(0, 10), 14)
+        bounce(self.db, mon[0], ny(0, 15))
+        self.assertEqual(ramp.open_day(self.db, self.acct, ny(1), CFG).start_limit, 60)  # one level up, as clean
+        self.assertEqual(self.row(d(0))["outcome"], "clean")
 
     def test_a_day_under_the_bounce_rate_still_closes_clean(self):
         put_day(self.db, d(0), 50)
@@ -391,18 +401,24 @@ class WeekendSendTest(Base):
 
 class BounceRateTest(Base):
     def test_bounce_rate_of_exactly_two_percent_is_a_warning(self):
-        touches = self.sends(ny(0, 10), 17) + self.sends(ny(1, 10), 17) + self.sends(ny(2, 10), 16)
+        touches = self.sends(ny(0, 10), 34) + self.sends(ny(1, 10), 33) + self.sends(ny(2, 10), 33)
         bounce(self.db, touches[-1], ny(2, 12))
-        rate = signals.bounce_rate_3d(self.db, 1, d(2), CFG)
-        self.assertEqual(rate, 0.02)
-        self.assertTrue(signals.bounce_rate_warns(rate, CFG))
+        bounce(self.db, touches[-2], ny(2, 12))
+        bounced, sent = signals.bounces_3d(self.db, 1, d(2), CFG)
+        self.assertEqual((bounced, sent, signals.bounce_rate_3d(self.db, 1, d(2), CFG)), (2, 100, 0.02))
+        self.assertTrue(signals.bounce_rate_warns(bounced, sent, CFG))
+
+    def test_one_bounce_never_warns_whatever_the_rate(self):
+        self.assertFalse(signals.bounce_rate_warns(1, 14, CFG))
+        self.assertTrue(signals.bounce_rate_warns(2, 14, CFG))
 
     def test_just_under_two_percent_is_clean(self):
-        touches = self.sends(ny(0, 10), 17) + self.sends(ny(1, 10), 17) + self.sends(ny(2, 10), 17)
+        touches = self.sends(ny(0, 10), 34) + self.sends(ny(1, 10), 34) + self.sends(ny(2, 10), 34)
         bounce(self.db, touches[-1], ny(2, 12))
-        rate = signals.bounce_rate_3d(self.db, 1, d(2), CFG)
-        self.assertAlmostEqual(rate, 1 / 51)
-        self.assertFalse(signals.bounce_rate_warns(rate, CFG))
+        bounce(self.db, touches[-2], ny(2, 12))
+        bounced, sent = signals.bounces_3d(self.db, 1, d(2), CFG)
+        self.assertAlmostEqual(signals.bounce_rate_3d(self.db, 1, d(2), CFG), 2 / 102)
+        self.assertFalse(signals.bounce_rate_warns(bounced, sent, CFG))
 
     def test_bounce_rate_3d_uses_sending_days_and_is_zero_without_sends(self):
         self.assertEqual(signals.bounce_rate_3d(self.db, 1, d(2), CFG), 0.0)

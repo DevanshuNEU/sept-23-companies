@@ -62,7 +62,7 @@ class SendConfigTest(unittest.TestCase):
 
     def test_defaults_are_the_nine_numbers(self):
         cfg = load_config(SHIPPED_SEND_CONFIG)
-        self.assertEqual((cfg.clean_bounce_rate, cfg.bounce_days), (0.02, 3))
+        self.assertEqual((cfg.clean_bounce_rate, cfg.bounce_days, cfg.bounce_warn_min), (0.02, 3, 2))
         self.assertEqual((cfg.window_start, cfg.window_end), (time(8, 0), time(15, 0)))
         self.assertEqual(cfg.weekdays, (0, 1, 2, 3, 4))
         self.assertEqual((cfg.per_company_daily, cfg.per_company_gap_minutes), (2, 60))
@@ -89,7 +89,7 @@ class SendConfigTest(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             cfg.from_name = "x"
         self.assertIsInstance(cfg, SendConfig)
-        self.assertEqual(len(dataclasses.fields(SendConfig)), 35)
+        self.assertEqual(len(dataclasses.fields(SendConfig)), 36)
 
     def test_holidays_load_as_dates(self):
         cfg = load_config(config_with(holidays='["2026-11-26", "2026-12-25"]'))

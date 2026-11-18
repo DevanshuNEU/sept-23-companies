@@ -58,7 +58,7 @@ def _close_outcome(conn: sqlite3.Connection, account: AccountRow, day: date, cfg
     rate warns, `clean` when it had sends and does not, else no outcome and the note `no sends`."""
     if signals.sends_on(conn, account.account_id, day, cfg) == 0:
         return None, "no sends"
-    if signals.bounce_rate_warns(signals.bounce_rate_3d(conn, account.account_id, day, cfg), cfg):
+    if signals.bounce_rate_warns(*signals.bounces_3d(conn, account.account_id, day, cfg), cfg):
         return "warning", "bounce rate"
     return "clean", ""
 

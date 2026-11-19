@@ -26,6 +26,7 @@ Projects lead every email (Devanshu, 2026-11-09). The jobs below are at most one
   retrieval, devtools. [gh OpenCodeIntel/opencodeintel] [page] [resume]
   - Code-search platform for AI coding agents: a web app, a REST API and a 12-tool MCP server (stdio for local
     agents, streamable HTTP for hosted Claude connectors).
+  - The web app is React and TypeScript.
   - Vector search fused with BM25 keyword scoring and reranking, over tree-sitter function-level chunks.
   - 94% average Hit@1 on a 665-query research eval across 14 open-source codebases; a 98-run ablation isolated
     reranking at +8.4 points. Say "research eval": the repo notes most queries came from function names.
@@ -58,6 +59,7 @@ Projects lead every email (Devanshu, 2026-11-09). The jobs below are at most one
     entirely in the browser, no backend.
   - Chrome MV3: page script that reads the streaming responses, Shadow DOM overlay, service worker running a BPE
     tokenizer. 1,808 Vitest tests across 63 files, plus Playwright end-to-end tests.
+  - Built in React and TypeScript.
 - **saar CLI**: https://pypi.org/project/saar/. Fits: developer tooling, AI coding agents. [gh OpenCodeIntel/saar]
   [site] [PyPI]
   - Published on PyPI. Statically analyzes a codebase and writes agent context files (AGENTS.md, CLAUDE.md,

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { renderWithApp } from '@/test/render';
 import { AppShell } from '@/shell/app-shell';
 import BrowsePage from './index';
+import { FILTERS_KEY } from './filters-store';
 
 /*
  * The job list (#156, the /browse page), on the sample: 82 postings from 11 companies, newest first by when each was
@@ -58,6 +59,7 @@ const REACHED_TAG = /Reached [A-Z][a-z]{2} \d/;
 describe('the Jobs page', () => {
   // Toasts live in a global store: one test's toast must not be another's Undo.
   beforeEach(() => {
+    window.localStorage.removeItem(FILTERS_KEY);
     act(() => {
       toast.dismiss();
     });
@@ -752,5 +754,149 @@ describe('the Jobs page', () => {
       expect(pass).not.toHaveBeenCalled();
       expect(done).not.toHaveBeenCalled();
     });
+  });
+});
+
+/*
+ * The H-1B chips and One per company (#309). On the sample the H-1B list holds Retell AI, Baseten, Kestrel, Resend and
+ * Graphite; Pylon is on record with none; every other company has no tag (as with no list built).
+ */
+describe('the H-1B chips and One per company', () => {
+  const HAS = new Set(['Retell AI', 'Baseten', 'Kestrel', 'Resend', 'Graphite']);
+  const chips = () => screen.getByRole('group', { name: 'H-1B' });
+  const chip = (name: string) => within(chips()).getByRole('button', { name });
+  const one = () => screen.getByRole('button', { name: 'One per company' });
+
+  beforeEach(() => {
+    window.localStorage.removeItem(FILTERS_KEY);
+    act(() => {
+      toast.dismiss();
+    });
+  });
+
+  it('starts on Any H-1B with One per company off, so the list is the one he had', async () => {
+    await open();
+    expect(chip('Any H-1B')).toHaveAttribute('aria-pressed', 'true');
+    expect(chip('Has H-1B')).toHaveAttribute('aria-pressed', 'false');
+    expect(chip('No H-1B record')).toHaveAttribute('aria-pressed', 'false');
+    expect(one()).toHaveAttribute('aria-pressed', 'false');
+    expect(new Set(companies()).size).toBeGreaterThan(HAS.size);
+  });
+
+  it('Has H-1B keeps only the companies on the list, on every tab, and the tab counts follow', async () => {
+    const user = userEvent.setup();
+    await open();
+    const before = Number(within(screen.getByRole('tab', { name: /^Your level/ })).getByText(/\d/).textContent?.replace(',', ''));
+    await user.click(chip('Has H-1B'));
+    expect(chip('Has H-1B')).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(companies().every((c) => HAS.has(c as string))).toBe(true));
+    expect(companies().length).toBeGreaterThan(0);
+    const after = Number(within(screen.getByRole('tab', { name: /^Your level/ })).getByText(/\d/).textContent?.replace(',', ''));
+    expect(after).toBeLessThan(before);
+    await user.click(screen.getByRole('tab', { name: /^Higher levels/ }));
+    await waitFor(() => expect(companies().every((c) => HAS.has(c as string))).toBe(true));
+  });
+
+  it('No H-1B record keeps every other company', async () => {
+    const user = userEvent.setup();
+    await open();
+    await user.click(chip('No H-1B record'));
+    await waitFor(() => expect(companies().some((c) => c === 'Pylon')).toBe(true));
+    expect(companies().some((c) => HAS.has(c as string))).toBe(false);
+  });
+
+  it('One per company shows each company once, says how many more roles it has, and the headline counts companies', async () => {
+    const user = userEvent.setup();
+    await open();
+    expect(new Set(companies()).size).toBeLessThan(companies().length); // a company has several rows to begin with
+    await user.click(one());
+    expect(one()).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(new Set(companies()).size).toBe(companies().length));
+    expect(await screen.findByText(/companies at your level in the last 30 days/)).toBeInTheDocument();
+    expect(within(row(9000)).getByRole('button', { name: /more roles?$/ })).toBeInTheDocument(); // Retell AI has several
+  });
+
+  it('"N more roles" opens the company\'s other postings in place, each with Pass and Mark applied, and closes again', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    await user.click(one());
+    await waitFor(() => expect(new Set(companies()).size).toBe(companies().length));
+    const lead = row(9000);
+    const more = within(lead).getByRole('button', { name: /more roles?$/ });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    const ask = vi.spyOn(client, 'jobs');
+    await user.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    const extra = await within(lead).findAllByRole('listitem');
+    expect(extra.length).toBeGreaterThan(0);
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ companyId: 7001, oneRowPerCompany: false }));
+    expect(within(extra[0] as HTMLElement).getByRole('button', { name: /^Pass/ })).toBeInTheDocument();
+    expect(within(extra[0] as HTMLElement).getByRole('button', { name: /^Mark applied/ })).toBeInTheDocument();
+    expect(within(lead).queryAllByRole('listitem').every((li) => li.getAttribute('data-job') === null)).toBe(true); // the keys stay on the leading rows
+    await user.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(within(lead).queryAllByRole('listitem')).toHaveLength(0);
+  });
+
+  it('Pass on a role under "more roles" takes only that posting off, and the count under the row drops', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const pass = vi.spyOn(client, 'passJob');
+    await user.click(one());
+    await waitFor(() => expect(new Set(companies()).size).toBe(companies().length));
+    const lead = row(9000);
+    const label = within(lead).getByRole('button', { name: /more roles?$/ }).textContent as string;
+    const n = Number(label.replace(/\D/g, ''));
+    await user.click(within(lead).getByRole('button', { name: /more roles?$/ }));
+    const extra = (await within(lead).findAllByRole('listitem'))[0] as HTMLElement;
+    const id = Number(extra.getAttribute('data-more-job'));
+    await user.click(within(extra).getByRole('button', { name: /^Pass/ }));
+    await waitFor(() => expect(lead.querySelector(`[data-more-job="${id}"]`)).toBeNull());
+    // The count drops at once; with none left the control goes.
+    if (n === 1) expect(within(lead).queryByRole('button', { name: /more roles?$/ })).toBeNull();
+    else expect(within(lead).getByRole('button', { name: /more roles?$/ })).toHaveTextContent(String(n - 1));
+    expect(row(9000)).toBeInTheDocument();
+    expect(pass).not.toHaveBeenCalledWith(9000, expect.anything());
+  });
+
+  it('keeps his choices for the next visit', async () => {
+    const user = userEvent.setup();
+    const first = await open();
+    await user.click(chip('Has H-1B'));
+    await user.click(one());
+    first.unmount();
+    await open();
+    expect(chip('Has H-1B')).toHaveAttribute('aria-pressed', 'true');
+    expect(one()).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(companies().every((c) => HAS.has(c as string))).toBe(true));
+  });
+
+  it('a stored choice that is not one of the chips is ignored', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ h1b: 'sometimes', onePerCompany: 'yes' }));
+    await open();
+    expect(chip('Any H-1B')).toHaveAttribute('aria-pressed', 'true');
+    expect(one()).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('with no H-1B list built, the page says so in the server\'s words and Any H-1B brings the jobs back', async () => {
+    const user = userEvent.setup();
+    const { client } = await open();
+    const real = client.jobs.bind(client);
+    vi.spyOn(client, 'jobs').mockImplementation((p) =>
+      p.h1b && p.h1b !== 'any' ? Promise.reject(new ApiError('conflict', 'The H-1B list is not built yet, so the H-1B chips cannot filter.')) : real(p));
+    await user.click(chip('Has H-1B'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The H-1B list is not built yet');
+    await user.click(screen.getByRole('button', { name: 'Show every company' }));
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    expect(chip('Any H-1B')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('the empty list names the H-1B chip when it is on', async () => {
+    const user = userEvent.setup();
+    await open();
+    await user.click(chip('Has H-1B'));
+    await user.type(search(), 'zzzz');
+    await screen.findByText(/^No jobs/);
+    expect(document.body).toHaveTextContent(/set H-1B to Any/i);
   });
 });

@@ -3187,6 +3187,10 @@
             "title": "Maybestaffing",
             "type": "boolean"
           },
+          "moreRoles": {
+            "title": "Moreroles",
+            "type": "integer"
+          },
           "postedAt": {
             "anyOf": [
               {
@@ -3274,6 +3278,7 @@
           "contactedOn",
           "maybeStaffing",
           "forClient",
+          "moreRoles",
           "h1b"
         ],
         "title": "JobRowWire",
@@ -11464,7 +11469,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a\npage. `window`\nis days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.",
+        "description": "The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a\npage. `window`\nis days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.\n`h1b` is the H-1B chips (#309): `has` keeps companies the H-1B list holds, `none` the rest. `oneRowPerCompany` shows\neach company once, by its newest posting, with `moreRoles`; `companyId` lists one company's postings (the rows\nbehind a \"more roles\").",
         "operationId": "jobs",
         "parameters": [
           {
@@ -11584,6 +11589,48 @@
                 }
               ],
               "title": "Levels"
+            }
+          },
+          {
+            "in": "query",
+            "name": "h1b",
+            "required": false,
+            "schema": {
+              "default": "any",
+              "enum": [
+                "any",
+                "has",
+                "none"
+              ],
+              "title": "H1B",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "oneRowPerCompany",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Onerowpercompany",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "companyId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Companyid"
             }
           }
         ],

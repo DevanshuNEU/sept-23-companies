@@ -429,6 +429,8 @@ export interface JobRow {
   companyId: Id; companyName: string; size: number | null; big: boolean /* known size over 300, or guessed big; size stays null then */;
   saysNoSponsorship: boolean; everify: boolean; yc: boolean; contactedOn: IsoDate | null;
   maybeStaffing: boolean /* work tier 3, staffing-flagged and not promoted (#257) */; forClient: boolean /* opens with client wording (#257) */;
+  /** One per company (#309): the company's other postings in this tab under the same filters; 0 when that is off. */
+  moreRoles: number;
   h1b: H1bTag | null; /* the company's H-1B tag; null: no H-1B list built (#252) */
 }
 export interface JobCounts { yourLevel: number; higher: number; other: number }
@@ -439,8 +441,16 @@ export type JobsWindow = '1h' | '6h' | '24h' | '7' | '30' | '60' | '90' | 'any';
 /** A level chip (#213): the key a row's level tag comes from. Several may be on at once; none means any level. */
 export type JobLevel = 'new_grad' | 'early_career' | 'swe1' | 'swe2' | 'entry' | 'not_stated';
 export type JobsSize = 'any' | 'small' | 'big' | 'unknown';
-/** What the job list asks for: a tab, a window in days, a size, the contacted filter, a company search and the cursor (`after`, opaque; none for the first page). */
-export interface JobsParams { view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; levels?: readonly JobLevel[]; after?: string | null; limit?: number }
+/** The H-1B chips (#309): has keeps companies the H-1B list holds with approvals (any trend), none keeps the rest. */
+export type JobsH1b = 'any' | 'has' | 'none';
+/**
+ * What the job list asks for: a tab, a window in days, a size, the contacted filter, a company search and the cursor (`after`, opaque; none for the first page).
+ * `h1b` is the H-1B chip, `oneRowPerCompany` shows each company once by its newest posting, `companyId` lists one company's postings (the rows behind "N more roles") (#309).
+ */
+export interface JobsParams {
+  view: JobsTab; window: JobsWindow; size: JobsSize; notContacted: boolean; q: string; levels?: readonly JobLevel[];
+  h1b?: JobsH1b; oneRowPerCompany?: boolean; companyId?: Id; after?: string | null; limit?: number;
+}
 /** Pass: the posting is hidden; the company is untouched. */
 export interface PassJobResult { postingId: Id; companyId: Id; passed: boolean }
 /**

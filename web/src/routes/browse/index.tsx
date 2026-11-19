@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { keepPreviousData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUp, Check, SearchX } from 'lucide-react';
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowUp, Check, ChevronDown, ChevronRight, SearchX } from 'lucide-react';
 import {
+  ApiError,
   pollMs,
   queryKeys,
   useClient,
@@ -10,6 +11,7 @@ import {
   type Id,
   type IsoTime,
   type JobLevel,
+  type JobsH1b,
   type JobRow,
   type JobsParams,
   type JobsSize,
@@ -33,6 +35,7 @@ import { cn } from '@/lib/utils';
 import { usePendingWrite, useViewQuery } from '@/pending/pending';
 import { dropPosting, markCompanyReached as markReachedInList } from './cache';
 import { CheckLineView, CheckNowButton, useCheckNow } from './check-now';
+import { readFilters, writeFilters } from './filters-store';
 import { heldRows, isNew, markOpened, readLastOpened } from './new-rows';
 
 const GROUP = 'Jobs';
@@ -67,6 +70,13 @@ const SIZES: { value: JobsSize; label: string; hint: string }[] = [
   { value: 'unknown', label: 'Not known', hint: 'No size on file and no sign of being big' },
 ];
 
+/** The H-1B chips (#309). Any is every company; has is any approval on the list, whatever the trend; none is the rest. */
+const H1B_CHIPS: { value: JobsH1b; label: string; hint: string }[] = [
+  { value: 'any', label: 'Any H-1B', hint: 'Every company' },
+  { value: 'has', label: 'Has H-1B', hint: 'Companies the H-1B list shows approvals for, whatever the trend' },
+  { value: 'none', label: 'No H-1B record', hint: 'Companies with no approvals on the H-1B list' },
+];
+
 /** Scrolled this little or less still counts as at the top: new rows show at once there. */
 const TOP_PX = 8;
 
@@ -90,13 +100,14 @@ interface Marks { hidden: Id[]; done: Id[]; reached: Id[] }
 const NO_MARKS: Marks = { hidden: [], done: [], reached: [] };
 
 /** "Widen the window, clear the search, or turn off Not contacted yet." Names only what is on. */
-function whatToWiden(on: { window: boolean; q: boolean; size: boolean; level: boolean; notContacted: boolean }): string {
+function whatToWiden(on: { window: boolean; q: boolean; size: boolean; level: boolean; notContacted: boolean; h1b: boolean }): string {
   const steps = [
     on.window ? 'widen the window' : null,
     on.level ? 'clear the level' : null,
     on.q ? 'clear the search' : null,
     on.size ? 'clear the size' : null,
     on.notContacted ? 'turn off Not contacted yet' : null,
+    on.h1b ? 'set H-1B to Any' : null,
   ].filter((s): s is string => s !== null);
   if (steps.length === 0) return 'Nothing is open here right now. New postings appear after the next crawl.';
   const last = steps[steps.length - 1] as string;
@@ -135,6 +146,7 @@ function JobItem({
   reachedOn,
   answer,
   marking,
+  more,
   onSelect,
   onPass,
   onApplied,
@@ -150,6 +162,8 @@ function JobItem({
   answer: string | undefined;
   /** Reached on this row waits in its undo window. */
   marking: boolean;
+  /** One per company: the company's other roles, opened in place under the row (#309). */
+  more: ReactNode;
   onSelect: () => void;
   onPass: () => void;
   onApplied: () => void;
@@ -209,7 +223,71 @@ function JobItem({
           </Button>
         </div>
       )}
+      {more}
     </li>
+  );
+}
+
+/**
+ * One per company (#309): "N more roles" under a company's leading row. It opens that company's other postings in place,
+ * read with the same filters (`params`) and the company's id, each with Pass and Mark applied. Mark reached stays on the
+ * leading row, since it marks the whole company. The keys stay on the leading rows. At most one page (the newest) is
+ * shown, and it says so when the company has more.
+ */
+function MoreRoles({ job, asOf, params, hidden, onPass, onApplied }: { job: JobRow; asOf: IsoTime; params: Omit<JobsParams, 'after'>; hidden: ReadonlySet<Id>; onPass: (j: JobRow) => void; onApplied: (j: JobRow) => void }) {
+  const client = usePageClient('plan');
+  const [open, setOpen] = useState(false);
+  const ask: JobsParams = { ...params, companyId: job.companyId, oneRowPerCompany: false, limit: PAGE };
+  const roles = useQuery({ queryKey: queryKeys.jobs(ask), queryFn: () => client.jobs(ask), enabled: open, placeholderData: keepPreviousData });
+  const others = (roles.data?.rows ?? []).filter((r) => r.postingId !== job.postingId);
+  const gone = others.filter((r) => hidden.has(r.postingId)).length;
+  const left = Math.max(job.moreRoles - gone, 0);
+  if (left === 0) return null;
+  const shown = others.filter((r) => !hidden.has(r.postingId));
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="grid gap-1 sm:col-span-2" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(LINK, 'inline-flex w-fit items-center gap-1 text-xs text-muted-foreground no-underline hover:text-foreground')}
+      >
+        <Chevron aria-hidden className="size-3.5" />
+        {`${left.toLocaleString('en-US')} more ${left === 1 ? 'role' : 'roles'}`}
+      </button>
+      {open ? (
+        roles.isError ? (
+          <p role="alert" className="text-xs">The other roles did not load. Nothing was changed.</p>
+        ) : !roles.data ? (
+          <p role="status" className="text-xs text-muted-foreground">Loading the roles</p>
+        ) : (
+          <ul aria-label={`More roles at ${job.companyName}`} className="grid border-l pl-4">
+            {shown.map((r) => (
+              <li key={r.postingId} data-more-job={r.postingId} className="grid items-start gap-x-6 gap-y-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                  {safeHref(r.url) ? (
+                    <a href={safeHref(r.url) as string} target="_blank" rel="noopener noreferrer" className={cn(LINK, 'text-[13px] font-medium')}>{r.title}</a>
+                  ) : (
+                    <span className="text-[13px] font-medium">{r.title}</span>
+                  )}
+                  <span className="text-xs text-muted-foreground">{r.levelTag}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{postedLabel(r, asOf)}</span>
+                  <span className="text-xs text-muted-foreground">{r.location}</span>
+                </p>
+                <div role="group" aria-label="Your answer" className="flex gap-1.5">
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs max-sm:h-11" onClick={() => onPass(r)}>Pass</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs max-sm:h-11" title="You applied online: keep it on Applied and take it off this list" onClick={() => onApplied(r)}>Mark applied</Button>
+                </div>
+              </li>
+            ))}
+            {roles.data.total > others.length + 1 ? (
+              <li className="py-2 text-xs text-muted-foreground">{`Showing the newest ${PAGE.toLocaleString('en-US')} of ${roles.data.total.toLocaleString('en-US')}. Narrow the filters to see the rest.`}</li>
+            ) : null}
+          </ul>
+        )
+      ) : null}
+    </div>
   );
 }
 
@@ -281,6 +359,11 @@ export default function BrowsePage() {
   const [windowDays, setWindowDays] = useState<JobsWindow>('30');
   const [size, setSize] = useState<JobsSize>('any');
   const [notContacted, setNotContacted] = useState(false);
+  // The H-1B chip and One per company are kept in the browser between visits (#309); a first visit has both off.
+  const [kept] = useState(readFilters);
+  const [h1b, setH1b] = useState<JobsH1b>(kept.h1b);
+  const [onePerCompany, setOnePerCompany] = useState(kept.onePerCompany);
+  useEffect(() => writeFilters({ h1b, onePerCompany }), [h1b, onePerCompany]);
   const [levels, setLevels] = useState<readonly JobLevel[]>([]);
   /** A level chip turns on or off; the order stays the chips' order, so the same choice is the same ask. */
   const toggleLevel = (l: JobLevel) =>
@@ -315,7 +398,7 @@ export default function BrowsePage() {
     return () => clearTimeout(id);
   }, [text]);
 
-  const params: Omit<JobsParams, 'after'> = { view: tab, window: windowDays, size, notContacted, q, levels, limit: PAGE };
+  const params: Omit<JobsParams, 'after'> = { view: tab, window: windowDays, size, notContacted, q, levels, h1b, oneRowPerCompany: onePerCompany, limit: PAGE };
   const query = useInfiniteQuery({
     queryKey: queryKeys.jobs(params),
     queryFn: ({ pageParam }) => client.jobs({ ...params, after: pageParam }),
@@ -468,6 +551,7 @@ export default function BrowsePage() {
       reachedOn={reachedNow.has(j.companyId) && asOf ? formatMonthDay(asOf) : j.contactedOn ? formatDateMonthDay(j.contactedOn) : null}
       answer={answers.get(j.postingId)}
       marking={marking.has(j.postingId)}
+      more={j.moreRoles > 0 ? <MoreRoles job={j} asOf={asOf ?? j.firstSeenAt} params={params} hidden={hidden} onPass={pass} onApplied={markApplied} /> : null}
       onSelect={() => setActive(j.postingId)}
       onPass={() => pass(j)}
       onApplied={() => markApplied(j)}
@@ -487,11 +571,11 @@ export default function BrowsePage() {
   ];
   useHotkeys(bindings);
 
-  const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', level: levels.length > 0, notContacted };
+  const on = { window: windowDays !== 'any', q: q !== '', size: size !== 'any', level: levels.length > 0, notContacted, h1b: h1b !== 'any' };
   // An empty tab points to the level tab that has jobs; it never points to Other roles.
   const other: JobsTab = tab === 'your_level' ? 'higher' : 'your_level';
   const otherCount = counts?.[other] ?? 0;
-  const headline = total === undefined || stale ? 'Loading the jobs' : `${total.toLocaleString('en-US')} ${levelText(tab)}${windowText(windowDays)}`;
+  const headline = total === undefined || stale ? 'Loading the jobs' : `${total.toLocaleString('en-US')} ${onePerCompany ? (total === 1 ? 'company' : 'companies') + ' ' : ''}${levelText(tab)}${windowText(windowDays)}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -567,15 +651,27 @@ export default function BrowsePage() {
             Not contacted yet
           </Button>
         </div>
-        <div role="group" aria-label="Level" className="flex flex-wrap gap-1.5">
-          <Button type="button" variant={levels.length === 0 ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.length === 0} className={CHIP} onClick={() => setLevels([])}>
-            Any level
-          </Button>
-          {LEVELS.map((l) => (
-            <Button key={l.value} type="button" variant={levels.includes(l.value) ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.includes(l.value)} className={CHIP} onClick={() => toggleLevel(l.value)}>
-              {l.label}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div role="group" aria-label="Level" className="flex flex-wrap gap-1.5">
+            <Button type="button" variant={levels.length === 0 ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.length === 0} className={CHIP} onClick={() => setLevels([])}>
+              Any level
             </Button>
-          ))}
+            {LEVELS.map((l) => (
+              <Button key={l.value} type="button" variant={levels.includes(l.value) ? 'secondary' : 'outline'} size="sm" aria-pressed={levels.includes(l.value)} className={CHIP} onClick={() => toggleLevel(l.value)}>
+                {l.label}
+              </Button>
+            ))}
+          </div>
+          <div role="group" aria-label="H-1B" className="flex flex-wrap gap-1.5">
+            {H1B_CHIPS.map((c) => (
+              <Button key={c.value} type="button" variant={h1b === c.value ? 'secondary' : 'outline'} size="sm" aria-pressed={h1b === c.value} title={c.hint} className={CHIP} onClick={() => setH1b(c.value)}>
+                {c.label}
+              </Button>
+            ))}
+          </div>
+          <Button type="button" variant={onePerCompany ? 'secondary' : 'outline'} size="sm" aria-pressed={onePerCompany} title="Show each company once, by its newest job" className={CHIP} onClick={() => setOnePerCompany((v) => !v)}>
+            One per company
+          </Button>
         </div>
       </header>
 
@@ -591,7 +687,15 @@ export default function BrowsePage() {
             </div>
           </div>
         ) : null}
-        {query.isError && !query.data ? (
+        {query.isError && !query.data && query.error instanceof ApiError && query.error.code === 'conflict' && h1b !== 'any' ? (
+          // The server refuses the H-1B chips with no list built: say so, never show an empty list.
+          <p role="alert" className="px-6 py-6 text-sm">
+            {query.error.message}{' '}
+            <button type="button" className="underline underline-offset-3" onClick={() => setH1b('any')}>
+              Show every company
+            </button>
+          </p>
+        ) : query.isError && !query.data ? (
           <p role="alert" className="px-6 py-6 text-sm">
             The jobs did not load. Nothing was changed.{' '}
             <button type="button" className="underline underline-offset-3" onClick={() => void query.refetch()}>

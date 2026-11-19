@@ -342,6 +342,9 @@ export interface paths {
          * @description The job list: open software postings at his level (or the higher levels, or every other role), newest first, 50 a
          *     page. `window`
          *     is days back (7, 30, 60, 90, any) or hours back (1h, 6h, 24h, #213); `levels` keeps only the chosen level chips.
+         *     `h1b` is the H-1B chips (#309): `has` keeps companies the H-1B list holds, `none` the rest. `oneRowPerCompany` shows
+         *     each company once, by its newest posting, with `moreRoles`; `companyId` lists one company's postings (the rows
+         *     behind a "more roles").
          */
         get: operations["jobs"];
         put?: never;
@@ -2450,6 +2453,8 @@ export interface components {
             location: string;
             /** Maybestaffing */
             maybeStaffing: boolean;
+            /** Moreroles */
+            moreRoles: number;
             /** Postedat */
             postedAt: string | null;
             /** Postingid */
@@ -6109,6 +6114,9 @@ export interface operations {
                 after?: string | null;
                 limit?: number;
                 levels?: string | null;
+                h1b?: "any" | "has" | "none";
+                oneRowPerCompany?: boolean;
+                companyId?: number | null;
             };
             header?: never;
             path?: never;

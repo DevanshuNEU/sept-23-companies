@@ -9,7 +9,7 @@
  * the Other roles tab.
  */
 import { sampleH1b } from './h1b-sample';
-import type { IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsView } from '../types';
+import type { Id, IsoDate, IsoTime, JobLevel, JobRow, JobsParams, JobsTab, JobsView } from '../types';
 
 /** The API's `name_key` in the small: lower case, letters and digits only. A search with none of either finds nothing. */
 const nameKey = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -57,7 +57,7 @@ export function buildJobs(today: IsoDate, asOf: IsoTime): { rows: JobRow[]; high
   const company = (c: Company) => ({
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
-    maybeStaffing: c.maybeStaffing === true, forClient: false, h1b: sampleH1b(c.name),
+    maybeStaffing: c.maybeStaffing === true, forClient: false, moreRoles: 0, h1b: sampleH1b(c.name),
   });
   const rows = Array.from({ length: 80 }, (_, i): JobRow => {
     const c = COMPANIES[i % COMPANIES.length] as Company;
@@ -150,7 +150,7 @@ export function foundJobs(asOf: IsoTime): JobRow[] {
     listAt: minus(30 * (i + 1)), postedAt: minus(30 * (i + 1)), firstSeenAt: asOf, seenGapS: 1800, firstRead: false, repostedFrom: null,
     companyId: c.id, companyName: c.name, size: c.size, big: c.guessedBig === true || (c.size !== null && c.size > 300),
     saysNoSponsorship: c.noSponsor === true, everify: c.everify === true, yc: c.yc === true, contactedOn: c.contactedOn ?? null,
-    maybeStaffing: c.maybeStaffing === true, forClient: false, h1b: sampleH1b(c.name),
+    maybeStaffing: c.maybeStaffing === true, forClient: false, moreRoles: 0, h1b: sampleH1b(c.name),
   }));
 }
 
@@ -169,15 +169,28 @@ export function jobsView(all: JobRow[], higher: ReadonlySet<number>, ages: Reado
   const inWindow = (r: JobRow) =>
     hours !== null ? r.listAt !== null && now - Date.parse(r.listAt) <= hours * 3_600_000 : r.listAt === null || (ages.get(r.postingId) ?? Infinity) <= days;
   const levelOk = (r: JobRow) => !p.levels?.length || p.levels.includes(LEVEL_OF_TAG[r.levelTag] ?? 'not_stated');
+  // As the API (#309): has keeps a company whose tag shows approvals, none keeps every other (also one with no tag).
+  const h1bOk = (r: JobRow) => (p.h1b ?? 'any') === 'any' || ((r.h1b !== null && r.h1b.trend !== 'none') === (p.h1b === 'has'));
   const sizeOk = (r: JobRow) => p.size === 'any' || (p.size === 'unknown' ? r.size === null && !r.big : p.size === 'big' ? r.big : r.size !== null && !r.big);
   const base = all
     .filter(inWindow)
     .filter(levelOk)
     .filter(sizeOk)
+    .filter(h1bOk)
+    .filter((r) => p.companyId === undefined || r.companyId === p.companyId)
     .filter((r) => !p.notContacted || r.contactedOn === null)
     .filter((r) => !p.q.trim() || (key !== '' && nameKey(r.companyName).includes(key)));
   const group = (r: JobRow) => (OTHER_ROLE_IDS.has(r.postingId) ? 'other' : higher.has(r.postingId) ? 'higher' : 'your_level');
-  const mine = base.filter((r) => group(r) === p.view);
+  // One per company (#309): per tab, the first row of each company in list order leads it, with the count of the rest.
+  const lead = (tab: JobsTab): JobRow[] => {
+    const inTab = base.filter((r) => group(r) === tab);
+    if (!p.oneRowPerCompany) return inTab;
+    const rest = new Map<Id, number>();
+    for (const r of inTab) rest.set(r.companyId, (rest.get(r.companyId) ?? 0) + 1);
+    const seen = new Set<Id>();
+    return inTab.filter((r) => !seen.has(r.companyId) && !!seen.add(r.companyId)).map((r) => ({ ...r, moreRoles: (rest.get(r.companyId) ?? 1) - 1 }));
+  };
+  const mine = lead(p.view);
   const at = p.after ? mine.findIndex((r) => String(r.postingId) === p.after) + 1 : 0;
   const page = mine.slice(at, at + limit);
   const last = page[page.length - 1];
@@ -185,9 +198,9 @@ export function jobsView(all: JobRow[], higher: ReadonlySet<number>, ages: Reado
     asOf, rows: page, total: mine.length,
     nextAfter: at + limit < mine.length && last ? String(last.postingId) : null,
     counts: {
-      yourLevel: base.filter((r) => group(r) === 'your_level').length,
-      higher: base.filter((r) => group(r) === 'higher').length,
-      other: base.filter((r) => group(r) === 'other').length,
+      yourLevel: lead('your_level').length,
+      higher: lead('higher').length,
+      other: lead('other').length,
     },
   };
 }

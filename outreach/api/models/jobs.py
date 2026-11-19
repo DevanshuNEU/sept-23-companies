@@ -15,6 +15,7 @@ JobWindow = Literal["1h", "6h", "24h", "7", "30", "60", "90", "any"]
 CheckNowState = Literal["started", "running", "not_live"]
 CheckState = Literal["idle", "queued", "running", "done"]
 JobSize = Literal["any", "small", "big", "unknown"]
+JobH1b = Literal["any", "has", "none"]  # the H-1B chips (#309)
 
 
 class JobRowWire(Wire):
@@ -39,6 +40,7 @@ class JobRowWire(Wire):
     contacted_on: str | None  # YYYY-MM-DD, the newest day he reached it: a person contacted, or his own Done mark
     maybe_staffing: bool  # work tier 3, staffing-flagged by the LCA rules and not promoted (#257)
     for_client: bool  # the posting opens with client wording, a recruiter's (#257)
+    more_roles: int  # One per company (#309): the company's other postings in this tab, same filters; else 0
     h1b: H1bTagWire | None = Field(None, alias="h1b")  # the H-1B list's tag (#252), null with no list; the alias, since camelCase spells it h1B
 
 

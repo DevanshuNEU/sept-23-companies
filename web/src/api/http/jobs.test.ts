@@ -14,6 +14,15 @@ describe('the job list methods', () => {
     expect(get).toHaveBeenLastCalledWith('/api/jobs?view=your_level&window=30&size=any', undefined);
   });
 
+  it('sends the H-1B chip, One per company and a company id (#309), and leaves them out when off', async () => {
+    const get = vi.fn(async () => VIEW);
+    const t = { get, send: vi.fn() } as unknown as Transport;
+    await planMethods(t).jobs!({ view: 'your_level', window: '30', size: 'any', notContacted: false, q: '', h1b: 'has', oneRowPerCompany: true, companyId: 7001 });
+    expect(get).toHaveBeenLastCalledWith('/api/jobs?view=your_level&window=30&size=any&h1b=has&oneRowPerCompany=true&companyId=7001', undefined);
+    await planMethods(t).jobs!({ view: 'your_level', window: '30', size: 'any', notContacted: false, q: '', h1b: 'any', oneRowPerCompany: false });
+    expect(get).toHaveBeenLastCalledWith('/api/jobs?view=your_level&window=30&size=any', undefined);
+  });
+
   it('pass and done post an empty body to the posting, with the request id as the key', async () => {
     const send = vi.fn(async () => ({}));
     const t = { get: vi.fn(), send } as unknown as Transport;

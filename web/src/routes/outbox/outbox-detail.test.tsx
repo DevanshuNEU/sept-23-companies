@@ -870,6 +870,33 @@ describe('reply', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
   });
 
+  it('a reply shows what they wrote and folds the quoted chain and footer behind one button', async () => {
+    const db = buildFixture();
+    const priya = db.details[T.priya];
+    if (!priya?.reply) throw new Error('No Priya reply in the fixture');
+    priya.reply.text = 'Thursday works. Best, Priya From: Devanshu <d@x.edu> Sent: Wednesday 1:49 PM To: Priya Subject: Re: hello CONFIDENTIALITY NOTICE: private.';
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.priya}`, client: new FixtureClient(db) });
+    await screen.findByRole('heading', { level: 2, name: 'Priya Natarajan' });
+    expect(screen.getByText('Thursday works. Best, Priya')).toBeVisible();
+    const fold = screen.getByText('Show quoted text').closest('details') as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    expect(within(fold).getByText(/^From: Devanshu/)).toBeInTheDocument();
+  });
+
+  it('a hold on many emails says how many, and the names sit behind Show who', async () => {
+    const db = buildFixture();
+    const priya = db.details[T.priya];
+    const first = priya?.held[0];
+    if (!priya || !first) throw new Error('No held emails in the fixture');
+    priya.held = ['Ann', 'Bo', 'Cy', 'Di', 'Ed'].map((personName) => ({ ...first, personName }));
+    renderWithApp(<OutboxPage />, { route: `/outbox/${T.priya}`, client: new FixtureClient(db) });
+    const alert = (await screen.findByText('Browserbase is on hold')).closest<HTMLElement>('[role="alert"]') as HTMLElement;
+    expect(alert).toHaveTextContent('5 emails are held');
+    const who = within(alert).getByText('Show who').closest('details') as HTMLDetailsElement;
+    expect(who.open).toBe(false);
+    expect(within(who).getAllByRole('listitem')).toHaveLength(5);
+  });
+
   it('a closed company has no Close footer on its reply', async () => {
     const db = buildFixture();
     const priya = db.details[T.priya];

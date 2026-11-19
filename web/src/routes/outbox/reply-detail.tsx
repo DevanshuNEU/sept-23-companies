@@ -6,6 +6,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { ageDays, formatDayTime, formatLocalTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { safeHref } from '@/lib/safe-href';
+import { splitReply } from '@/lib/reply-text';
 import { heldLine } from './company-actions';
 
 export type ReplyChoice = Exclude<ReplyKind, 'unsorted'>;
@@ -17,6 +18,25 @@ const CHOICES: { kind: ReplyChoice; label: string }[] = [
   { kind: 'said_no', label: 'Said no' },
   { kind: 'asked_to_stop', label: 'Asked to stop' },
 ];
+
+/** What they wrote, with the quoted chain and legal footer folded behind one button. */
+function ReplyBody({ text, className }: { text: string; className?: string }) {
+  const { fresh, quoted } = splitReply(text);
+  return (
+    <div className={cn('grid gap-2 border-t px-3 py-2.5 text-sm leading-[22px]', className)}>
+      <p className="max-w-[72ch] break-words whitespace-pre-wrap">{fresh}</p>
+      {quoted ? (
+        <details className="group/quote">
+          <summary className="w-fit cursor-pointer rounded-sm text-xs text-muted-foreground underline decoration-foreground/30 underline-offset-3 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/70">
+            <span className="group-open/quote:hidden">Show quoted text</span>
+            <span className="hidden group-open/quote:inline">Hide quoted text</span>
+          </summary>
+          <p className="mt-2 max-w-[72ch] border-l-2 pl-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">{quoted}</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
 
 const when = (at: string, asOf: string) => (ageDays(at, asOf) === 0 ? `Today ${formatLocalTime(at)}` : formatDayTime(at));
 
@@ -30,7 +50,11 @@ function Message({ m, asOf, open }: { m: ThreadMessage; asOf: string; open: bool
         <span className="truncate text-muted-foreground">{[kind, m.subject].filter(Boolean).join(': ')}</span>
         <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground tabular-nums">{when(m.at, asOf)}</span>
       </summary>
-      <p className="border-t px-3 py-2.5 text-sm leading-[22px] break-words whitespace-pre-wrap text-muted-foreground">{m.body}</p>
+      {mine ? (
+        <p className="max-w-[72ch] border-t px-3 py-2.5 text-sm leading-[22px] break-words whitespace-pre-wrap text-muted-foreground">{m.body}</p>
+      ) : (
+        <ReplyBody text={m.body} className="text-muted-foreground" />
+      )}
     </details>
   );
 }
@@ -53,16 +77,26 @@ function HoldAlert({ detail }: { detail: OutboxDetail }) {
   const { item, held, gmailThreadUrl, asOf } = detail;
   const first = item.person.name.split(' ')[0] ?? item.person.name;
   const lines = held.map((h) => heldLine(h, asOf));
-  const who = lines.length > 1 ? `${lines.slice(0, -1).join(', ')} and ${lines[lines.length - 1]}` : (lines[0] ?? '');
   const company = item.company.name;
   return (
     <Alert className="border-ok-bd bg-ok-bg text-ok">
       <Pause aria-hidden />
       <AlertTitle>{`${company} is on hold`}</AlertTitle>
       <AlertDescription className="text-current">
-        <p>
-          {`${first} replied, so nothing else goes to ${company}${lines.length > 0 ? `: ${who} ${lines.length === 1 ? 'is' : 'are'} held` : ''}. Answer in Gmail. This app never sends a reply.`}
-        </p>
+        <p>{`${first} replied, so nothing else goes to ${company}${lines.length > 0 ? `: ${lines.length} ${lines.length === 1 ? 'email is' : 'emails are'} held` : ''}. Answer in Gmail. This app never sends a reply.`}</p>
+        {lines.length > 0 ? (
+          <details className="group/held">
+            <summary className="w-fit cursor-pointer rounded-sm text-xs underline decoration-current/40 underline-offset-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70">
+              <span className="group-open/held:hidden">Show who</span>
+              <span className="hidden group-open/held:inline">Hide who</span>
+            </summary>
+            <ul className="mt-1.5 grid gap-0.5 text-[13px]">
+              {lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
         {safeHref(gmailThreadUrl) ? (
           <Button asChild variant="outline" size="sm" className="mt-1 text-foreground">
             <a href={safeHref(gmailThreadUrl)} target="_blank" rel="noreferrer">
@@ -107,7 +141,7 @@ export function ReplyDetail({
               <span className="text-muted-foreground">to you</span>
               <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground tabular-nums">{when(reply.at, asOf)}</span>
             </div>
-            <p className="border-t px-3 py-2.5 text-sm leading-[22px] break-words whitespace-pre-wrap">{reply.text}</p>
+            <ReplyBody text={reply.text} />
           </div>
         ) : null}
         {reply ? (

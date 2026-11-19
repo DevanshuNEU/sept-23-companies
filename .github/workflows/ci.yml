@@ -1,23 +1,26 @@
 # CI for the Outreach repo. Advisory: the repo has no branch protection, so a red run does not block a merge by
-# itself. The rule is in CLAUDE.md: never merge a red PR. `ci-ok` is the one check that summarizes the four below.
+# itself. The rule is in CLAUDE.md: never merge a red PR. `ci-ok` is the one check that summarizes the jobs below.
 #
-# Runs on every pull request and every push to master:
-#   python  the full Python suite (the network guard in tests/__init__.py stays on)
-#   web     typecheck, lint and the Vitest suite
-#   schema  web/openapi.json and src/api/schema.ts match the API (a no-op until outreach/api is on this branch)
-#   e2e     Playwright on the Chromium it installs
+# Runs on pull requests only (#312). A push to master starts nothing: the PR already ran CI, and the deploy runs the
+# full suite in the live checkout. `changes` reads the PR's files and starts only the checks they need, so a private
+# repo stays inside its free Actions minutes:
+#   python  the full Python suite (the network guard in tests/__init__.py stays on). Skipped only when every change
+#           is under docs/ or web/ (web/openapi.json excepted: a Python test checks it).
+#   web     typecheck, lint and the Vitest suite, when something under web/ changed
+#   schema  web/openapi.json and src/api/schema.ts match the API, whenever python or web runs
+#   e2e     Playwright on the Chromium it installs, when something under web/ changed (it runs on sample data, no API)
+# A change under .github/ runs all four.
 #
-# The mutation check does NOT run on pull requests or pushes: one full run is about 114 reruns of the whole Python
-# suite, which is hours of runner time. Start it by hand (Actions tab, "CI", Run workflow, or
-# `gh workflow run ci.yml`); it splits into ten shards. A manual run starts only the mutation shards.
+# The mutation check does NOT run on pull requests: one full run is about 114 reruns of the whole Python suite, which
+# is hours of runner time. Start it by hand (Actions tab, "CI", Run workflow, or `gh workflow run ci.yml`); it splits
+# into ten shards. A manual run starts only the mutation shards.
 #
-# No secrets, a read-only token, and nothing here needs the network beyond installing packages.
+# No secrets, a read-only token, and nothing here needs the network beyond installing packages and listing the PR's
+# files.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -28,8 +31,58 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which checks this PR needs, from its changed files (a rename counts both names). A listing that fails turns the
+  # run red through ci-ok, and a PR at GitHub's 3,000-file listing cap runs everything.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      python: ${{ steps.pick.outputs.python }}
+      web: ${{ steps.pick.outputs.web }}
+      schema: ${{ steps.pick.outputs.schema }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')
+          python=false
+          web=false
+          if [ "$(printf '%s\n' "$files" | grep -c .)" -ge 3000 ]; then
+            python=true
+            web=true
+          fi
+          while IFS= read -r f; do
+            case "$f" in
+              '') ;;
+              .github/*) python=true; web=true ;;
+              web/openapi.json) python=true; web=true ;;
+              web/*) web=true ;;
+              docs/*) ;;
+              *) python=true ;;
+            esac
+          done <<< "$files"
+          schema=false
+          if [ "$python" = true ] || [ "$web" = true ]; then
+            schema=true
+          fi
+          echo "python=$python web=$web schema=$schema"
+          {
+            echo "python=$python"
+            echo "web=$web"
+            echo "schema=$schema"
+          } >> "$GITHUB_OUTPUT"
+
   python:
-    if: github.event_name != 'workflow_dispatch'
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     # The suite takes about 15 minutes on CI and grew with the two-account simulation (#255).
     timeout-minutes: 30
@@ -48,7 +101,8 @@ jobs:
       - run: uv run --frozen python -m unittest discover -s tests -t .
 
   web:
-    if: github.event_name != 'workflow_dispatch'
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -70,7 +124,8 @@ jobs:
       - run: pnpm test --maxWorkers=2
 
   schema:
-    if: github.event_name != 'workflow_dispatch'
+    needs: changes
+    if: needs.changes.outputs.schema == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -116,7 +171,8 @@ jobs:
         run: pnpm test src/api/schema.drift.test.ts
 
   e2e:
-    if: github.event_name != 'workflow_dispatch'
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -187,10 +243,39 @@ jobs:
           fi
 
   ci-ok:
-    if: always() && github.event_name != 'workflow_dispatch'
-    needs: [python, web, schema, e2e]
+    if: always() && github.event_name == 'pull_request'
+    needs: [changes, python, web, schema, e2e]
     runs-on: ubuntu-latest
     steps:
-      # All four jobs always run on these events, so anything but success (a skip included) is a red.
-      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
-        run: exit 1
+      # Red when the file listing failed, when any job failed or was cancelled, and when a job the listing asked for
+      # did not succeed (a skip included). A job the listing did not ask for is skipped, and that is green.
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          WANT_PYTHON: ${{ needs.changes.outputs.python }}
+          WANT_WEB: ${{ needs.changes.outputs.web }}
+          WANT_SCHEMA: ${{ needs.changes.outputs.schema }}
+          PYTHON: ${{ needs.python.result }}
+          WEB: ${{ needs.web.result }}
+          SCHEMA: ${{ needs.schema.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          bad=0
+          if [ "$CHANGES" != success ]; then
+            echo "::error::changes ended $CHANGES"
+            bad=1
+          fi
+          check() {
+            case "$3" in
+              failure|cancelled) echo "::error::$1 ended $3"; bad=1; return ;;
+            esac
+            if [ "$2" = true ] && [ "$3" != success ]; then
+              echo "::error::$1 was needed and ended $3"
+              bad=1
+            fi
+          }
+          check python "$WANT_PYTHON" "$PYTHON"
+          check web "$WANT_WEB" "$WEB"
+          check schema "$WANT_SCHEMA" "$SCHEMA"
+          check e2e "$WANT_WEB" "$E2E"
+          echo "python=$PYTHON web=$WEB schema=$SCHEMA e2e=$E2E"
+          exit "$bad"

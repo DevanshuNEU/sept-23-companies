@@ -6,6 +6,7 @@ import json
 import sys
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -449,7 +450,10 @@ class CareersStepTest(FindBoardsBase):
     def test_a_marker_older_than_30_days_is_checked_again(self):
         sundial = self.company("Sundial Health Inc")
         quill = self.company("Quill Data Services Inc")
-        for company, at in ((sundial, "2026-09-01T00:00:00Z"), (quill, "2026-10-20T00:00:00Z")):
+        # Both relative to now: a fixed "this month" date turned stale on its 30th day (2026-11-19).
+        def days_ago(n):
+            return (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for company, at in ((sundial, days_ago(60)), (quill, days_ago(5))):
             append_event(self.conn, entity="company", kind="careers_checked", actor="crawler", entity_id=company,
                          company_id=company, detail={"result": "none"}, at=at, idempotency_key=f"seed:{company}")
         self.run_careers()
